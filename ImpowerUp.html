@@ -1019,7 +1019,7 @@ function floatXp(x,y,amount){
 /* ============ Modal ============ */
 function openModal(html){
   const host = document.getElementById("modalHost");
-  host.innerHTML = '<div class="modal-overlay" data-action="closeModal"><div class="modal" onclick="event.stopPropagation()">'+html+'</div></div>';
+  host.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this) closeModal()"><div class="modal">'+html+'</div></div>';
 }
 function closeModal(){ document.getElementById("modalHost").innerHTML = ""; }
 function fallbackCopyText(text){
