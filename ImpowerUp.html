@@ -966,6 +966,25 @@ async function adminAssessRestoreSection(templateId, si){
   delete sections[si].deleted;
   await persistAdminAssessSections(templateId, sections, "Section restored");
 }
+async function adminAssessDeleteQuestion(templateId, si, qi){
+  const hub = _adminAssessHub;
+  if(!hub || hub.mode!=="edit" || !hub.template) return;
+  const sec = hub.template.sections[si];
+  const q = sec && sec.questions[qi];
+  if(!q || q.deleted) return;
+  if(!confirm('Delete this question? Clients will no longer be asked it, and it won\'t count toward progress. You can restore it here anytime.')) return;
+  const sections = buildEditedSectionsFromForm(hub.template); // capture any unsaved wording edits first
+  sections[si].questions[qi].deleted = true;
+  await persistAdminAssessSections(templateId, sections, "Question deleted");
+}
+async function adminAssessRestoreQuestion(templateId, si, qi){
+  const hub = _adminAssessHub;
+  if(!hub || hub.mode!=="edit" || !hub.template) return;
+  const sections = buildEditedSectionsFromForm(hub.template);
+  if(!sections[si] || !sections[si].questions[qi]) return;
+  delete sections[si].questions[qi].deleted;
+  await persistAdminAssessSections(templateId, sections, "Question restored");
+}
 async function saveAdminAssessTemplateEdits(templateId){
   const hub = _adminAssessHub;
   if(!hub || hub.mode!=="edit" || !hub.template) return;
@@ -1036,7 +1055,7 @@ function renderAdminAssessPreviewBody(template){
     if(sec.deleted) return;
     html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
     if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
-    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,{},true); });
+    (sec.questions||[]).forEach((q,qi)=>{ if(!q.deleted) html += assessQuestionHtml(si,qi,q,{},true); });
   });
   return html;
 }
@@ -1047,7 +1066,7 @@ function edtFieldHtml(id, value, multiline, extraStyle){
     : '<input type="text" id="'+id+'" value="'+escapeHtml(value||"")+'" style="'+style+'">';
 }
 function renderAdminAssessEditBody(template){
-  let html = '<div class="assess-info-card">✏️ You can edit wording and delete whole sections here — just not reorder or add/remove individual questions or options, so existing client answers stay correctly linked. Changes apply to this assessment for everyone assigned it.</div>';
+  let html = '<div class="assess-info-card">✏️ You can edit wording and delete whole sections or individual questions here — just not reorder or add/remove answer options, so existing client answers stay correctly linked. Changes apply to this assessment for everyone assigned it.</div>';
   html += '<div class="field"><label>Title</label>'+edtFieldHtml("edt_title", template.title, false)+'</div>';
   html += '<div class="field"><label>Description</label>'+edtFieldHtml("edt_desc", template.description, true)+'</div>';
   (template.sections||[]).forEach((sec,si)=>{
@@ -1065,7 +1084,15 @@ function renderAdminAssessEditBody(template){
     html += '<div class="field"><label>Section title</label>'+edtFieldHtml("edt_sec_"+si+"_title", sec.title, false)+'</div>';
     html += '<div class="field" style="margin-bottom:0;"><label>Section instructions (optional)</label>'+edtFieldHtml("edt_sec_"+si+"_instr", sec.instructions, true)+'</div>';
     (sec.questions||[]).forEach((q,qi)=>{
+      if(q.deleted){
+        html += '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;opacity:.65;">'+
+          '<div style="font-size:12.5px;">🗑️ '+escapeHtml((q.prompt||"Untitled question").slice(0,60))+' <span class="tag">Deleted</span></div>'+
+          '<button class="btn secondary sm" data-action="adminAssessRestoreQuestion" data-id="'+template.id+'" data-si="'+si+'" data-qi="'+qi+'">↩️ Restore</button>'+
+          '</div>';
+        return;
+      }
       html += '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:12px;">';
+      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:4px;"><button class="btn secondary sm" data-action="adminAssessDeleteQuestion" data-id="'+template.id+'" data-si="'+si+'" data-qi="'+qi+'">🗑️ Delete Question</button></div>';
       html += '<div class="field" style="margin-bottom:8px;"><label style="font-size:11px;">'+(q.type==="info"?"Message text":"Question wording")+'</label>'+edtFieldHtml("edt_q_"+si+"_"+qi+"_prompt", q.prompt, true)+'</div>';
       if(q.options && q.options.length){
         html += q.options.map((opt,oi)=>{
@@ -1293,7 +1320,7 @@ function renderAdminInterviewTake(){
     if(sec.deleted) return;
     html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
     if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
-    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,c.responses,false,"adminInterview"); });
+    (sec.questions||[]).forEach((q,qi)=>{ if(!q.deleted) html += assessQuestionHtml(si,qi,q,c.responses,false,"adminInterview"); });
   });
   html += '<div class="assess-sticky-bar"><div id="adminInterviewSaveIndicator" class="assess-save-indicator">Autosaves as you go</div>'+
     '<button class="btn block" data-action="adminInterviewSubmit">✅ Mark Complete</button></div>';
@@ -1482,7 +1509,7 @@ function printAssessment(clientName, template, responses, status, submittedAt, s
       const qid = "s"+si+"_q"+qi;
       const disp = assessAnswerDisplay(q, responses[qid]);
       html += '<div class="pa-q">';
-      if(q.prompt) html += '<div class="pa-prompt">'+escapeHtml(q.prompt)+'</div>';
+      if(q.prompt) html += '<div class="pa-prompt">'+escapeHtml(q.prompt)+(q.deleted?' <i>(retired)</i>':'')+'</div>';
       if(disp.type==="none") html += '<div class="pa-answer pa-unanswered">No response</div>';
       else if(disp.type==="text") html += '<div class="pa-answer">'+escapeHtml(disp.text).replace(/\n/g,"<br>")+'</div>';
       else if(disp.type==="drawing") html += disp.zones.map(z=>(z.label?'<div class="pa-zone-label">'+escapeHtml(z.label)+'</div>':"")+'<img class="pa-drawing-img" src="'+z.src+'">').join("");
@@ -1513,7 +1540,10 @@ function renderAdminAssessReview(){
   (tmpl.sections||[]).forEach((sec,si)=>{
     html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+(sec.deleted?' <span class="tag">🗑️ Retired</span>':'')+'</h2></div>';
     if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
-    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,r.responses,true); });
+    (sec.questions||[]).forEach((q,qi)=>{
+      const card = assessQuestionHtml(si,qi,q,r.responses,true);
+      html += q.deleted ? '<div style="opacity:.65;">'+card.replace('<div class="assess-q-prompt">','<div style="font-size:10.5px;font-weight:800;color:var(--text-muted);margin-bottom:4px;">🗑️ Retired question</div><div class="assess-q-prompt">')+'</div>' : card;
+    });
   });
   return html;
 }
@@ -1623,7 +1653,7 @@ function assessCountsForTemplateResponses(template, responses){
   ((template && template.sections)||[]).forEach((sec,si)=>{
     if(sec.deleted) return;
     (sec.questions||[]).forEach((q,qi)=>{
-      if(q.type==="info") return;
+      if(q.type==="info" || q.deleted) return;
       total++;
       const qid = "s"+si+"_q"+qi;
       if(assessIsAnswered(q, responses ? responses[qid] : undefined)) answered++;
@@ -1636,7 +1666,7 @@ function assessFindFirstUnanswered(template, responses){
   ((template && template.sections)||[]).forEach((sec,si)=>{
     if(found || sec.deleted) return;
     (sec.questions||[]).forEach((q,qi)=>{
-      if(found || q.type==="info") return;
+      if(found || q.type==="info" || q.deleted) return;
       const qid = "s"+si+"_q"+qi;
       if(!assessIsAnswered(q, responses ? responses[qid] : undefined)) found = qid;
     });
@@ -1948,7 +1978,7 @@ function renderAssessTake(){
     if(sec.deleted) return;
     html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
     if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
-    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,c.responses,readonly); });
+    (sec.questions||[]).forEach((q,qi)=>{ if(!q.deleted) html += assessQuestionHtml(si,qi,q,c.responses,readonly); });
   });
   if(!readonly){
     html += '<div class="assess-sticky-bar"><div id="assessSaveIndicator" class="assess-save-indicator">Autosaves as you go</div>'+
@@ -4641,6 +4671,8 @@ document.addEventListener("click", async function(e){
     case "saveAdminAssessTemplateEdits": await saveAdminAssessTemplateEdits(id); break;
     case "adminAssessDeleteSection": await adminAssessDeleteSection(id, Number(v)); break;
     case "adminAssessRestoreSection": await adminAssessRestoreSection(id, Number(v)); break;
+    case "adminAssessDeleteQuestion": await adminAssessDeleteQuestion(id, Number(t.getAttribute("data-si")), Number(t.getAttribute("data-qi"))); break;
+    case "adminAssessRestoreQuestion": await adminAssessRestoreQuestion(id, Number(t.getAttribute("data-si")), Number(t.getAttribute("data-qi"))); break;
     case "openAdminAssessCompletion": await openAdminAssessCompletion(id); break;
     case "openAdminAssessCompletionReview": await openAdminAssessCompletionReview(id, v); break;
     case "openAdminFillInterview": await openAdminFillInterview(id); break;
