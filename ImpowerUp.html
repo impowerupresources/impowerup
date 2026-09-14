@@ -414,7 +414,8 @@ function defaultState(){
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", alertSound:"classic", alertVolume:80,
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false },
-    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[]
+    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
+    semesters:[], activeSemesterId:null
   };
 }
 let state = null;
@@ -939,6 +940,65 @@ function getCustomEventAlarms(dateStr){
     alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true
   }));
 }
+/* ============ Block/Rotation Class Schedule (A/B/C/D day rotation) ============ */
+function weekdayIndexOf(dateStr){ const [y,m,d]=dateStr.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
+function getSemesters(){ return state.semesters || (state.semesters=[]); }
+function activeSemester(){ return getSemesters().find(s=>s.id===state.activeSemesterId) || null; }
+function semesterForDate(dateStr){
+  const active = activeSemester();
+  if(active && dateStr>=active.startDate && dateStr<=active.endDate) return active;
+  return getSemesters().find(s=>dateStr>=s.startDate && dateStr<=s.endDate) || null;
+}
+function isSchoolWeekday(sem, dateStr){ return (sem.activeWeekdays||[1,2,3,4,5]).includes(weekdayIndexOf(dateStr)); }
+function isHolidayDate(sem, dateStr){ return (sem.holidays||[]).includes(dateStr); }
+function rotationLetters(sem){ const n = sem.rotationLength||4; return Array.from({length:n},(_,i)=>String.fromCharCode(65+i)); }
+function getRotationLetter(sem, dateStr){
+  if(dateStr<sem.startDate || dateStr>sem.endDate) return null;
+  if(!isSchoolWeekday(sem, dateStr) || isHolidayDate(sem, dateStr)) return null;
+  // Holidays are skipped entirely from the count, so the letter sequence "bumps" forward
+  // onto the next real school day instead of being consumed by the day off.
+  let count = 0, cur = sem.startDate;
+  while(cur < dateStr){
+    if(isSchoolWeekday(sem, cur) && !isHolidayDate(sem, cur)) count++;
+    cur = addDays(cur, 1);
+  }
+  const n = sem.rotationLength||4;
+  const idx = ((sem.startLetterIndex||0) + count) % n;
+  return String.fromCharCode(65+idx);
+}
+function periodTimesFor(sem){
+  const count = sem.periodsPerDay||6;
+  const [sh,sm] = (sem.defaultStartTime||"08:00").split(":").map(Number);
+  let mins = (sh||0)*60+(sm||0);
+  const dur = sem.periodMinutes||50, gap = sem.passingMinutes==null?5:sem.passingMinutes;
+  const times = [];
+  for(let i=0;i<count;i++){
+    const h = Math.floor(mins/60)%24, mm = mins%60;
+    times.push(String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"));
+    mins += dur+gap;
+  }
+  return times;
+}
+function getScheduleDayInfo(dateStr){
+  const sem = semesterForDate(dateStr);
+  if(!sem) return null;
+  if(!isSchoolWeekday(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"weekend", classes:[]};
+  if(isHolidayDate(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"holiday", classes:[]};
+  const letter = getRotationLetter(sem, dateStr);
+  if(!letter) return {semester:sem, letter:null, noSchool:true, reason:"out_of_range", classes:[]};
+  const subjects = (sem.classes && sem.classes[letter]) || [];
+  const times = periodTimesFor(sem);
+  const classes = subjects.map((subj,i)=>({subject:(subj||"").trim(), time:times[i]||""})).filter(c=>c.subject);
+  return {semester:sem, letter, noSchool:false, reason:null, classes};
+}
+function dayLetterBadgeHtml(dateStr, size){
+  const info = getScheduleDayInfo(dateStr);
+  if(!info) return "";
+  if(info.noSchool){
+    return info.reason==="holiday" ? '<span class="tag" style="background:var(--surface-2);'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">No School</span>' : "";
+  }
+  return '<span class="tag" style="background:var(--accent);color:#fff;'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+info.letter+' Day</span>';
+}
 function getDayTimelineItems(dateStr){
   const template = getTemplateForDate(dateStr);
   const items = [];
@@ -963,6 +1023,10 @@ function getDayTimelineItems(dateStr){
     state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id}));
   }
   (state.customEvents||[]).filter(e=>e.date===dateStr).forEach(e=>items.push({time:e.time||"", label:e.label, emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes}));
+  const sched = getScheduleDayInfo(dateStr);
+  if(sched && !sched.noSchool){
+    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, duration:sched.semester.periodMinutes}));
+  }
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
 }
@@ -1421,9 +1485,12 @@ function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, ex
     const isToday = d2===todayStr();
     const isSelected = d2===selectedDate;
     const hasCompletion = state.habitLogs.some(l=>l.completed_date===d2);
+    const rotInfo = inMonth ? getScheduleDayInfo(d2) : null;
+    const rotLetter = (rotInfo && !rotInfo.noSchool) ? rotInfo.letter : "";
     html += '<div class="cal-cell '+(inMonth?"":"dim")+' '+(isToday&&!isSelected?"today":"")+' '+(isSelected?"selected":"")+'" data-action="'+clickAction+'" data-v="'+d2+'">'+
       (expandable?'<div class="expand-ic" data-action="expandDayPreview" data-v="'+d2+'" title="Preview this day">🔍</div>':"")+
-      dnum+(hasCompletion&&!isSelected?'<div class="dot"></div>':'')+'</div>';
+      dnum+(hasCompletion&&!isSelected?'<div class="dot"></div>':'')+
+      (rotLetter?'<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:1px;">'+rotLetter+'</div>':'')+'</div>';
   }
   html += '</div>';
   return html;
@@ -1450,14 +1517,14 @@ function dayTimelineListHtml(dateStr){
     return '<div class="timeline-item" style="align-items:center;"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
       '<div class="timeline-line"><div class="timeline-dot" style="background:'+(tmpl?tmpl.color:"var(--accent)")+'"></div></div>'+
       '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
-      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":"Event")+'</div></div>'+controls+'</div>';
+      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?it.letter+" Day class":"Event")+'</div></div>'+controls+'</div>';
   }).join("");
 }
 function dayPreviewModalHtml(dateStr){
   const [yy,mm,dd] = dateStr.split("-").map(Number);
   const dayLabel = new Date(yy,mm-1,dd).toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
   const tmpl = getTemplateForDate(dateStr);
-  return '<h2>'+dayLabel+'</h2>'+
+  return '<h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+dayLabel+' '+dayLetterBadgeHtml(dateStr)+'</h2>'+
     (tmpl?'<p class="hc-meta" style="margin-top:-8px;margin-bottom:10px;">'+tmpl.emoji+' '+escapeHtml(tmpl.name)+'</p>':"")+
     '<div style="max-height:55vh;overflow-y:auto;">'+dayTimelineListHtml(dateStr)+'</div>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Close</button>'+
@@ -1475,7 +1542,7 @@ function renderPlannerDay(){
 
   const overviewBlock = '<div class="card">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'+
-    '<div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+dayLetterBadgeHtml(plannerDate)+'</div>'+
     '<div style="display:flex;gap:6px;align-items:center;">'+
     '<button class="icon-btn" data-action="togglePlannerDayCalPos" title="'+(calPos==="bottom"?"Move calendar above":"Move calendar below")+'">'+(calPos==="bottom"?"⬆️":"⬇️")+'</button>'+
     '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
@@ -1511,7 +1578,7 @@ function renderPlannerWeek(){
       html += '<div class="wg-row '+(d2===todayStr()?"today":"")+'" style="'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
         '<div class="wg-daycol"><div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
         '<div style="font-weight:800;font-size:16px;">'+ddd+'</div>'+
-        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+'</div>'+
+        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+dayLetterBadgeHtml(d2,"sm")+'</div>'+
         '<div class="wg-list">'+escapeHtml(namesPreview)+'</div>'+
         (habitCount?'<div style="font-size:11px;color:var(--text-muted);flex-shrink:0;">'+doneCount+'/'+habitCount+'</div>':'')+
         '<div class="expand-ic" style="position:static;font-size:11px;opacity:.6;" data-action="expandDayPreview" data-v="'+d2+'">🔍</div>'+
@@ -1532,6 +1599,7 @@ function renderPlannerWeek(){
         '<div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
         '<div style="font-weight:800;font-size:16px;">'+ddd+'</div>'+
         (tmpl?'<div style="font-size:14px;margin-top:2px;">'+tmpl.emoji+'</div>':'<div style="height:18px;"></div>')+
+        '<div style="margin-top:2px;">'+dayLetterBadgeHtml(d2,"sm")+'</div>'+
         (habitCount?'<div style="font-size:10px;margin-top:4px;color:var(--text-muted);">'+doneCount+'/'+habitCount+'</div>':'')+
         '</div>';
     }
@@ -1566,6 +1634,81 @@ function customEventFormHtml(dateStr, ev){
 function openCustomEventForm(dateStr, id){
   const ev = id ? (state.customEvents||[]).find(x=>x.id===id) : null;
   openModal(customEventFormHtml(dateStr, ev));
+}
+
+/* ============ Block/Rotation Class Schedule — Settings UI ============ */
+let semFormWeekdays = [1,2,3,4,5];
+let scheduleEditLetter = "A";
+function semesterFormHtml(sem){
+  sem = sem || {name:"", startDate:todayStr(), endDate:addDays(todayStr(),120), rotationLength:4, startLetterIndex:0, activeWeekdays:[1,2,3,4,5], periodsPerDay:7, defaultStartTime:"08:00", periodMinutes:50, passingMinutes:5};
+  semFormWeekdays = (sem.activeWeekdays||[1,2,3,4,5]).slice();
+  const weekdayOpts = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
+  const rotLenOpts = [2,3,4,5,6,7,8];
+  const letterOpts = Array.from({length:10},(_,i)=>String.fromCharCode(65+i));
+  return '<h2>'+(sem.id?"Edit Semester":"New Semester")+'</h2>'+
+    '<div class="field"><label>Name</label><input id="sem_name" type="text" placeholder="e.g. Fall 2026" value="'+escapeHtml(sem.name)+'"></div>'+
+    '<div class="row-inline"><div class="field"><label>Start date</label><input id="sem_start" type="date" value="'+sem.startDate+'"></div>'+
+    '<div class="field"><label>End date</label><input id="sem_end" type="date" value="'+sem.endDate+'"></div></div>'+
+    '<div class="field"><label>School days (count toward the rotation)</label><div class="chip-group">'+weekdayOpts.map(w=>'<div class="chip '+(semFormWeekdays.includes(w[0])?"selected":"")+'" data-action="pickSemWeekday" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div>'+
+    '<div class="row-inline"><div class="field"><label>Rotation length</label><select id="sem_rotLen">'+rotLenOpts.map(n=>'<option value="'+n+'" '+((sem.rotationLength||4)===n?"selected":"")+'>'+n+' days (A–'+String.fromCharCode(65+n-1)+')</option>').join("")+'</select></div>'+
+    '<div class="field"><label>Start date is a…</label><select id="sem_startLetter">'+letterOpts.map((l,i)=>'<option value="'+i+'" '+((sem.startLetterIndex||0)===i?"selected":"")+'>'+l+' Day</option>').join("")+'</select></div></div>'+
+    '<p class="hc-meta">Holidays don’t consume a letter — mark them below once this is saved, and the rotation just picks up on the next real school day.</p>'+
+    '<div class="row-inline"><div class="field"><label>Periods per day</label><input id="sem_periods" type="number" min="1" max="14" value="'+(sem.periodsPerDay||7)+'"></div>'+
+    '<div class="field"><label>First period starts</label><input id="sem_startTime" type="time" value="'+(sem.defaultStartTime||"08:00")+'"></div></div>'+
+    '<div class="row-inline"><div class="field"><label>Period length (min)</label><input id="sem_periodMin" type="number" min="5" value="'+(sem.periodMinutes||50)+'"></div>'+
+    '<div class="field"><label>Passing time (min)</label><input id="sem_passMin" type="number" min="0" value="'+(sem.passingMinutes==null?5:sem.passingMinutes)+'"></div></div>'+
+    '<div class="modal-actions">'+(sem.id?'<button class="btn danger" data-action="deleteSemester" data-id="'+sem.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveSemester" data-id="'+(sem.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openSemesterForm(id){
+  const sem = id ? getSemesters().find(x=>x.id===id) : null;
+  openModal(semesterFormHtml(sem));
+}
+function scheduleClassesCardHtml(sem){
+  const letters = rotationLetters(sem);
+  if(!letters.includes(scheduleEditLetter)) scheduleEditLetter = letters[0];
+  const times = periodTimesFor(sem);
+  const subjects = (sem.classes && sem.classes[scheduleEditLetter]) || [];
+  let html = '<div class="card" style="margin-top:14px;"><h2>📚 Classes by Rotation Day</h2>'+
+    '<p class="hc-meta">Set what’s in each period for '+letters.join("/")+' Days. Times come from the semester’s period settings above.</p>'+
+    '<div class="chip-group" style="margin:10px 0;">'+letters.map(l=>'<div class="chip '+(scheduleEditLetter===l?"selected":"")+'" data-action="pickScheduleLetter" data-v="'+l+'">'+l+' Day</div>').join("")+'</div>';
+  for(let i=0;i<(sem.periodsPerDay||7);i++){
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">'+
+      '<div style="flex:0 0 76px;font-size:11.5px;color:var(--text-muted);font-weight:700;">'+fmtTime12(times[i]||"")+'</div>'+
+      '<input type="text" class="clsSubjInput" data-idx="'+i+'" placeholder="Period '+(i+1)+'" value="'+escapeHtml(subjects[i]||"")+'" style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">'+
+      '</div>';
+  }
+  html += '<button class="btn secondary sm" style="margin-top:4px;" data-action="saveScheduleClasses">Save '+scheduleEditLetter+' Day Classes</button></div>';
+  return html;
+}
+function scheduleHolidaysCardHtml(sem){
+  const list = (sem.holidays||[]).slice().sort();
+  return '<div class="card" style="margin-top:14px;"><h2>🌴 Holidays / Days Off</h2>'+
+    '<p class="hc-meta">These dates are skipped — the rotation picks back up on the next school day without losing its place.</p>'+
+    '<div class="row-inline" style="margin-top:10px;"><input id="sem_holidayDate" type="date" style="flex:1;"><button class="btn secondary sm" data-action="addHoliday">+ Add</button></div>'+
+    (list.length?'<div class="chip-group" style="margin-top:10px;">'+list.map(d=>'<div class="chip" style="display:flex;align-items:center;gap:6px;">'+fmtDatePretty(d)+'<span data-action="removeHoliday" data-v="'+d+'" style="opacity:.6;cursor:pointer;">✕</span></div>').join("")+'</div>':'<p class="hc-meta" style="margin-top:8px;">No holidays added yet.</p>')+
+    '</div>';
+}
+function scheduleSettingsCardHtml(){
+  const sems = getSemesters();
+  const active = activeSemester();
+  let html = '<div class="card" style="margin-top:14px;"><h2>🎓 Class Schedule (Block Rotation)</h2>'+
+    '<p class="hc-meta">Set up A/B/C/D (or longer) rotating school days — the Planner shows which day it is and lists that day’s classes automatically.</p>';
+  if(sems.length){
+    html += '<div class="field" style="margin-top:10px;"><label>Active semester</label><select id="sem_activeSelect">'+
+      sems.map(s=>'<option value="'+s.id+'" '+(state.activeSemesterId===s.id?"selected":"")+'>'+escapeHtml(s.name)+' ('+s.startDate+' – '+s.endDate+')</option>').join("")+
+      '</select></div>';
+  }
+  html += '<div class="modal-actions" style="margin-top:4px;">'+
+    (active?'<button class="btn secondary" style="flex:1" data-action="openSemesterForm" data-id="'+active.id+'">Edit Semester</button>':'')+
+    '<button class="btn'+(active?" secondary":"")+'" style="flex:1" data-action="openSemesterForm">+ New Semester</button>'+
+    '</div></div>';
+  if(active){
+    html += scheduleClassesCardHtml(active);
+    html += scheduleHolidaysCardHtml(active);
+  }
+  return html;
 }
 
 /* Schedule template CRUD */
@@ -2049,6 +2192,8 @@ function renderSettings(){
     '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
 
   html += renderAllProfilesSection();
+
+  html += scheduleSettingsCardHtml();
 
   html += '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>'+
     '<p class="hc-meta">Live two-way sync with Google/Outlook/Apple isn\'t possible here — that needs a registered API app and a hosted backend, which this offline single-file app doesn\'t have. The reliable offline equivalent: export your alerts as a standard .ics file and import it into whichever calendar you use.</p>'+
@@ -2665,6 +2810,80 @@ document.addEventListener("click", function(e){
       break;
     }
 
+    case "openSemesterForm": openSemesterForm(id); break;
+    case "pickSemWeekday": {
+      const wd = Number(v);
+      const idx = semFormWeekdays.indexOf(wd);
+      if(idx>=0) semFormWeekdays.splice(idx,1); else semFormWeekdays.push(wd);
+      document.querySelectorAll('[data-action="pickSemWeekday"]').forEach(c=>c.classList.toggle("selected", semFormWeekdays.includes(Number(c.getAttribute("data-v")))));
+      break;
+    }
+    case "saveSemester": {
+      const name = document.getElementById("sem_name").value.trim();
+      if(!name){ toast("Please enter a name"); return; }
+      const startDate = document.getElementById("sem_start").value;
+      const endDate = document.getElementById("sem_end").value;
+      if(!startDate || !endDate || endDate<startDate){ toast("Check the start/end dates"); return; }
+      const rotationLength = Number(document.getElementById("sem_rotLen").value)||4;
+      const payload = {
+        name, startDate, endDate, rotationLength,
+        startLetterIndex: Number(document.getElementById("sem_startLetter").value)%rotationLength,
+        activeWeekdays: semFormWeekdays.slice().sort(),
+        periodsPerDay: Math.max(1, Number(document.getElementById("sem_periods").value)||7),
+        defaultStartTime: document.getElementById("sem_startTime").value||"08:00",
+        periodMinutes: Math.max(5, Number(document.getElementById("sem_periodMin").value)||50),
+        passingMinutes: Math.max(0, Number(document.getElementById("sem_passMin").value)||0)
+      };
+      let semId = id;
+      if(id){
+        const existing = getSemesters().find(x=>x.id===id);
+        Object.assign(existing, payload);
+      } else {
+        semId = uid();
+        payload.id = semId; payload.holidays = []; payload.classes = {};
+        getSemesters().push(payload);
+        if(!state.activeSemesterId) state.activeSemesterId = semId;
+      }
+      saveState(); closeModal(); render();
+      toast("Semester saved");
+      break;
+    }
+    case "deleteSemester": {
+      state.semesters = getSemesters().filter(x=>x.id!==id);
+      if(state.activeSemesterId===id) state.activeSemesterId = state.semesters.length ? state.semesters[0].id : null;
+      saveState(); closeModal(); render();
+      break;
+    }
+    case "pickScheduleLetter": { scheduleEditLetter = v; render(); break; }
+    case "saveScheduleClasses": {
+      const active = activeSemester();
+      if(!active) return;
+      const arr = [];
+      document.querySelectorAll(".clsSubjInput").forEach(inp=>{ arr[Number(inp.getAttribute("data-idx"))] = inp.value.trim(); });
+      active.classes = active.classes || {};
+      active.classes[scheduleEditLetter] = arr;
+      saveState(); render();
+      toast(scheduleEditLetter+" Day classes saved");
+      break;
+    }
+    case "addHoliday": {
+      const active = activeSemester();
+      if(!active) return;
+      const d = document.getElementById("sem_holidayDate").value;
+      if(!d){ toast("Pick a date first"); return; }
+      active.holidays = active.holidays || [];
+      if(!active.holidays.includes(d)) active.holidays.push(d);
+      saveState(); render();
+      break;
+    }
+    case "removeHoliday": {
+      const active = activeSemester();
+      if(!active) return;
+      active.holidays = (active.holidays||[]).filter(x=>x!==v);
+      saveState(); render();
+      break;
+    }
+
     case "openReminderForm": openReminderForm(null); break;
     case "editReminder": openReminderForm(id); break;
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
@@ -2955,6 +3174,11 @@ document.addEventListener("change", function(e){
   }
   if(e.target.id === "customAccentPicker2"){
     state.profile.accent2 = e.target.value; saveState(); applyTheme();
+    return;
+  }
+  if(e.target.id === "sem_activeSelect"){
+    state.activeSemesterId = e.target.value;
+    saveState(); render();
     return;
   }
   if(e.target.id === "alertVolumeSlider"){
