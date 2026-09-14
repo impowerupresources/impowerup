@@ -256,12 +256,64 @@
   .proof-thumb{border-radius:12px;overflow:hidden;aspect-ratio:1;background:var(--surface-2);position:relative;}
   .proof-thumb img{width:100%;height:100%;object-fit:cover;}
   .proof-thumb .cap{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:3px 5px;}
+
+  /* ============ Assessments ============ */
+  .assess-status-pill{display:inline-block;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;}
+  .assess-status-pill.not_started{background:var(--surface-2);color:var(--text-muted);}
+  .assess-status-pill.in_progress{background:rgba(var(--accent-rgb),.15);color:var(--accent);}
+  .assess-status-pill.submitted{background:var(--success);color:#fff;}
+  .assess-overall-card{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:16px;}
+  .assess-overall-card .progress-bar{background:rgba(255,255,255,.3);}
+  .assess-overall-card .progress-bar>div{background:#fff;}
+  .assess-q-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;}
+  .assess-q-prompt{font-weight:800;font-size:14.5px;margin-bottom:10px;line-height:1.4;}
+  .assess-opts{display:flex;flex-direction:column;gap:8px;}
+  .assess-opt{display:block;width:100%;text-align:left;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface);font-size:13.5px;font-weight:600;color:var(--text);cursor:pointer;transition:all .12s;}
+  .assess-opt.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),.1);color:var(--text);font-weight:800;}
+  .assess-opt.readonly{cursor:default;}
+  .assess-vs-row{display:flex;gap:10px;align-items:stretch;}
+  .assess-vs-row .assess-opt{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;min-height:64px;}
+  .assess-vs-divider{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:var(--text-muted);width:26px;flex-shrink:0;}
+  .assess-check-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--border);cursor:pointer;}
+  .assess-check-row+.assess-check-row{margin-top:8px;}
+  .assess-check-row.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),.1);}
+  .assess-check-box{width:20px;height:20px;border-radius:6px;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;margin-top:1px;}
+  .assess-check-row.selected .assess-check-box{background:var(--accent);border-color:var(--accent);}
+  .assess-zone-label{font-size:12px;font-weight:800;color:var(--text-muted);margin:14px 0 6px;}
+  .assess-zone-label:first-child{margin-top:0;}
+  .assess-canvas-wrap{position:relative;}
+  .assess-canvas{touch-action:none;background:#fff;border:1.5px solid var(--border);border-radius:12px;width:100%;height:180px;display:block;cursor:crosshair;}
+  .assess-canvas-clear{position:absolute;top:8px;right:8px;background:var(--surface-2);border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;color:var(--text-muted);cursor:pointer;}
+  .assess-info-card{background:rgba(var(--accent-rgb),.08);border:1.5px dashed var(--accent);border-radius:16px;padding:18px;text-align:center;margin-bottom:12px;font-size:13.5px;font-weight:600;}
+  .assess-save-indicator{font-size:11.5px;color:var(--text-muted);text-align:center;margin:6px 0 14px;}
+  .assess-sticky-bar{position:sticky;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 0;margin-top:10px;z-index:20;}
+  @media(min-width:760px){ .assess-vs-row{max-width:520px;} }
+
+  /* ---- Print / PDF export ---- */
+  #printAssessArea{display:none;}
+  .pa-header{border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px;}
+  .pa-header h1{font-size:20px;margin:0 0 4px;}
+  .pa-header .pa-meta{font-size:12px;color:#555;}
+  .pa-section-title{font-size:14px;font-weight:800;margin:18px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px;}
+  .pa-q{margin-bottom:10px;page-break-inside:avoid;}
+  .pa-q .pa-prompt{font-weight:700;font-size:12.5px;margin-bottom:3px;}
+  .pa-q .pa-answer{font-size:12.5px;color:#111;padding-left:10px;}
+  .pa-q .pa-answer.pa-unanswered{color:#999;font-style:italic;}
+  .pa-zone-label{font-size:11px;font-weight:700;color:#555;margin:8px 0 3px;}
+  .pa-drawing-img{max-width:320px;max-height:180px;border:1px solid #ccc;border-radius:6px;display:block;margin:4px 0;}
+  .pa-score{background:#f4f4f4;border:1px solid #ccc;border-radius:8px;padding:10px;margin-top:14px;font-size:12.5px;white-space:pre-wrap;}
+  @media print{
+    body>*:not(#printAssessArea){display:none!important;}
+    #printAssessArea{display:block!important;}
+    body{background:#fff;}
+  }
 </style>
 </head>
 <body data-theme="light">
 <div id="app"></div>
 <div id="toastHost"></div>
 <div id="modalHost"></div>
+<div id="printAssessArea"></div>
 <input type="file" id="proofPhotoInput" accept="image/*" capture="environment" style="display:none;">
 
 <script>
@@ -788,6 +840,7 @@ async function loadAdminClientList(){
 }
 function renderAdmin(){
   if(!state.profile.isCloudAdmin) return renderHome();
+  if(_adminAssessClient) return renderAdminAssessManage();
   if(adminClientList===null){
     adminClientList = [];
     loadAdminClientList().then(list=>{ adminClientList = list; render(); });
@@ -798,8 +851,218 @@ function renderAdmin(){
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
     '<div class="hc-meta">Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
-    (c.is_admin?'':'<button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>')+'</div>').join("");
+    (c.is_admin?'':'<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>'+
+    '<button class="btn ghost sm" data-action="openAdminAssessManage" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"Client")+'">📋 Assessments</button></div>')+'</div>').join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
+  return html;
+}
+
+/* ---- Admin: assessments assign/enable + review + scoring ---- */
+let _adminAssessClient = null;      // {id, name}
+let _adminAssessTemplates = null;   // all templates (cached across clients)
+let _adminAssessRows = null;        // this client's assignment rows, keyed by template_id
+let _adminAssessReviewing = null;   // {templateId, template, responses, status, submittedAt}
+let _adminScoringFor = null;        // templateId currently being scored
+
+async function loadAdminAssessTemplates(){
+  if(!(await ensureFreshSession())) return [];
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?select=id,title,description&order=title.asc", {headers: acctHeaders(true)});
+    if(!res.ok) return [];
+    return await res.json();
+  }catch(e){ return []; }
+}
+async function loadAdminAssessRows(clientId){
+  if(!(await ensureFreshSession())) return {};
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?user_id=eq."+clientId+"&select=*", {headers: acctHeaders(true)});
+    if(!res.ok) return {};
+    const rows = await res.json();
+    const map = {};
+    rows.forEach(r=>{ map[r.template_id] = r; });
+    return map;
+  }catch(e){ return {}; }
+}
+function openAdminAssessManage(clientId, clientName){
+  _adminAssessClient = {id: clientId, name: clientName};
+  _adminAssessTemplates = null;
+  _adminAssessRows = null;
+  _adminAssessReviewing = null;
+  render();
+}
+function adminBackToClientList(){
+  _adminAssessClient = null;
+  _adminAssessTemplates = null;
+  _adminAssessRows = null;
+  _adminAssessReviewing = null;
+  render();
+}
+async function adminToggleAssessEnabled(templateId){
+  if(!_adminAssessClient) return;
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  const existing = (_adminAssessRows||{})[templateId];
+  const nextEnabled = !(existing && existing.enabled);
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?on_conflict=user_id,template_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify({ user_id: _adminAssessClient.id, template_id: templateId, enabled: nextEnabled, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok){ toast("Couldn't update — check your connection"); return; }
+    _adminAssessRows = await loadAdminAssessRows(_adminAssessClient.id);
+    render();
+    toast(nextEnabled ? "Assessment turned on for "+_adminAssessClient.name : "Assessment turned off for "+_adminAssessClient.name);
+  }catch(e){ toast("Couldn't update — check your connection"); }
+}
+async function openAdminAssessReview(templateId){
+  const tmplMeta = (_adminAssessTemplates||[]).find(t=>t.id===templateId);
+  const row = (_adminAssessRows||{})[templateId];
+  if(!row){ toast("No responses yet"); return; }
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?id=eq."+encodeURIComponent(templateId)+"&select=id,title,description,sections", {headers: acctHeaders(true)});
+    const rows = res.ok ? await res.json() : [];
+    const template = rows[0];
+    if(!template){ toast("Couldn't load that assessment"); return; }
+    _adminAssessReviewing = { templateId, template, responses: row.responses||{}, status: row.status||"not_started", submittedAt: row.submitted_at||null, score: row.score||null };
+    render();
+  }catch(e){ toast("Couldn't load that assessment"); }
+}
+function adminBackToAssessManage(){
+  _adminAssessReviewing = null;
+  render();
+}
+function openAdminScoring(templateId){
+  const row = (_adminAssessRows||{})[templateId] || (_adminAssessReviewing && _adminAssessReviewing.templateId===templateId ? {score:_adminAssessReviewing.score} : null);
+  const existingScore = (row && row.score) || {};
+  _adminScoringFor = templateId;
+  openModal('<h2>📝 Scoring</h2><p class="hc-meta">No scoring template has been uploaded yet — jot notes/scores here for now. Once you upload a scoring rubric, this section can auto-calculate.</p>'+
+    '<div class="field"><label>Score / Notes</label><textarea id="admin_score_notes" style="width:100%;min-height:120px;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);">'+escapeHtml(existingScore.notes||"")+'</textarea></div>'+
+    '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
+    '<button class="btn" style="flex:1" data-action="saveAdminScore" data-id="'+templateId+'">Save</button></div>');
+}
+async function saveAdminScore(templateId){
+  if(!_adminAssessClient) return;
+  const notes = document.getElementById("admin_score_notes").value;
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?on_conflict=user_id,template_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify({ user_id: _adminAssessClient.id, template_id: templateId, score: {notes, scoredAt: new Date().toISOString()}, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok){ toast("Couldn't save score"); return; }
+    _adminAssessRows = await loadAdminAssessRows(_adminAssessClient.id);
+    if(_adminAssessReviewing && _adminAssessReviewing.templateId===templateId) _adminAssessReviewing.score = {notes};
+    closeModal(); render();
+    toast("Score saved");
+  }catch(e){ toast("Couldn't save score"); }
+}
+function renderAdminAssessManage(){
+  const client = _adminAssessClient;
+  let html = '<div class="topbar"><div><h1>📋 '+escapeHtml(client.name)+'\'s Assessments</h1><p class="subtitle" style="margin:2px 0 0">Turn assessments on or off, review answers, and score.</p></div>'+
+    '<button class="btn secondary sm" data-action="adminBackToClientList">‹ Clients</button></div>';
+  if(_adminAssessReviewing) return html + renderAdminAssessReview();
+  if(_adminAssessTemplates===null || _adminAssessRows===null){
+    Promise.all([loadAdminAssessTemplates(), loadAdminAssessRows(client.id)]).then(([tmpls,rows])=>{
+      _adminAssessTemplates = tmpls; _adminAssessRows = rows; render();
+    });
+    return html + '<div class="empty card"><div class="big">⏳</div>Loading…</div>';
+  }
+  if(!_adminAssessTemplates.length){ return html + emptyState("📋","No assessment templates yet","Templates are seeded on the backend."); }
+  html += _adminAssessTemplates.map(t=>{
+    const row = _adminAssessRows[t.id];
+    const enabled = !!(row && row.enabled);
+    const status = (row && row.status) || "not_started";
+    const statusLabel = status==="submitted" ? "Submitted" : (status==="in_progress" ? "In progress" : "Not started");
+    const hasScore = !!(row && row.score && row.score.notes);
+    return '<div class="habit-card" style="align-items:flex-start;">'+
+      '<div class="emoji-badge" style="background:var(--surface-2);">📋</div>'+
+      '<div class="hc-body" style="flex:1;">'+
+      '<div class="hc-title">'+escapeHtml(t.title)+' <span class="assess-status-pill '+status+'">'+statusLabel+'</span>'+(hasScore?' <span class="tag">Scored</span>':'')+'</div>'+
+      (t.description?'<div class="hc-meta">'+escapeHtml(t.description)+'</div>':"")+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
+      '<button class="btn '+(enabled?"":"secondary")+' sm" data-action="adminToggleAssessEnabled" data-id="'+t.id+'">'+(enabled?"✅ On":"Turn On")+'</button>'+
+      (row ? '<button class="btn secondary sm" data-action="openAdminAssessReview" data-id="'+t.id+'">View</button>' : '')+
+      (row ? '<button class="btn secondary sm" data-action="openAdminScoring" data-id="'+t.id+'">📝 Score</button>' : '')+
+      '</div></div></div>';
+  }).join("");
+  return html;
+}
+function assessAnswerDisplay(q, val){
+  if(val===undefined || val===null) return {type:"none"};
+  if(q.type==="single_choice" || q.type==="versus"){
+    if(typeof val!=="number") return {type:"none"};
+    const opt = (q.options||[])[val];
+    const label = typeof opt==="string" ? opt : ((opt&&opt.label)||"");
+    return label ? {type:"text", text: label} : {type:"none"};
+  }
+  if(q.type==="checklist"){
+    if(!Array.isArray(val) || !val.length) return {type:"none"};
+    const items = val.map(oi=>(q.options||[])[oi]).filter(Boolean);
+    return items.length ? {type:"text", text: items.map(i=>"• "+i).join("\n")} : {type:"none"};
+  }
+  if(q.type==="text"){
+    return (val && String(val).trim()) ? {type:"text", text: val} : {type:"none"};
+  }
+  if(q.type==="drawing"){
+    const zones = (q.zones && q.zones.length) ? q.zones : [null];
+    const out = zones.map(z=>{
+      const v = z ? (val && typeof val==="object" ? val[z] : null) : val;
+      return (v && typeof v==="string" && v.indexOf("data:image")===0) ? {label:z, src:v} : null;
+    }).filter(Boolean);
+    return out.length ? {type:"drawing", zones: out} : {type:"none"};
+  }
+  return {type:"none"};
+}
+function printAssessment(clientName, template, responses, status, submittedAt, score){
+  const container = document.getElementById("printAssessArea");
+  if(!container || !template) return;
+  const statusLabel = status==="submitted" ? ("Submitted"+(submittedAt?(" on "+fmtDatePretty(submittedAt.slice(0,10))):"")) : (status==="in_progress"?"In progress":"Not started");
+  let html = '<div class="pa-header"><h1>'+escapeHtml(template.title||"Assessment")+'</h1>'+
+    '<div class="pa-meta">Client: '+escapeHtml(clientName||"—")+' &nbsp;·&nbsp; Status: '+statusLabel+' &nbsp;·&nbsp; Printed '+fmtDatePretty(todayStr())+'</div></div>';
+  (template.sections||[]).forEach((sec,si)=>{
+    const qs = (sec.questions||[]).filter(q=>q.type!=="info");
+    if(!qs.length) return;
+    html += '<div class="pa-section-title">'+escapeHtml(sec.title||"")+'</div>';
+    (sec.questions||[]).forEach((q,qi)=>{
+      if(q.type==="info") return;
+      const qid = "s"+si+"_q"+qi;
+      const disp = assessAnswerDisplay(q, responses[qid]);
+      html += '<div class="pa-q">';
+      if(q.prompt) html += '<div class="pa-prompt">'+escapeHtml(q.prompt)+'</div>';
+      if(disp.type==="none") html += '<div class="pa-answer pa-unanswered">No response</div>';
+      else if(disp.type==="text") html += '<div class="pa-answer">'+escapeHtml(disp.text).replace(/\n/g,"<br>")+'</div>';
+      else if(disp.type==="drawing") html += disp.zones.map(z=>(z.label?'<div class="pa-zone-label">'+escapeHtml(z.label)+'</div>':"")+'<img class="pa-drawing-img" src="'+z.src+'">').join("");
+      html += '</div>';
+    });
+  });
+  if(score && score.notes) html += '<div class="pa-score"><b>Score / Notes:</b><br>'+escapeHtml(score.notes).replace(/\n/g,"<br>")+'</div>';
+  container.innerHTML = html;
+  setTimeout(()=>{ window.print(); }, 60);
+}
+function renderAdminAssessReview(){
+  const r = _adminAssessReviewing;
+  const tmpl = r.template;
+  const counts = assessCountsForTemplateResponses(tmpl, r.responses);
+  const pct = counts.total ? Math.round(counts.answered/counts.total*100) : 0;
+  const submittedLabel = r.submittedAt ? (" "+fmtDatePretty(r.submittedAt.slice(0,10))) : "";
+  let html = '<div class="section-head" style="margin-top:0;"><h2>'+escapeHtml(tmpl.title||"Assessment")+'</h2>'+
+    '<button class="btn secondary sm" data-action="adminBackToAssessManage">‹ Back</button></div>';
+  html += '<div class="card" style="margin-bottom:14px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:800;color:var(--text-muted);"><span>'+counts.answered+' of '+counts.total+' answered ('+pct+'%)</span>'+
+    '<span class="assess-status-pill '+r.status+'">'+(r.status==="submitted"?"Submitted"+submittedLabel:(r.status==="in_progress"?"In progress":"Not started"))+'</span></div>'+
+    '<div class="progress-bar" style="margin-top:6px;"><div style="width:'+pct+'%;"></div></div>'+
+    (r.score && r.score.notes ? '<div class="hc-meta" style="margin-top:10px;white-space:pre-wrap;"><b>Score/notes:</b> '+escapeHtml(r.score.notes)+'</div>' : '')+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">'+
+    '<button class="btn secondary sm" data-action="openAdminScoring" data-id="'+r.templateId+'">📝 '+(r.score&&r.score.notes?"Edit score":"Add score")+'</button>'+
+    '<button class="btn secondary sm" data-action="printReviewedAssessment">🖨️ Print / Save PDF</button>'+
+    '</div></div>';
+  (tmpl.sections||[]).forEach((sec,si)=>{
+    html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
+    if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
+    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,r.responses,true); });
+  });
   return html;
 }
 async function openAsClient(clientId){
@@ -820,6 +1083,7 @@ async function openAsClient(clientId){
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
+    _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
     location.hash = "#/home";
     render();
     toast("Now viewing "+clientName+"'s data");
@@ -844,9 +1108,353 @@ function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
   state = _adminOwnState; STORE_KEY = _adminOwnKey;
   _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
+  _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
   location.hash = "#/admin";
   render();
   if(msg) toast(msg);
+}
+
+/* ============ Assessments (client-facing engine) ============ */
+let _assessCache = null;          // array of assignment rows (each with embedded `template`) for the logged-in user
+let _assessView = {mode:"list"};  // {mode:"list"} or {mode:"take"}
+let _assessCurrent = null;        // {templateId, template, responses, status, submittedAt}
+let _assessSaveTimer = null;
+let _assessDrawActive = false;
+
+async function loadAssessAssignments(){
+  if(!(await ensureFreshSession())) return [];
+  try{
+    const uid = state.profile.cloudSession.user_id;
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?user_id=eq."+uid+"&enabled=eq.true&select=*,template:assessment_templates(id,title,description,sections)&order=updated_at.desc", {headers: acctHeaders(true)});
+    if(!res.ok) return [];
+    return await res.json();
+  }catch(e){ return []; }
+}
+
+function assessIsAnswered(q, val){
+  if(val===undefined || val===null) return false;
+  if(q.type==="single_choice" || q.type==="versus") return typeof val==="number";
+  if(q.type==="checklist") return Array.isArray(val) && val.length>0;
+  if(q.type==="text") return typeof val==="string" && val.trim().length>0;
+  if(q.type==="drawing"){
+    if(q.zones && q.zones.length){
+      if(!val || typeof val!=="object") return false;
+      return q.zones.some(z=>val[z] && String(val[z]).indexOf("data:image")===0);
+    }
+    return typeof val==="string" && val.indexOf("data:image")===0;
+  }
+  return !!val;
+}
+function assessCountsForTemplateResponses(template, responses){
+  let total=0, answered=0;
+  ((template && template.sections)||[]).forEach((sec,si)=>{
+    (sec.questions||[]).forEach((q,qi)=>{
+      if(q.type==="info") return;
+      total++;
+      const qid = "s"+si+"_q"+qi;
+      if(assessIsAnswered(q, responses ? responses[qid] : undefined)) answered++;
+    });
+  });
+  return {answered, total};
+}
+function assessOverallCounts(){
+  let total=0, answered=0;
+  (_assessCache||[]).forEach(row=>{
+    const tmpl = row.template;
+    if(!tmpl) return;
+    const responses = (_assessCurrent && _assessCurrent.templateId===row.template_id) ? _assessCurrent.responses : (row.responses||{});
+    const c = assessCountsForTemplateResponses(tmpl, responses);
+    total += c.total; answered += c.answered;
+  });
+  return {answered, total, pct: total ? Math.round(answered/total*100) : 0};
+}
+function updateAssessProgressUI(){
+  if(!_assessCurrent) return;
+  const c = assessCountsForTemplateResponses(_assessCurrent.template, _assessCurrent.responses);
+  const pct = c.total ? Math.round(c.answered/c.total*100) : 0;
+  const bar = document.getElementById("assessSelfBar"); if(bar) bar.style.width = pct+"%";
+  const txt = document.getElementById("assessSelfBarTxt"); if(txt) txt.textContent = c.answered+" of "+c.total+" answered ("+pct+"%)";
+  const oc = assessOverallCounts();
+  const obar = document.getElementById("assessOverallBarTake"); if(obar) obar.style.width = oc.pct+"%";
+  const otxt = document.getElementById("assessOverallBarTakeTxt"); if(otxt) otxt.textContent = "Overall: "+oc.answered+" of "+oc.total+" ("+oc.pct+"%)";
+}
+
+function scheduleAssessAutosave(){
+  const ind = document.getElementById("assessSaveIndicator"); if(ind) ind.textContent = "Saving…";
+  clearTimeout(_assessSaveTimer);
+  _assessSaveTimer = setTimeout(()=>{ saveAssessAssignment(); }, 1100);
+}
+async function saveAssessAssignment(statusOverride){
+  if(!_assessCurrent) return false;
+  if(!(await ensureFreshSession())){
+    const ind = document.getElementById("assessSaveIndicator"); if(ind) ind.textContent = "Not saved — please log in again";
+    return false;
+  }
+  const uid = state.profile.cloudSession.user_id;
+  const newStatus = statusOverride || (_assessCurrent.status==="not_started" ? "in_progress" : _assessCurrent.status);
+  const body = { user_id: uid, template_id: _assessCurrent.templateId, responses: _assessCurrent.responses, status: newStatus, updated_at: new Date().toISOString() };
+  if(statusOverride==="submitted") body.submitted_at = new Date().toISOString();
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?on_conflict=user_id,template_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){ const ind = document.getElementById("assessSaveIndicator"); if(ind) ind.textContent = "Save failed — check your connection"; return false; }
+    _assessCurrent.status = newStatus;
+    if(body.submitted_at) _assessCurrent.submittedAt = body.submitted_at;
+    const row = (_assessCache||[]).find(r=>r.template_id===_assessCurrent.templateId);
+    if(row){ row.responses = _assessCurrent.responses; row.status = newStatus; if(body.submitted_at) row.submitted_at = body.submitted_at; }
+    const ind = document.getElementById("assessSaveIndicator"); if(ind) ind.textContent = "Saved ✓";
+    return true;
+  }catch(e){ const ind = document.getElementById("assessSaveIndicator"); if(ind) ind.textContent = "Save failed — check your connection"; return false; }
+}
+async function assessSubmitCurrent(){
+  if(!_assessCurrent) return;
+  if(!confirm("Submit this assessment? You'll still be able to review your answers afterward, but they'll be marked complete.")) return;
+  clearTimeout(_assessSaveTimer);
+  const ok = await saveAssessAssignment("submitted");
+  if(ok){ toast("Assessment submitted!"); render(); } else toast("Couldn't submit — check your connection and try again");
+}
+
+function openAssessmentTake(templateId){
+  const row = (_assessCache||[]).find(r=>r.template_id===templateId);
+  if(!row || !row.template){ toast("Couldn't load that assessment"); return; }
+  _assessCurrent = {
+    templateId, template: row.template,
+    responses: JSON.parse(JSON.stringify(row.responses||{})),
+    status: row.status||"not_started",
+    submittedAt: row.submitted_at||null
+  };
+  _assessView = {mode:"take"};
+  render();
+}
+function assessBackToList(){
+  if(_assessCurrent && _assessCurrent.status!=="submitted"){
+    clearTimeout(_assessSaveTimer);
+    saveAssessAssignment();
+  }
+  _assessCurrent = null;
+  _assessView = {mode:"list"};
+  render();
+}
+
+/* ---- Drawing canvases (mouse / touch / pencil via Pointer Events) ---- */
+function assessDrawStart(ev, canvas){
+  if(canvas.hasAttribute("readonly")) return;
+  ev.preventDefault();
+  _assessDrawActive = true;
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+  const x = (ev.clientX-rect.left)*scaleX, y = (ev.clientY-rect.top)*scaleY;
+  canvas._lastX = x; canvas._lastY = y;
+  ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(x,y,1.3,0,Math.PI*2); ctx.fillStyle = "#1e293b"; ctx.fill();
+}
+function assessDrawMove(ev, canvas){
+  if(!_assessDrawActive) return;
+  ev.preventDefault();
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+  const x = (ev.clientX-rect.left)*scaleX, y = (ev.clientY-rect.top)*scaleY;
+  ctx.beginPath(); ctx.moveTo(canvas._lastX, canvas._lastY); ctx.lineTo(x,y); ctx.stroke();
+  canvas._lastX = x; canvas._lastY = y;
+}
+function assessDrawEnd(ev, canvas){
+  if(!_assessDrawActive) return;
+  _assessDrawActive = false;
+  const qid = canvas.getAttribute("data-qid");
+  const zoneKey = canvas.getAttribute("data-zone")||"";
+  captureAssessDrawing(canvas, qid, zoneKey);
+}
+function captureAssessDrawing(canvas, qid, zoneKey){
+  if(!_assessCurrent) return;
+  const dataUrl = canvas.toDataURL("image/png");
+  if(zoneKey){
+    const cur = _assessCurrent.responses[qid];
+    const obj = (cur && typeof cur==="object" && !Array.isArray(cur)) ? cur : {};
+    obj[zoneKey] = dataUrl;
+    _assessCurrent.responses[qid] = obj;
+  } else {
+    _assessCurrent.responses[qid] = dataUrl;
+  }
+  scheduleAssessAutosave();
+  updateAssessProgressUI();
+}
+function clearAssessDrawing(canvasId, qid, zoneKey){
+  const canvas = document.getElementById(canvasId);
+  if(canvas){
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+  if(_assessCurrent){
+    if(zoneKey){ const cur = _assessCurrent.responses[qid]; if(cur && typeof cur==="object") delete cur[zoneKey]; }
+    else delete _assessCurrent.responses[qid];
+    scheduleAssessAutosave();
+    updateAssessProgressUI();
+  }
+}
+function paintAssessCanvases(responses){
+  if(!responses) return;
+  document.querySelectorAll(".assess-canvas").forEach(canvas=>{
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+    const qid = canvas.getAttribute("data-qid");
+    const zoneKey = canvas.getAttribute("data-zone")||"";
+    let val = responses[qid];
+    if(zoneKey && val && typeof val==="object") val = val[zoneKey];
+    if(val && typeof val==="string" && val.indexOf("data:image")===0){
+      const img = new Image();
+      img.onload = ()=>{ ctx.drawImage(img,0,0,canvas.width,canvas.height); };
+      img.src = val;
+    }
+  });
+}
+function initAssessCanvases(){ if(_assessCurrent) paintAssessCanvases(_assessCurrent.responses); }
+function initAdminAssessCanvases(){ if(_adminAssessReviewing) paintAssessCanvases(_adminAssessReviewing.responses); }
+function assessTextInput(el, qid){
+  if(!_assessCurrent) return;
+  _assessCurrent.responses[qid] = el.value;
+  scheduleAssessAutosave();
+  updateAssessProgressUI();
+}
+
+/* ---- Rendering ---- */
+function renderAssessments(){
+  if(!state.profile.cloudSession){
+    return topbarHtml("📋 Assessments","Assigned by your Empowerment Specialist")+
+      emptyState("🔒","Sign in to see your assessments","Assessments are tied to your account so your specialist can assign, track, and review them.")+
+      '<button class="btn block" style="margin-top:14px;" data-action="openAccountForm" data-v="signup">Set up your account</button>'+
+      '<button class="btn secondary block" style="margin-top:10px;" data-action="openAccountForm" data-v="login">I already have an account — Log in</button>';
+  }
+  if(_assessView.mode==="take" && _assessCurrent) return renderAssessTake();
+  return renderAssessList();
+}
+function renderAssessList(){
+  let html = topbarHtml("📋 Assessments","Assigned by your Empowerment Specialist");
+  if(_assessCache===null){
+    loadAssessAssignments().then(list=>{ _assessCache = list; render(); });
+    return html + '<div class="empty card"><div class="big">⏳</div>Loading your assessments…</div>';
+  }
+  if(!_assessCache.length){
+    return html + emptyState("📋","No assessments assigned yet","Once your specialist assigns one, it'll show up here.")+
+      '<button class="btn secondary block" style="margin-top:14px;" data-action="refreshAssessList">↻ Refresh</button>';
+  }
+  const oc = assessOverallCounts();
+  html += '<div class="assess-overall-card"><div style="font-weight:800;font-size:13.5px;margin-bottom:6px;">Overall Progress</div>'+
+    '<div class="progress-bar"><div style="width:'+oc.pct+'%;"></div></div>'+
+    '<div style="font-size:12px;margin-top:6px;opacity:.9;">'+oc.answered+' of '+oc.total+' questions answered ('+oc.pct+'%)</div></div>';
+  html += _assessCache.map(row=>{
+    const tmpl = row.template || {};
+    const c = assessCountsForTemplateResponses(tmpl, row.responses||{});
+    const pct = c.total ? Math.round(c.answered/c.total*100) : 0;
+    const status = row.status || "not_started";
+    const statusLabel = status==="submitted" ? "Submitted" : (status==="in_progress" ? "In progress" : "Not started");
+    const btnLabel = status==="submitted" ? "Review" : (status==="in_progress" ? "Continue" : "Start");
+    return '<div class="habit-card" style="align-items:flex-start;">'+
+      '<div class="emoji-badge" style="background:var(--surface-2);">📋</div>'+
+      '<div class="hc-body" style="flex:1;">'+
+      '<div class="hc-title">'+escapeHtml(tmpl.title||"Assessment")+' <span class="assess-status-pill '+status+'">'+statusLabel+'</span></div>'+
+      (tmpl.description?'<div class="hc-meta">'+escapeHtml(tmpl.description)+'</div>':'')+
+      '<div class="progress-bar" style="margin-top:8px;"><div style="width:'+pct+'%;"></div></div>'+
+      '<div class="hc-meta" style="margin-top:4px;">'+c.answered+' of '+c.total+' answered</div>'+
+      '</div>'+
+      '<button class="btn secondary sm" data-action="assessOpenTake" data-id="'+tmpl.id+'">'+btnLabel+' ›</button>'+
+      '</div>';
+  }).join("");
+  html += '<button class="btn secondary block" style="margin-top:10px;" data-action="refreshAssessList">↻ Refresh</button>';
+  return html;
+}
+function assessQuestionHtml(si, qi, q, responses, readonly){
+  const qid = "s"+si+"_q"+qi;
+  const val = responses[qid];
+  if(q.type==="info"){
+    return '<div class="assess-info-card">☕ '+escapeHtml(q.prompt||"")+'</div>';
+  }
+  let inner = "";
+  if(q.type==="single_choice"){
+    inner = '<div class="assess-opts">'+(q.options||[]).map((opt,oi)=>{
+      const label = typeof opt==="string" ? opt : (opt.label||"");
+      const sub = (typeof opt==="object" && opt && opt.sub) ? '<div style="font-size:11.5px;font-weight:500;color:var(--text-muted);margin-top:2px;">'+escapeHtml(opt.sub)+'</div>' : "";
+      const sel = val===oi;
+      const tag = readonly ? "div" : "button";
+      const attrs = readonly ? "" : ' data-action="assessPick" data-id="'+qid+'" data-v="'+oi+'"';
+      return '<'+tag+' type="button" class="assess-opt'+(sel?" selected":"")+(readonly?" readonly":"")+'"'+attrs+'>'+escapeHtml(label)+sub+'</'+tag+'>';
+    }).join("")+'</div>';
+  } else if(q.type==="versus"){
+    const opts = q.options||["",""];
+    const tag = readonly ? "div" : "button";
+    inner = '<div class="assess-vs-row">'+
+      [0,1].map(oi=>{
+        const sel = val===oi;
+        const attrs = readonly ? "" : ' data-action="assessPick" data-id="'+qid+'" data-v="'+oi+'"';
+        return '<'+tag+' type="button" class="assess-opt'+(sel?" selected":"")+(readonly?" readonly":"")+'"'+attrs+'>'+escapeHtml(opts[oi]||"")+'</'+tag+'>';
+      }).join('<div class="assess-vs-divider">VS</div>')+
+      '</div>';
+  } else if(q.type==="checklist"){
+    const arr = Array.isArray(val) ? val : [];
+    inner = (q.options||[]).map((opt,oi)=>{
+      const sel = arr.indexOf(oi)>-1;
+      const attrs = readonly ? "" : ' data-action="assessToggleCheck" data-id="'+qid+'" data-v="'+oi+'"';
+      return '<div class="assess-check-row'+(sel?" selected":"")+'"'+attrs+'><div class="assess-check-box">'+(sel?"✓":"")+'</div><div style="font-size:13px;flex:1;">'+escapeHtml(opt)+'</div></div>';
+    }).join("");
+  } else if(q.type==="text"){
+    const escVal = escapeHtml(val||"");
+    const disAttr = readonly ? " readonly" : "";
+    if(q.multiline){
+      inner = '<textarea style="width:100%;min-height:90px;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' oninput="assessTextInput(this,\''+qid+'\')" placeholder="Type your answer…">'+escVal+'</textarea>';
+    } else {
+      inner = '<input type="text" style="width:100%;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' value="'+escVal+'" oninput="assessTextInput(this,\''+qid+'\')" placeholder="Type your answer…">';
+    }
+  } else if(q.type==="drawing"){
+    const zones = (q.zones && q.zones.length) ? q.zones : [null];
+    inner = zones.map((z,zi)=>{
+      const zoneKey = z||"";
+      const canvasId = "dcv_"+qid+"_"+zi;
+      const clearBtn = readonly ? "" : '<button type="button" class="assess-canvas-clear" data-action="assessClearDrawing" data-id="'+canvasId+'" data-qid="'+qid+'" data-zone="'+escapeHtml(zoneKey)+'">Clear</button>';
+      const ptrAttrs = readonly ? " readonly" :
+        ' onpointerdown="assessDrawStart(event,this)" onpointermove="assessDrawMove(event,this)" onpointerup="assessDrawEnd(event,this)" onpointerleave="assessDrawEnd(event,this)" onpointercancel="assessDrawEnd(event,this)"';
+      return (z?'<div class="assess-zone-label">'+escapeHtml(z)+'</div>':"")+
+        '<div class="assess-canvas-wrap">'+clearBtn+
+        '<canvas id="'+canvasId+'" class="assess-canvas" width="600" height="260" data-qid="'+qid+'" data-zone="'+escapeHtml(zoneKey)+'"'+ptrAttrs+'></canvas>'+
+        '</div>';
+    }).join("");
+  }
+  return '<div class="assess-q-card">'+(q.prompt?'<div class="assess-q-prompt">'+escapeHtml(q.prompt)+'</div>':"")+inner+'</div>';
+}
+function renderAssessTake(){
+  const c = _assessCurrent;
+  const tmpl = c.template;
+  const readonly = c.status==="submitted";
+  const counts = assessCountsForTemplateResponses(tmpl, c.responses);
+  const pct = counts.total ? Math.round(counts.answered/counts.total*100) : 0;
+  const oc = assessOverallCounts();
+  const submittedLabel = c.submittedAt ? (" "+fmtDatePretty(c.submittedAt.slice(0,10))) : "";
+  let html = '<div class="topbar"><div><h1>'+escapeHtml(tmpl.title||"Assessment")+'</h1>'+
+    (tmpl.description?'<p class="subtitle" style="margin:2px 0 0">'+escapeHtml(tmpl.description)+'</p>':"")+'</div>'+
+    '<button class="btn secondary sm" data-action="assessBackToList">‹ Back</button></div>';
+  html += '<div class="card" style="margin-bottom:14px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:800;color:var(--text-muted);"><span id="assessSelfBarTxt">'+counts.answered+' of '+counts.total+' answered ('+pct+'%)</span>'+
+    (readonly?'<span class="assess-status-pill submitted">Submitted'+submittedLabel+'</span>':"")+'</div>'+
+    '<div class="progress-bar" style="margin-top:6px;"><div id="assessSelfBar" style="width:'+pct+'%;"></div></div>'+
+    '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;" id="assessOverallBarTakeTxt">Overall: '+oc.answered+' of '+oc.total+' ('+oc.pct+'%)</div>'+
+    '<div class="progress-bar" style="margin-top:4px;height:6px;"><div id="assessOverallBarTake" style="width:'+oc.pct+'%;"></div></div>'+
+    '</div>';
+  (tmpl.sections||[]).forEach((sec,si)=>{
+    html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
+    if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
+    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,c.responses,readonly); });
+  });
+  if(!readonly){
+    html += '<div class="assess-sticky-bar"><div id="assessSaveIndicator" class="assess-save-indicator">Autosaves as you go</div>'+
+      '<button class="btn block" data-action="assessSubmit">✅ Submit Assessment</button></div>';
+  } else {
+    html += '<button class="btn secondary block" style="margin-top:10px;" data-action="assessBackToList">‹ Back to Assessments</button>';
+  }
+  return html;
 }
 
 function bootApp(){
@@ -1225,6 +1833,7 @@ const ROUTES = [
   {path:"habits", label:"Habits", icon:"✅"},
   {path:"goals", label:"Goals", icon:"🎯"},
   {path:"planner", label:"Planner", icon:"🗓️"},
+  {path:"assessments", label:"Assessments", icon:"📋"},
   {path:"reminders", label:"Alerts", icon:"⏰"},
   {path:"progress", label:"Progress", icon:"📈"},
   {path:"focus", label:"Focus", icon:"🧘"},
@@ -1331,6 +1940,7 @@ function render(){
   else if(route==="habits") body = renderHabits();
   else if(route==="goals") body = renderGoals();
   else if(route==="planner") body = renderPlanner();
+  else if(route==="assessments") body = renderAssessments();
   else if(route==="reminders") body = renderReminders();
   else if(route==="progress") body = renderProgress();
   else if(route==="focus") body = renderFocus();
@@ -1349,6 +1959,8 @@ function render(){
     const activeF = state.focusSessions.find(s=>s.status==="active");
     if(activeF) startFocusTicker(activeF);
   }
+  if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
+  if(route==="admin" && _adminAssessReviewing) initAdminAssessCanvases();
 }
 
 /* ============ Onboarding ============ */
@@ -3464,7 +4076,9 @@ document.addEventListener("click", async function(e){
           applySession(json);
           const flags = await acctFetchProfileFlags();
           state.profile.isCloudAdmin = !!(flags && flags.is_admin);
-          saveState(); closeModal(); render();
+          saveState(); closeModal();
+          _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+          render();
           toast("Account created — signed in!");
         } else {
           closeModal();
@@ -3482,7 +4096,9 @@ document.addEventListener("click", async function(e){
         applySession(json);
         const flags = await acctFetchProfileFlags();
         state.profile.isCloudAdmin = !!(flags && flags.is_admin);
-        saveState(); closeModal(); render();
+        saveState(); closeModal();
+        _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+        render();
         toast("Logged in!");
       }catch(err){ toast(err.message); }
       break;
@@ -3492,7 +4108,9 @@ document.addEventListener("click", async function(e){
       state.profile.isCloudAdmin = false;
       state.profile.cloudSyncEnabled = false;
       saveState();
-      if(currentRoute()==="admin") location.hash = "#/home";
+      _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+      _adminAssessClient = null; _adminAssessTemplates = null; _adminAssessRows = null; _adminAssessReviewing = null;
+      if(currentRoute()==="admin" || currentRoute()==="assessments") location.hash = "#/home";
       render();
       toast("Logged out");
       break;
@@ -3509,6 +4127,51 @@ document.addEventListener("click", async function(e){
     case "openAsClient": await openAsClient(id); break;
     case "saveExitClientView": await saveAndExitClientView(); break;
     case "discardExitClientView": exitClientView("Discarded changes"); break;
+    case "openAdminAssessManage": openAdminAssessManage(id, v); break;
+    case "adminBackToClientList": adminBackToClientList(); break;
+    case "adminToggleAssessEnabled": await adminToggleAssessEnabled(id); break;
+    case "openAdminAssessReview": await openAdminAssessReview(id); break;
+    case "adminBackToAssessManage": adminBackToAssessManage(); break;
+    case "openAdminScoring": openAdminScoring(id); break;
+    case "saveAdminScore": await saveAdminScore(id); break;
+    case "printReviewedAssessment": {
+      const r = _adminAssessReviewing;
+      if(r) printAssessment(_adminAssessClient?_adminAssessClient.name:"", r.template, r.responses, r.status, r.submittedAt, r.score);
+      break;
+    }
+
+    case "assessOpenTake": openAssessmentTake(id); break;
+    case "assessBackToList": assessBackToList(); break;
+    case "refreshAssessList": _assessCache = null; render(); break;
+    case "assessPick": {
+      if(!_assessCurrent) break;
+      _assessCurrent.responses[id] = Number(v);
+      document.querySelectorAll('[data-action="assessPick"][data-id="'+id+'"]').forEach(el=>el.classList.toggle("selected", el===t));
+      scheduleAssessAutosave();
+      updateAssessProgressUI();
+      break;
+    }
+    case "assessToggleCheck": {
+      if(!_assessCurrent) break;
+      const oi = Number(v);
+      let arr = Array.isArray(_assessCurrent.responses[id]) ? _assessCurrent.responses[id].slice() : [];
+      const pos = arr.indexOf(oi);
+      if(pos>-1) arr.splice(pos,1); else arr.push(oi);
+      _assessCurrent.responses[id] = arr;
+      t.classList.toggle("selected");
+      const box = t.querySelector(".assess-check-box");
+      if(box) box.textContent = arr.indexOf(oi)>-1 ? "✓" : "";
+      scheduleAssessAutosave();
+      updateAssessProgressUI();
+      break;
+    }
+    case "assessClearDrawing": {
+      const qid2 = t.getAttribute("data-qid");
+      const zone2 = t.getAttribute("data-zone")||"";
+      clearAssessDrawing(id, qid2, zone2);
+      break;
+    }
+    case "assessSubmit": await assessSubmitCurrent(); break;
 
     case "setTheme": state.profile.theme=v; saveState(); render(); break;
     case "pickAccent": state.profile.accent=v; saveState(); render(); break;
