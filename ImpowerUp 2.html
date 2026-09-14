@@ -840,6 +840,7 @@ async function loadAdminClientList(){
 }
 function renderAdmin(){
   if(!state.profile.isCloudAdmin) return renderHome();
+  if(_adminInterviewCurrent) return renderAdminInterviewTake();
   if(_adminAssessHub) return renderAdminAssessHub();
   if(_adminAssessClient) return renderAdminAssessManage();
   if(adminClientList===null){
@@ -890,6 +891,70 @@ async function openAdminAssessPreview(templateId){
     render();
   }catch(e){ toast("Couldn't load that assessment"); }
 }
+async function openAdminAssessEdit(templateId){
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?id=eq."+encodeURIComponent(templateId)+"&select=id,title,description,sections", {headers: acctHeaders(true)});
+    const rows = res.ok ? await res.json() : [];
+    const template = rows[0];
+    if(!template){ toast("Couldn't load that assessment"); return; }
+    _adminAssessHub = {mode:"edit", template};
+    render();
+  }catch(e){ toast("Couldn't load that assessment"); }
+}
+function buildEditedSectionsFromForm(template){
+  return (template.sections||[]).map((sec,si)=>{
+    const titleEl = document.getElementById("edt_sec_"+si+"_title");
+    const instrEl = document.getElementById("edt_sec_"+si+"_instr");
+    return {
+      title: titleEl ? titleEl.value : (sec.title||""),
+      instructions: instrEl ? instrEl.value : (sec.instructions||""),
+      questions: (sec.questions||[]).map((q,qi)=>{
+        const newQ = Object.assign({}, q);
+        const promptEl = document.getElementById("edt_q_"+si+"_"+qi+"_prompt");
+        if(promptEl) newQ.prompt = promptEl.value;
+        if(q.options){
+          newQ.options = q.options.map((opt,oi)=>{
+            const el = document.getElementById("edt_q_"+si+"_"+qi+"_opt_"+oi);
+            const val = el ? el.value : (typeof opt==="string" ? opt : ((opt&&opt.label)||""));
+            return (typeof opt==="object" && opt) ? Object.assign({}, opt, {label: val}) : val;
+          });
+        }
+        if(q.zones){
+          newQ.zones = q.zones.map((z,zi)=>{
+            const el = document.getElementById("edt_q_"+si+"_"+qi+"_zone_"+zi);
+            return el ? el.value : (z||"");
+          });
+        }
+        return newQ;
+      })
+    };
+  });
+}
+async function saveAdminAssessTemplateEdits(templateId){
+  const hub = _adminAssessHub;
+  if(!hub || hub.mode!=="edit" || !hub.template) return;
+  const titleEl = document.getElementById("edt_title");
+  const title = titleEl ? titleEl.value.trim() : "";
+  if(!title){ toast("Title can't be empty"); return; }
+  if(!confirm("Save these wording changes? They'll apply immediately to every client using this assessment.")) return;
+  const descEl = document.getElementById("edt_desc");
+  const description = descEl ? descEl.value.trim() : "";
+  const sections = buildEditedSectionsFromForm(hub.template);
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?id=eq."+encodeURIComponent(templateId), {
+      method:"PATCH",
+      headers: Object.assign(acctHeaders(true), {Prefer:"return=minimal"}),
+      body: JSON.stringify({ title, description, sections, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok){ toast("Couldn't save — check your connection"); return; }
+    _adminAssessTemplates = null; // refresh cached list so titles/descriptions everywhere pick up the change
+    _adminAssessHub = {mode:"templates"};
+    render();
+    toast("Saved — updated for every client");
+  }catch(e){ toast("Couldn't save — check your connection"); }
+}
 async function loadAdminAssessCompletion(templateId){
   if(!(await ensureFreshSession())) return [];
   try{
@@ -932,6 +997,39 @@ function renderAdminAssessPreviewBody(template){
   });
   return html;
 }
+function edtFieldHtml(id, value, multiline, extraStyle){
+  const style = 'width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px;font-size:13px;background:var(--surface);color:var(--text);'+(extraStyle||"");
+  return multiline
+    ? '<textarea id="'+id+'" style="'+style+'min-height:50px;">'+escapeHtml(value||"")+'</textarea>'
+    : '<input type="text" id="'+id+'" value="'+escapeHtml(value||"")+'" style="'+style+'">';
+}
+function renderAdminAssessEditBody(template){
+  let html = '<div class="assess-info-card">✏️ Editing wording only — the number and order of sections/questions/options stays the same, so existing client answers stay correctly linked. Changes save to this assessment for everyone assigned it.</div>';
+  html += '<div class="field"><label>Title</label>'+edtFieldHtml("edt_title", template.title, false)+'</div>';
+  html += '<div class="field"><label>Description</label>'+edtFieldHtml("edt_desc", template.description, true)+'</div>';
+  (template.sections||[]).forEach((sec,si)=>{
+    html += '<div class="card" style="margin-bottom:14px;">';
+    html += '<div class="field"><label>Section '+(si+1)+' title</label>'+edtFieldHtml("edt_sec_"+si+"_title", sec.title, false)+'</div>';
+    html += '<div class="field" style="margin-bottom:0;"><label>Section instructions (optional)</label>'+edtFieldHtml("edt_sec_"+si+"_instr", sec.instructions, true)+'</div>';
+    (sec.questions||[]).forEach((q,qi)=>{
+      html += '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:12px;">';
+      html += '<div class="field" style="margin-bottom:8px;"><label style="font-size:11px;">'+(q.type==="info"?"Message text":"Question wording")+'</label>'+edtFieldHtml("edt_q_"+si+"_"+qi+"_prompt", q.prompt, true)+'</div>';
+      if(q.options && q.options.length){
+        html += q.options.map((opt,oi)=>{
+          const val = typeof opt==="string" ? opt : ((opt&&opt.label)||"");
+          return '<div class="field" style="margin-bottom:6px;"><label style="font-size:11px;">Option '+(oi+1)+'</label>'+edtFieldHtml("edt_q_"+si+"_"+qi+"_opt_"+oi, val, false)+'</div>';
+        }).join("");
+      }
+      if(q.zones && q.zones.length){
+        html += q.zones.map((z,zi)=>'<div class="field" style="margin-bottom:6px;"><label style="font-size:11px;">Drawing zone '+(zi+1)+' label</label>'+edtFieldHtml("edt_q_"+si+"_"+qi+"_zone_"+zi, z, false)+'</div>').join("");
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  html += '<div class="assess-sticky-bar"><button class="btn block" data-action="saveAdminAssessTemplateEdits" data-id="'+template.id+'">💾 Save Changes</button></div>';
+  return html;
+}
 function renderAdminAssessCompletionBody(template, rows){
   if(rows===null) return '<div class="empty card"><div class="big">⏳</div>Loading…</div>';
   if(!rows.length) return emptyState("👥","No clients yet","Once someone signs up, they'll show up here.");
@@ -965,24 +1063,186 @@ function renderAdminAssessHub(){
   const backAction = isSub ? "adminAssessHubBackToTemplates" : "closeAdminAssessHub";
   const backLabel = isSub ? "‹ All Assessments" : "‹ Clients";
   const title = isSub ? ((hub.template&&hub.template.title)||"Assessment") : "All Assessments";
-  const subtitle = hub.mode==="preview" ? "Preview — exactly what clients see (read-only)." : (hub.mode==="completion" ? "Who has completed this, and when." : "Preview a template or see who has completed it.");
+  const subtitle = hub.mode==="preview" ? "Preview — exactly what clients see (read-only)." : (hub.mode==="completion" ? "Who has completed this, and when." : (hub.mode==="edit" ? "Edit wording — changes apply immediately to every client using this assessment." : "Preview, edit wording, or see who has completed it."));
   let html = '<div class="topbar"><div><h1>📋 '+escapeHtml(title)+'</h1><p class="subtitle" style="margin:2px 0 0">'+subtitle+'</p></div>'+
     '<button class="btn secondary sm" data-action="'+backAction+'">'+backLabel+'</button></div>';
   if(hub.mode==="preview") return html + renderAdminAssessPreviewBody(hub.template);
   if(hub.mode==="completion") return html + renderAdminAssessCompletionBody(hub.template, hub.rows);
+  if(hub.mode==="edit") return html + renderAdminAssessEditBody(hub.template);
   if(_adminAssessTemplates===null){
     loadAdminAssessTemplates().then(list=>{ _adminAssessTemplates = list; render(); });
     return html + '<div class="empty card"><div class="big">⏳</div>Loading…</div>';
   }
   if(!_adminAssessTemplates.length) return html + emptyState("📋","No assessment templates yet","Templates are seeded on the backend.");
   html += _adminAssessTemplates.map(t=>'<div class="habit-card" style="align-items:flex-start;">'+
-    '<div class="emoji-badge" style="background:var(--surface-2);">📋</div>'+
-    '<div class="hc-body" style="flex:1;"><div class="hc-title">'+escapeHtml(t.title)+'</div>'+
+    '<div class="emoji-badge" style="background:var(--surface-2);">'+(ADMIN_ONLY_ASSESSMENT_IDS.indexOf(t.id)>-1?"📝":"📋")+'</div>'+
+    '<div class="hc-body" style="flex:1;"><div class="hc-title">'+escapeHtml(t.title)+(ADMIN_ONLY_ASSESSMENT_IDS.indexOf(t.id)>-1?' <span class="tag">🔒 Admin only</span>':'')+'</div>'+
     (t.description?'<div class="hc-meta">'+escapeHtml(t.description)+'</div>':"")+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
     '<button class="btn secondary sm" data-action="openAdminAssessPreview" data-id="'+t.id+'">👁 Preview</button>'+
+    '<button class="btn secondary sm" data-action="openAdminAssessEdit" data-id="'+t.id+'">✏️ Edit wording</button>'+
     '<button class="btn secondary sm" data-action="openAdminAssessCompletion" data-id="'+t.id+'">✅ Completion</button>'+
     '</div></div></div>').join("");
+  return html;
+}
+
+/* ---- Admin-only "Client Interview" — Leanna fills this out herself, per client ---- */
+let _adminInterviewCurrent = null;   // {templateId, template, responses, status, submittedAt, clientId, clientName}
+let _adminInterviewSaveTimer = null;
+let _adminInterviewDrawActive = false;
+
+async function openAdminFillInterview(templateId){
+  if(!_adminAssessClient){ toast("Pick a client first"); return; }
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?id=eq."+encodeURIComponent(templateId)+"&select=id,title,description,sections", {headers: acctHeaders(true)});
+    const rows = res.ok ? await res.json() : [];
+    const template = rows[0];
+    if(!template){ toast("Couldn't load that assessment"); return; }
+    const existingRow = (_adminAssessRows||{})[templateId];
+    _adminInterviewCurrent = {
+      templateId, template,
+      responses: JSON.parse(JSON.stringify((existingRow&&existingRow.responses)||{})),
+      status: (existingRow&&existingRow.status)||"not_started",
+      submittedAt: (existingRow&&existingRow.submitted_at)||null,
+      clientId: _adminAssessClient.id, clientName: _adminAssessClient.name
+    };
+    render();
+  }catch(e){ toast("Couldn't load that assessment"); }
+}
+function adminInterviewBackToManage(){
+  if(_adminInterviewCurrent && _adminInterviewCurrent.status!=="submitted"){
+    clearTimeout(_adminInterviewSaveTimer);
+    saveAdminInterviewAssignment();
+  }
+  _adminInterviewCurrent = null;
+  render();
+}
+function updateAdminInterviewProgressUI(){
+  if(!_adminInterviewCurrent) return;
+  const c = assessCountsForTemplateResponses(_adminInterviewCurrent.template, _adminInterviewCurrent.responses);
+  const pct = c.total ? Math.round(c.answered/c.total*100) : 0;
+  const bar = document.getElementById("adminInterviewBar"); if(bar) bar.style.width = pct+"%";
+  const txt = document.getElementById("adminInterviewBarTxt"); if(txt) txt.textContent = c.answered+" of "+c.total+" answered ("+pct+"%)";
+}
+function scheduleAdminInterviewAutosave(){
+  const ind = document.getElementById("adminInterviewSaveIndicator"); if(ind) ind.textContent = "Saving…";
+  clearTimeout(_adminInterviewSaveTimer);
+  _adminInterviewSaveTimer = setTimeout(()=>{ saveAdminInterviewAssignment(); }, 1100);
+}
+async function saveAdminInterviewAssignment(statusOverride){
+  if(!_adminInterviewCurrent) return false;
+  if(!(await ensureFreshSession())){
+    const ind = document.getElementById("adminInterviewSaveIndicator"); if(ind) ind.textContent = "Not saved — please log in again";
+    return false;
+  }
+  const c = _adminInterviewCurrent;
+  const newStatus = statusOverride || (c.status==="not_started" ? "in_progress" : c.status);
+  const body = { user_id: c.clientId, template_id: c.templateId, responses: c.responses, status: newStatus, enabled: true, updated_at: new Date().toISOString() };
+  if(statusOverride==="submitted") body.submitted_at = new Date().toISOString();
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?on_conflict=user_id,template_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){ const ind = document.getElementById("adminInterviewSaveIndicator"); if(ind) ind.textContent = "Save failed — check your connection"; return false; }
+    c.status = newStatus;
+    if(body.submitted_at) c.submittedAt = body.submitted_at;
+    if(_adminAssessRows) _adminAssessRows[c.templateId] = Object.assign({}, _adminAssessRows[c.templateId]||{}, {enabled:true, responses:c.responses, status:newStatus, submitted_at: c.submittedAt||null});
+    const ind = document.getElementById("adminInterviewSaveIndicator"); if(ind) ind.textContent = "Saved ✓";
+    return true;
+  }catch(e){ const ind = document.getElementById("adminInterviewSaveIndicator"); if(ind) ind.textContent = "Save failed — check your connection"; return false; }
+}
+async function adminInterviewSubmit(){
+  if(!_adminInterviewCurrent) return;
+  if(assessBlockIncompleteSubmit(_adminInterviewCurrent.template, _adminInterviewCurrent.responses, "adminInterview")) return;
+  if(!confirm("Mark this interview as complete?")) return;
+  clearTimeout(_adminInterviewSaveTimer);
+  const ok = await saveAdminInterviewAssignment("submitted");
+  if(ok){ toast("Interview saved as complete"); render(); } else toast("Couldn't save — check your connection");
+}
+function adminInterviewTextInput(el, qid){
+  if(!_adminInterviewCurrent) return;
+  _adminInterviewCurrent.responses[qid] = el.value;
+  scheduleAdminInterviewAutosave();
+  updateAdminInterviewProgressUI();
+}
+function adminInterviewDrawStart(ev, canvas){
+  if(canvas.hasAttribute("readonly")) return;
+  ev.preventDefault();
+  _adminInterviewDrawActive = true;
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+  const x = (ev.clientX-rect.left)*scaleX, y = (ev.clientY-rect.top)*scaleY;
+  canvas._lastX = x; canvas._lastY = y;
+  ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(x,y,1.3,0,Math.PI*2); ctx.fillStyle = "#1e293b"; ctx.fill();
+}
+function adminInterviewDrawMove(ev, canvas){
+  if(!_adminInterviewDrawActive) return;
+  ev.preventDefault();
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+  const x = (ev.clientX-rect.left)*scaleX, y = (ev.clientY-rect.top)*scaleY;
+  ctx.beginPath(); ctx.moveTo(canvas._lastX, canvas._lastY); ctx.lineTo(x,y); ctx.stroke();
+  canvas._lastX = x; canvas._lastY = y;
+}
+function adminInterviewDrawEnd(ev, canvas){
+  if(!_adminInterviewDrawActive) return;
+  _adminInterviewDrawActive = false;
+  const qid = canvas.getAttribute("data-qid");
+  const zoneKey = canvas.getAttribute("data-zone")||"";
+  captureAdminInterviewDrawing(canvas, qid, zoneKey);
+}
+function captureAdminInterviewDrawing(canvas, qid, zoneKey){
+  if(!_adminInterviewCurrent) return;
+  const dataUrl = canvas.toDataURL("image/png");
+  if(zoneKey){
+    const cur = _adminInterviewCurrent.responses[qid];
+    const obj = (cur && typeof cur==="object" && !Array.isArray(cur)) ? cur : {};
+    obj[zoneKey] = dataUrl;
+    _adminInterviewCurrent.responses[qid] = obj;
+  } else {
+    _adminInterviewCurrent.responses[qid] = dataUrl;
+  }
+  scheduleAdminInterviewAutosave();
+  updateAdminInterviewProgressUI();
+}
+function clearAdminInterviewDrawing(canvasId, qid, zoneKey){
+  const canvas = document.getElementById(canvasId);
+  if(canvas){
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+  if(_adminInterviewCurrent){
+    if(zoneKey){ const cur = _adminInterviewCurrent.responses[qid]; if(cur && typeof cur==="object") delete cur[zoneKey]; }
+    else delete _adminInterviewCurrent.responses[qid];
+    scheduleAdminInterviewAutosave();
+    updateAdminInterviewProgressUI();
+  }
+}
+function initAdminInterviewCanvases(){ if(_adminInterviewCurrent) paintAssessCanvases(_adminInterviewCurrent.responses); }
+function renderAdminInterviewTake(){
+  const c = _adminInterviewCurrent;
+  const tmpl = c.template;
+  const counts = assessCountsForTemplateResponses(tmpl, c.responses);
+  const pct = counts.total ? Math.round(counts.answered/counts.total*100) : 0;
+  let html = '<div class="topbar"><div><h1>📝 '+escapeHtml(tmpl.title||"Interview")+'</h1><p class="subtitle" style="margin:2px 0 0">For '+escapeHtml(c.clientName)+' — admin only, the client never sees this</p></div>'+
+    '<button class="btn secondary sm" data-action="adminInterviewBackToManage">‹ Back</button></div>';
+  html += '<div class="card" style="margin-bottom:14px;">'+
+    '<div style="font-size:12px;font-weight:800;color:var(--text-muted);" id="adminInterviewBarTxt">'+counts.answered+' of '+counts.total+' answered ('+pct+'%)</div>'+
+    '<div class="progress-bar" style="margin-top:6px;"><div id="adminInterviewBar" style="width:'+pct+'%;"></div></div></div>';
+  (tmpl.sections||[]).forEach((sec,si)=>{
+    html += '<div class="section-head"><h2>'+escapeHtml(sec.title||"")+'</h2></div>';
+    if(sec.instructions) html += '<p class="hc-meta" style="margin:-6px 0 10px;">'+escapeHtml(sec.instructions)+'</p>';
+    (sec.questions||[]).forEach((q,qi)=>{ html += assessQuestionHtml(si,qi,q,c.responses,false,"adminInterview"); });
+  });
+  html += '<div class="assess-sticky-bar"><div id="adminInterviewSaveIndicator" class="assess-save-indicator">Autosaves as you go</div>'+
+    '<button class="btn block" data-action="adminInterviewSubmit">✅ Mark Complete</button></div>';
   return html;
 }
 
@@ -1094,10 +1354,22 @@ function renderAdminAssessManage(){
   if(!_adminAssessTemplates.length){ return html + emptyState("📋","No assessment templates yet","Templates are seeded on the backend."); }
   html += _adminAssessTemplates.map(t=>{
     const row = _adminAssessRows[t.id];
-    const enabled = !!(row && row.enabled);
+    const adminOnly = ADMIN_ONLY_ASSESSMENT_IDS.indexOf(t.id)>-1;
     const status = (row && row.status) || "not_started";
     const statusLabel = status==="submitted" ? "Submitted" : (status==="in_progress" ? "In progress" : "Not started");
     const hasScore = !!(row && row.score && row.score.notes);
+    if(adminOnly){
+      return '<div class="habit-card" style="align-items:flex-start;">'+
+        '<div class="emoji-badge" style="background:var(--surface-2);">📝</div>'+
+        '<div class="hc-body" style="flex:1;">'+
+        '<div class="hc-title">'+escapeHtml(t.title)+' <span class="tag">🔒 Admin only</span> <span class="assess-status-pill '+status+'">'+statusLabel+'</span>'+(hasScore?' <span class="tag">Scored</span>':'')+'</div>'+
+        '<div class="hc-meta">You fill this out yourself — the client never sees it.</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
+        '<button class="btn sm" data-action="openAdminFillInterview" data-id="'+t.id+'">📝 '+(row?"Continue":"Fill Out")+'</button>'+
+        (row ? '<button class="btn secondary sm" data-action="openAdminScoring" data-id="'+t.id+'">📝 Score</button>' : '')+
+        '</div></div></div>';
+    }
+    const enabled = !!(row && row.enabled);
     return '<div class="habit-card" style="align-items:flex-start;">'+
       '<div class="emoji-badge" style="background:var(--surface-2);">📋</div>'+
       '<div class="hc-body" style="flex:1;">'+
@@ -1115,6 +1387,10 @@ function assessAnswerDisplay(q, val){
   if(val===undefined || val===null) return {type:"none"};
   if(q.type==="single_choice" || q.type==="versus"){
     if(typeof val!=="number") return {type:"none"};
+    if(q.type==="versus" && val===2){
+      const o0 = (q.options||[])[0]||"", o1 = (q.options||[])[1]||"";
+      return {type:"text", text: "Both relate to me: \""+o0+"\" and \""+o1+"\""};
+    }
     const opt = (q.options||[])[val];
     const label = typeof opt==="string" ? opt : ((opt&&opt.label)||"");
     return label ? {type:"text", text: label} : {type:"none"};
@@ -1205,7 +1481,7 @@ async function openAsClient(clientId){
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
-    _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+    _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
     location.hash = "#/home";
     render();
     toast("Now viewing "+clientName+"'s data");
@@ -1230,18 +1506,37 @@ function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
   state = _adminOwnState; STORE_KEY = _adminOwnKey;
   _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
-  _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+  _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
   location.hash = "#/admin";
   render();
   if(msg) toast(msg);
 }
 
 /* ============ Assessments (client-facing engine) ============ */
+const ADMIN_ONLY_ASSESSMENT_IDS = ["client_interview"]; // filled out by the admin about a client — never shown to clients (also enforced server-side via RLS)
 let _assessCache = null;          // array of assignment rows (each with embedded `template`) for the logged-in user
 let _assessView = {mode:"list"};  // {mode:"list"} or {mode:"take"}
 let _assessCurrent = null;        // {templateId, template, responses, status, submittedAt}
 let _assessSaveTimer = null;
 let _assessDrawActive = false;
+let _hasAnyAssessment = null;     // null=unknown, true/false=known — controls whether the nav tab is shown at all
+let _hasAnyAssessmentLoading = false;
+
+function maybeCheckHasAnyAssessment(){
+  if(_hasAnyAssessmentLoading || _hasAnyAssessment!==null) return;
+  if(!state || !state.profile || !state.profile.cloudSession) return;
+  _hasAnyAssessmentLoading = true;
+  checkHasAnyAssessment().finally(()=>{ _hasAnyAssessmentLoading = false; });
+}
+async function checkHasAnyAssessment(){
+  if(!(await ensureFreshSession())){ _hasAnyAssessment = false; return; }
+  try{
+    const uid = state.profile.cloudSession.user_id;
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?user_id=eq."+uid+"&enabled=eq.true&select=id&limit=1", {headers: acctHeaders(true)});
+    _hasAnyAssessment = res.ok ? (await res.json()).length>0 : false;
+  }catch(e){ _hasAnyAssessment = false; }
+  render();
+}
 
 async function loadAssessAssignments(){
   if(!(await ensureFreshSession())) return [];
@@ -1249,14 +1544,16 @@ async function loadAssessAssignments(){
     const uid = state.profile.cloudSession.user_id;
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_assignments?user_id=eq."+uid+"&enabled=eq.true&select=*,template:assessment_templates(id,title,description,sections)&order=updated_at.desc", {headers: acctHeaders(true)});
     if(!res.ok) return [];
-    return await res.json();
+    const rows = await res.json();
+    return rows.filter(r=>ADMIN_ONLY_ASSESSMENT_IDS.indexOf(r.template_id)===-1); // belt-and-suspenders — RLS already blocks these server-side
   }catch(e){ return []; }
 }
 
 function assessIsAnswered(q, val){
+  // Checklists allow selecting anywhere from none to all of the items — any state (including untouched) is a complete answer.
+  if(q.type==="checklist") return true;
   if(val===undefined || val===null) return false;
   if(q.type==="single_choice" || q.type==="versus") return typeof val==="number";
-  if(q.type==="checklist") return Array.isArray(val) && val.length>0;
   if(q.type==="text") return typeof val==="string" && val.trim().length>0;
   if(q.type==="drawing"){
     if(q.zones && q.zones.length){
@@ -1278,6 +1575,26 @@ function assessCountsForTemplateResponses(template, responses){
     });
   });
   return {answered, total};
+}
+function assessFindFirstUnanswered(template, responses){
+  let found = null;
+  ((template && template.sections)||[]).forEach((sec,si)=>{
+    if(found) return;
+    (sec.questions||[]).forEach((q,qi)=>{
+      if(found || q.type==="info") return;
+      const qid = "s"+si+"_q"+qi;
+      if(!assessIsAnswered(q, responses ? responses[qid] : undefined)) found = qid;
+    });
+  });
+  return found;
+}
+function assessBlockIncompleteSubmit(template, responses, prefix){
+  const missingQid = assessFindFirstUnanswered(template, responses);
+  if(!missingQid) return false;
+  toast("Please answer every question before submitting — jumping to the first one you missed.");
+  const el = document.getElementById("qcard_"+prefix+"_"+missingQid);
+  if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+  return true;
 }
 function assessOverallCounts(){
   let total=0, answered=0;
@@ -1333,6 +1650,7 @@ async function saveAssessAssignment(statusOverride){
 }
 async function assessSubmitCurrent(){
   if(!_assessCurrent) return;
+  if(assessBlockIncompleteSubmit(_assessCurrent.template, _assessCurrent.responses, "assess")) return;
   if(!confirm("Submit this assessment? You'll still be able to review your answers afterward, but they'll be marked complete.")) return;
   clearTimeout(_assessSaveTimer);
   const ok = await saveAssessAssignment("submitted");
@@ -1490,7 +1808,8 @@ function renderAssessList(){
   html += '<button class="btn secondary block" style="margin-top:10px;" data-action="refreshAssessList">↻ Refresh</button>';
   return html;
 }
-function assessQuestionHtml(si, qi, q, responses, readonly){
+function assessQuestionHtml(si, qi, q, responses, readonly, prefix){
+  prefix = prefix || "assess";
   const qid = "s"+si+"_q"+qi;
   const val = responses[qid];
   if(q.type==="info"){
@@ -1503,7 +1822,7 @@ function assessQuestionHtml(si, qi, q, responses, readonly){
       const sub = (typeof opt==="object" && opt && opt.sub) ? '<div style="font-size:11.5px;font-weight:500;color:var(--text-muted);margin-top:2px;">'+escapeHtml(opt.sub)+'</div>' : "";
       const sel = val===oi;
       const tag = readonly ? "div" : "button";
-      const attrs = readonly ? "" : ' data-action="assessPick" data-id="'+qid+'" data-v="'+oi+'"';
+      const attrs = readonly ? "" : ' data-action="'+prefix+'Pick" data-id="'+qid+'" data-v="'+oi+'"';
       return '<'+tag+' type="button" class="assess-opt'+(sel?" selected":"")+(readonly?" readonly":"")+'"'+attrs+'>'+escapeHtml(label)+sub+'</'+tag+'>';
     }).join("")+'</div>';
   } else if(q.type==="versus"){
@@ -1512,40 +1831,45 @@ function assessQuestionHtml(si, qi, q, responses, readonly){
     inner = '<div class="assess-vs-row">'+
       [0,1].map(oi=>{
         const sel = val===oi;
-        const attrs = readonly ? "" : ' data-action="assessPick" data-id="'+qid+'" data-v="'+oi+'"';
+        const attrs = readonly ? "" : ' data-action="'+prefix+'Pick" data-id="'+qid+'" data-v="'+oi+'"';
         return '<'+tag+' type="button" class="assess-opt'+(sel?" selected":"")+(readonly?" readonly":"")+'"'+attrs+'>'+escapeHtml(opts[oi]||"")+'</'+tag+'>';
       }).join('<div class="assess-vs-divider">VS</div>')+
       '</div>';
+    inner += (()=>{
+      const sel = val===2;
+      const attrs = readonly ? "" : ' data-action="'+prefix+'Pick" data-id="'+qid+'" data-v="2"';
+      return '<'+tag+' type="button" class="assess-opt'+(sel?" selected":"")+(readonly?" readonly":"")+'" style="margin-top:8px;text-align:center;"'+attrs+'>🤝 Both relate to me</'+tag+'>';
+    })();
   } else if(q.type==="checklist"){
     const arr = Array.isArray(val) ? val : [];
     inner = (q.options||[]).map((opt,oi)=>{
       const sel = arr.indexOf(oi)>-1;
-      const attrs = readonly ? "" : ' data-action="assessToggleCheck" data-id="'+qid+'" data-v="'+oi+'"';
+      const attrs = readonly ? "" : ' data-action="'+prefix+'ToggleCheck" data-id="'+qid+'" data-v="'+oi+'"';
       return '<div class="assess-check-row'+(sel?" selected":"")+'"'+attrs+'><div class="assess-check-box">'+(sel?"✓":"")+'</div><div style="font-size:13px;flex:1;">'+escapeHtml(opt)+'</div></div>';
     }).join("");
   } else if(q.type==="text"){
     const escVal = escapeHtml(val||"");
     const disAttr = readonly ? " readonly" : "";
     if(q.multiline){
-      inner = '<textarea style="width:100%;min-height:90px;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' oninput="assessTextInput(this,\''+qid+'\')" placeholder="Type your answer…">'+escVal+'</textarea>';
+      inner = '<textarea style="width:100%;min-height:90px;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' oninput="'+prefix+'TextInput(this,\''+qid+'\')" placeholder="Type your answer…">'+escVal+'</textarea>';
     } else {
-      inner = '<input type="text" style="width:100%;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' value="'+escVal+'" oninput="assessTextInput(this,\''+qid+'\')" placeholder="Type your answer…">';
+      inner = '<input type="text" style="width:100%;border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13.5px;background:var(--surface);color:var(--text);'+(readonly?"opacity:.75;":"")+'"'+disAttr+' value="'+escVal+'" oninput="'+prefix+'TextInput(this,\''+qid+'\')" placeholder="Type your answer…">';
     }
   } else if(q.type==="drawing"){
     const zones = (q.zones && q.zones.length) ? q.zones : [null];
     inner = zones.map((z,zi)=>{
       const zoneKey = z||"";
       const canvasId = "dcv_"+qid+"_"+zi;
-      const clearBtn = readonly ? "" : '<button type="button" class="assess-canvas-clear" data-action="assessClearDrawing" data-id="'+canvasId+'" data-qid="'+qid+'" data-zone="'+escapeHtml(zoneKey)+'">Clear</button>';
+      const clearBtn = readonly ? "" : '<button type="button" class="assess-canvas-clear" data-action="'+prefix+'ClearDrawing" data-id="'+canvasId+'" data-qid="'+qid+'" data-zone="'+escapeHtml(zoneKey)+'">Clear</button>';
       const ptrAttrs = readonly ? " readonly" :
-        ' onpointerdown="assessDrawStart(event,this)" onpointermove="assessDrawMove(event,this)" onpointerup="assessDrawEnd(event,this)" onpointerleave="assessDrawEnd(event,this)" onpointercancel="assessDrawEnd(event,this)"';
+        ' onpointerdown="'+prefix+'DrawStart(event,this)" onpointermove="'+prefix+'DrawMove(event,this)" onpointerup="'+prefix+'DrawEnd(event,this)" onpointerleave="'+prefix+'DrawEnd(event,this)" onpointercancel="'+prefix+'DrawEnd(event,this)"';
       return (z?'<div class="assess-zone-label">'+escapeHtml(z)+'</div>':"")+
         '<div class="assess-canvas-wrap">'+clearBtn+
         '<canvas id="'+canvasId+'" class="assess-canvas" width="600" height="260" data-qid="'+qid+'" data-zone="'+escapeHtml(zoneKey)+'"'+ptrAttrs+'></canvas>'+
         '</div>';
     }).join("");
   }
-  return '<div class="assess-q-card">'+(q.prompt?'<div class="assess-q-prompt">'+escapeHtml(q.prompt)+'</div>':"")+inner+'</div>';
+  return '<div class="assess-q-card" id="qcard_'+prefix+'_'+qid+'">'+(q.prompt?'<div class="assess-q-prompt">'+escapeHtml(q.prompt)+'</div>':"")+inner+'</div>';
 }
 function renderAssessTake(){
   const c = _assessCurrent;
@@ -2036,8 +2360,9 @@ if(window.matchMedia){
 
 /* ============ Render dispatcher ============ */
 function navHtml(active){
-  let routeList = ROUTES;
-  if(state && state.profile && state.profile.isCloudAdmin) routeList = ROUTES.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
+  maybeCheckHasAnyAssessment();
+  let routeList = ROUTES.filter(r=>r.path!=="assessments" || active==="assessments" || _hasAnyAssessment===true);
+  if(state && state.profile && state.profile.isCloudAdmin) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
   const items = routeList.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
   return '<nav class="sidebar"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
          '<nav class="bottombar">'+items+'</nav>';
@@ -2083,6 +2408,7 @@ function render(){
   }
   if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
   if(route==="admin" && _adminAssessReviewing) initAdminAssessCanvases();
+  if(route==="admin" && _adminInterviewCurrent) initAdminInterviewCanvases();
 }
 
 /* ============ Onboarding ============ */
@@ -4199,7 +4525,7 @@ document.addEventListener("click", async function(e){
           const flags = await acctFetchProfileFlags();
           state.profile.isCloudAdmin = !!(flags && flags.is_admin);
           saveState(); closeModal();
-          _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+          _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
           render();
           toast("Account created — signed in!");
         } else {
@@ -4219,7 +4545,7 @@ document.addEventListener("click", async function(e){
         const flags = await acctFetchProfileFlags();
         state.profile.isCloudAdmin = !!(flags && flags.is_admin);
         saveState(); closeModal();
-        _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
+        _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
         render();
         toast("Logged in!");
       }catch(err){ toast(err.message); }
@@ -4230,8 +4556,8 @@ document.addEventListener("click", async function(e){
       state.profile.isCloudAdmin = false;
       state.profile.cloudSyncEnabled = false;
       saveState();
-      _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null;
-      _adminAssessClient = null; _adminAssessTemplates = null; _adminAssessRows = null; _adminAssessReviewing = null; _adminAssessHub = null;
+      _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
+      _adminAssessClient = null; _adminAssessTemplates = null; _adminAssessRows = null; _adminAssessReviewing = null; _adminAssessHub = null; _adminInterviewCurrent = null;
       if(currentRoute()==="admin" || currentRoute()==="assessments") location.hash = "#/home";
       render();
       toast("Logged out");
@@ -4255,8 +4581,41 @@ document.addEventListener("click", async function(e){
     case "closeAdminAssessHub": closeAdminAssessHub(); break;
     case "adminAssessHubBackToTemplates": adminAssessHubBackToTemplates(); break;
     case "openAdminAssessPreview": await openAdminAssessPreview(id); break;
+    case "openAdminAssessEdit": await openAdminAssessEdit(id); break;
+    case "saveAdminAssessTemplateEdits": await saveAdminAssessTemplateEdits(id); break;
     case "openAdminAssessCompletion": await openAdminAssessCompletion(id); break;
     case "openAdminAssessCompletionReview": await openAdminAssessCompletionReview(id, v); break;
+    case "openAdminFillInterview": await openAdminFillInterview(id); break;
+    case "adminInterviewBackToManage": adminInterviewBackToManage(); break;
+    case "adminInterviewSubmit": await adminInterviewSubmit(); break;
+    case "adminInterviewPick": {
+      if(!_adminInterviewCurrent) break;
+      _adminInterviewCurrent.responses[id] = Number(v);
+      document.querySelectorAll('[data-action="adminInterviewPick"][data-id="'+id+'"]').forEach(el=>el.classList.toggle("selected", el===t));
+      scheduleAdminInterviewAutosave();
+      updateAdminInterviewProgressUI();
+      break;
+    }
+    case "adminInterviewToggleCheck": {
+      if(!_adminInterviewCurrent) break;
+      const oi = Number(v);
+      let arr = Array.isArray(_adminInterviewCurrent.responses[id]) ? _adminInterviewCurrent.responses[id].slice() : [];
+      const pos = arr.indexOf(oi);
+      if(pos>-1) arr.splice(pos,1); else arr.push(oi);
+      _adminInterviewCurrent.responses[id] = arr;
+      t.classList.toggle("selected");
+      const box = t.querySelector(".assess-check-box");
+      if(box) box.textContent = arr.indexOf(oi)>-1 ? "✓" : "";
+      scheduleAdminInterviewAutosave();
+      updateAdminInterviewProgressUI();
+      break;
+    }
+    case "adminInterviewClearDrawing": {
+      const qid2 = t.getAttribute("data-qid");
+      const zone2 = t.getAttribute("data-zone")||"";
+      clearAdminInterviewDrawing(id, qid2, zone2);
+      break;
+    }
     case "adminToggleAssessEnabled": await adminToggleAssessEnabled(id); break;
     case "openAdminAssessReview": await openAdminAssessReview(id); break;
     case "adminBackToAssessManage": adminBackToAssessManage(); break;
