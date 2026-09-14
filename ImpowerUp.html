@@ -120,9 +120,11 @@
 
   .modal-overlay{position:fixed;inset:0;background:rgba(15,10,28,0.55);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(3px);}
   @media(min-width:640px){.modal-overlay{align-items:center;}}
-  .modal{background:var(--surface);border-radius:24px 24px 0 0;padding:22px;width:100%;max-width:500px;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-lg);}
+  .modal{position:relative;background:var(--surface);border-radius:24px 24px 0 0;padding:22px;width:100%;max-width:500px;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-lg);}
   @media(min-width:640px){.modal{border-radius:24px;}}
-  .modal h2{margin-bottom:16px;}
+  .modal h2{margin-bottom:16px;padding-right:34px;}
+  .modal-close-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--surface-2);color:var(--text-muted);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;cursor:pointer;z-index:5;flex-shrink:0;}
+  .modal-close-x:hover{background:var(--border);}
   .field{margin-bottom:14px;}
   .field label{display:block;font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-muted);}
   .field input[type=text],.field input[type=date],.field input[type=time],.field input[type=number],.field select,.field textarea,.field input[type=email],.field input[type=tel]{
@@ -420,7 +422,7 @@ function defaultState(){
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}
   };
 }
 let state = null;
@@ -1074,6 +1076,7 @@ function checkLevelUp(prevXp){
 
 /* ============ Schedule templates / effective time ============ */
 function getTemplateForDate(dateStr){
+  if(isPlannerHoliday(dateStr)) return null; // holidays/breaks/days off suppress the assigned day template
   const dp = state.dayPlans.find(x=>x.date===dateStr);
   if(!dp) return null;
   return state.scheduleTemplates.find(t=>t.id===dp.template_id) || null;
@@ -1111,7 +1114,16 @@ function semesterForDate(dateStr){
   return getSemesters().find(s=>dateStr>=s.startDate && dateStr<=s.endDate) || null;
 }
 function isSchoolWeekday(sem, dateStr){ return (sem.activeWeekdays||[1,2,3,4,5]).includes(weekdayIndexOf(dateStr)); }
-function isHolidayDate(sem, dateStr){ return (sem.holidays||[]).includes(dateStr); }
+/* Planner-wide holidays/breaks/days off — one shared list used by both the block rotation and day templates. */
+function getPlannerHoliday(dateStr){ return (state.plannerHolidays||[]).find(h=>dateStr>=h.startDate && dateStr<=h.endDate) || null; }
+function isPlannerHoliday(dateStr){ return !!getPlannerHoliday(dateStr); }
+function isHolidayDate(sem, dateStr){ return isPlannerHoliday(dateStr); }
+function plannerHolidayBadgeHtml(dateStr, size){
+  const h = getPlannerHoliday(dateStr);
+  if(!h) return "";
+  const typeIcon = {holiday:"🎉", break:"🏖️", day_off:"📴"};
+  return '<span class="tag" style="background:var(--surface-2);'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+(typeIcon[h.type]||"🌴")+' '+escapeHtml(h.label)+'</span>';
+}
 function rotationLetters(sem){ const n = sem.rotationLength||4; return Array.from({length:n},(_,i)=>String.fromCharCode(65+i)); }
 function getRotationLetter(sem, dateStr){
   if(dateStr<sem.startDate || dateStr>sem.endDate) return null;
@@ -1141,7 +1153,21 @@ function periodTimesFor(sem){
   return times;
 }
 function getScheduleDayInfo(dateStr){
+  const override = (state.scheduleOverrides||{})[dateStr];
   const sem = semesterForDate(dateStr);
+  if(override){
+    const effSem = sem || activeSemester();
+    if(override.mode==="custom"){
+      const classes = (override.classes||[]).filter(c=>c.subject&&c.subject.trim());
+      return {semester:effSem, letter:null, noSchool:false, reason:null, classes, overridden:true, overrideLabel:override.label||"Custom Schedule"};
+    }
+    if(override.mode==="letter" && effSem){
+      const subjects = (effSem.classes && effSem.classes[override.letter]) || [];
+      const times = periodTimesFor(effSem);
+      const classes = subjects.map((subj,i)=>({subject:(subj||"").trim(), time:times[i]||""})).filter(c=>c.subject);
+      return {semester:effSem, letter:override.letter, noSchool:false, reason:null, classes, overridden:true};
+    }
+  }
   if(!sem) return null;
   if(!isSchoolWeekday(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"weekend", classes:[]};
   if(isHolidayDate(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"holiday", classes:[]};
@@ -1158,7 +1184,8 @@ function dayLetterBadgeHtml(dateStr, size){
   if(info.noSchool){
     return info.reason==="holiday" ? '<span class="tag" style="background:var(--surface-2);'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">No School</span>' : "";
   }
-  return '<span class="tag" style="background:var(--accent);color:#fff;'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+info.letter+' Day</span>';
+  const label = info.letter ? (info.letter+" Day"+(info.overridden?" (swapped)":"")) : (info.overrideLabel||"Custom Schedule");
+  return '<span class="tag" style="background:var(--accent);color:#fff;'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+escapeHtml(label)+'</span>';
 }
 function getDayTimelineItems(dateStr){
   const template = getTemplateForDate(dateStr);
@@ -1186,7 +1213,7 @@ function getDayTimelineItems(dateStr){
   (state.customEvents||[]).filter(e=>e.date===dateStr).forEach(e=>items.push({time:e.time||"", label:e.label, emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes}));
   const sched = getScheduleDayInfo(dateStr);
   if(sched && !sched.noSchool){
-    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, duration:sched.semester.periodMinutes}));
+    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:(sched.semester&&sched.semester.periodMinutes)||30}));
   }
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
@@ -1244,7 +1271,8 @@ function floatXp(x,y,amount){
 /* ============ Modal ============ */
 function openModal(html){
   const host = document.getElementById("modalHost");
-  host.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this) closeModal()"><div class="modal">'+html+'</div></div>';
+  host.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this) closeModal()"><div class="modal">'+
+    '<span class="modal-close-x" data-action="closeModal" title="Close">✕</span>'+html+'</div></div>';
 }
 function closeModal(){ document.getElementById("modalHost").innerHTML = ""; }
 function fallbackCopyText(text){
@@ -1690,14 +1718,14 @@ function dayTimelineListHtml(dateStr){
     return '<div class="timeline-item" style="align-items:center;"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
       '<div class="timeline-line"><div class="timeline-dot" style="background:'+(tmpl?tmpl.color:"var(--accent)")+'"></div></div>'+
       '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
-      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?it.letter+" Day class":"Event")+'</div></div>'+controls+'</div>';
+      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):"Event")+'</div></div>'+controls+'</div>';
   }).join("");
 }
 function dayPreviewModalHtml(dateStr){
   const [yy,mm,dd] = dateStr.split("-").map(Number);
   const dayLabel = new Date(yy,mm-1,dd).toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
   const tmpl = getTemplateForDate(dateStr);
-  return '<h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+dayLabel+' '+dayLetterBadgeHtml(dateStr)+'</h2>'+
+  return '<h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+dayLabel+' '+dayLetterBadgeHtml(dateStr)+plannerHolidayBadgeHtml(dateStr)+'</h2>'+
     (tmpl?'<p class="hc-meta" style="margin-top:-8px;margin-bottom:10px;">'+tmpl.emoji+' '+escapeHtml(tmpl.name)+'</p>':"")+
     '<div style="max-height:55vh;overflow-y:auto;">'+dayTimelineListHtml(dateStr)+'</div>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Close</button>'+
@@ -1715,10 +1743,12 @@ function renderPlannerDay(){
 
   const overviewBlock = '<div class="card">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'+
-    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+dayLetterBadgeHtml(plannerDate)+'</div>'+
-    '<div style="display:flex;gap:6px;align-items:center;">'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+dayLetterBadgeHtml(plannerDate)+plannerHolidayBadgeHtml(plannerDate)+'</div>'+
+    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
     '<button class="icon-btn" data-action="togglePlannerDayCalPos" title="'+(calPos==="bottom"?"Move calendar above":"Move calendar below")+'">'+(calPos==="bottom"?"⬆️":"⬇️")+'</button>'+
     '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
+    '<button class="btn ghost sm" data-action="openHolidayForm" data-v="'+plannerDate+'">+ Day Off</button>'+
+    '<button class="btn ghost sm" data-action="openDayOverrideForm" data-v="'+plannerDate+'">🔀 Override Day</button>'+
     '<button class="btn ghost sm" data-action="openApplyTemplateModal">'+(tmpl?tmpl.emoji+" "+escapeHtml(tmpl.name):"Change schedule")+'</button>'+
     '</div></div>'+
     dayTimelineListHtml(plannerDate)+
@@ -1751,7 +1781,7 @@ function renderPlannerWeek(){
       html += '<div class="wg-row '+(d2===todayStr()?"today":"")+'" style="'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
         '<div class="wg-daycol"><div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
         '<div style="font-weight:800;font-size:16px;">'+ddd+'</div>'+
-        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+dayLetterBadgeHtml(d2,"sm")+'</div>'+
+        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+dayLetterBadgeHtml(d2,"sm")+plannerHolidayBadgeHtml(d2,"sm")+'</div>'+
         '<div class="wg-list">'+escapeHtml(namesPreview)+'</div>'+
         (habitCount?'<div style="font-size:11px;color:var(--text-muted);flex-shrink:0;">'+doneCount+'/'+habitCount+'</div>':'')+
         '<div class="expand-ic" style="position:static;font-size:11px;opacity:.6;" data-action="expandDayPreview" data-v="'+d2+'">🔍</div>'+
@@ -1772,7 +1802,7 @@ function renderPlannerWeek(){
         '<div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
         '<div style="font-weight:800;font-size:16px;">'+ddd+'</div>'+
         (tmpl?'<div style="font-size:14px;margin-top:2px;">'+tmpl.emoji+'</div>':'<div style="height:18px;"></div>')+
-        '<div style="margin-top:2px;">'+dayLetterBadgeHtml(d2,"sm")+'</div>'+
+        '<div style="margin-top:2px;">'+dayLetterBadgeHtml(d2,"sm")+plannerHolidayBadgeHtml(d2,"sm")+'</div>'+
         (habitCount?'<div style="font-size:10px;margin-top:4px;color:var(--text-muted);">'+doneCount+'/'+habitCount+'</div>':'')+
         '</div>';
     }
@@ -1855,13 +1885,80 @@ function scheduleClassesCardHtml(sem){
   html += '<button class="btn secondary sm" style="margin-top:4px;" data-action="saveScheduleClasses">Save '+scheduleEditLetter+' Day Classes</button></div>';
   return html;
 }
-function scheduleHolidaysCardHtml(sem){
-  const list = (sem.holidays||[]).slice().sort();
-  return '<div class="card" style="margin-top:14px;"><h2>🌴 Holidays / Days Off</h2>'+
-    '<p class="hc-meta">These dates are skipped — the rotation picks back up on the next school day without losing its place.</p>'+
-    '<div class="row-inline" style="margin-top:10px;"><input id="sem_holidayDate" type="date" style="flex:1;"><button class="btn secondary sm" data-action="addHoliday">+ Add</button></div>'+
-    (list.length?'<div class="chip-group" style="margin-top:10px;">'+list.map(d=>'<div class="chip" style="display:flex;align-items:center;gap:6px;">'+fmtDatePretty(d)+'<span data-action="removeHoliday" data-v="'+d+'" style="opacity:.6;cursor:pointer;">✕</span></div>').join("")+'</div>':'<p class="hc-meta" style="margin-top:8px;">No holidays added yet.</p>')+
+let holFormType = "holiday";
+const HOLIDAY_TYPE_ICON = {holiday:"🎉", break:"🏖️", day_off:"📴"};
+function holidayFormHtml(h){
+  h = h || {label:"", type:"holiday", startDate: (typeof plannerDate!=="undefined"?plannerDate:todayStr()), endDate: (typeof plannerDate!=="undefined"?plannerDate:todayStr())};
+  holFormType = h.type || "holiday";
+  return '<h2>'+(h.id?"Edit":"Add")+' Holiday / Break / Day Off</h2>'+
+    '<div class="field"><label>Label</label><input id="hol_label" type="text" placeholder="e.g. Winter Break, Teacher In-Service Day" value="'+escapeHtml(h.label||"")+'"></div>'+
+    '<div class="field"><label>Type</label><div class="chip-group">'+
+    [["holiday","🎉 Holiday"],["break","🏖️ Break"],["day_off","📴 Day Off"]].map(o=>'<div class="chip '+(holFormType===o[0]?"selected":"")+'" data-action="pickHolType" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
+    '</div></div>'+
+    '<div class="row-inline"><div class="field"><label>Start date</label><input id="hol_start" type="date" value="'+h.startDate+'"></div>'+
+    '<div class="field"><label>End date</label><input id="hol_end" type="date" value="'+h.endDate+'"></div></div>'+
+    '<p class="hc-meta">These days are automatically skipped by the Class Schedule rotation, and any day template you\'ve assigned won\'t apply.</p>'+
+    '<div class="modal-actions">'+(h.id?'<button class="btn danger" data-action="deletePlannerHoliday" data-id="'+h.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="savePlannerHoliday" data-id="'+(h.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openHolidayForm(id, prefillDate){
+  const h = id ? (state.plannerHolidays||[]).find(x=>x.id===id) : (prefillDate ? {label:"",type:"holiday",startDate:prefillDate,endDate:prefillDate} : null);
+  openModal(holidayFormHtml(h));
+}
+function plannerHolidaysCardHtml(){
+  const list = (state.plannerHolidays||[]).slice().sort((a,b)=>a.startDate.localeCompare(b.startDate));
+  return '<div class="card" style="margin-top:14px;"><h2>🌴 Holidays, Breaks &amp; Days Off</h2>'+
+    '<p class="hc-meta">Shared across the whole Planner — these days are skipped by the Class Schedule rotation, and any assigned day template won\'t apply on them.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="openHolidayForm">+ Add</button>'+
+    (list.length?'<div style="margin-top:10px;">'+list.map(h=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(HOLIDAY_TYPE_ICON[h.type]||"🌴")+'</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.label)+'</div><div class="hc-meta">'+(h.startDate===h.endDate?fmtDatePretty(h.startDate):fmtDatePretty(h.startDate)+' – '+fmtDatePretty(h.endDate))+'</div></div>'+
+      '<button class="icon-btn" data-action="openHolidayForm" data-id="'+h.id+'">✏️</button></div>').join("")+'</div>':'<p class="hc-meta" style="margin-top:8px;">None added yet.</p>')+
     '</div>';
+}
+
+/* ---- Per-day schedule override: swap in another rotation day, or write a fully custom one-off day (Exam Day, Special Schedule, etc.) ---- */
+let dayOvFormMode = "letter";
+let dayOvChosenLetter = null;
+function dayOverrideFormHtml(dateStr){
+  const existing = (state.scheduleOverrides||{})[dateStr];
+  const sem = semesterForDate(dateStr) || activeSemester();
+  const letters = sem ? rotationLetters(sem) : [];
+  let html = '<h2>Override Schedule</h2><p class="hc-meta" style="margin-top:-8px;margin-bottom:10px;">'+fmtDatePretty(dateStr)+'</p>'+
+    '<p class="hc-meta">Swap in another rotation day\'s classes, or write a fully custom one-off schedule for something like an Exam Day or Special Schedule. Either way, it overrides the normal rotation (and any holiday marking) for just this date.</p>'+
+    '<div class="chip-group" style="margin:10px 0;">'+
+    '<div class="chip '+(dayOvFormMode==="letter"?"selected":"")+'" data-action="pickDayOvMode" data-v="letter" data-date="'+dateStr+'">Swap to another day</div>'+
+    '<div class="chip '+(dayOvFormMode==="custom"?"selected":"")+'" data-action="pickDayOvMode" data-v="custom" data-date="'+dateStr+'">Fully custom</div>'+
+    '</div>';
+  if(dayOvFormMode==="letter"){
+    if(!letters.length){
+      html += '<p class="hc-meta">Set up a Class Schedule first (Planner → Schedule tab) to swap between lettered days.</p>';
+    } else {
+      html += '<div class="field"><label>Run this day\'s schedule instead</label><div class="chip-group">'+letters.map(l=>'<div class="chip '+(dayOvChosenLetter===l?"selected":"")+'" data-action="pickDayOvLetter" data-v="'+l+'">'+l+' Day</div>').join("")+'</div></div>';
+    }
+  } else {
+    const count = sem ? (sem.periodsPerDay||7) : 6;
+    const defTimes = sem ? periodTimesFor(sem) : [];
+    const rows = (existing && existing.mode==="custom" && existing.classes && existing.classes.length) ? existing.classes : Array.from({length:count},(_,i)=>({subject:"",time:defTimes[i]||""}));
+    html += '<div class="field"><label>Label</label><input id="dov_label" type="text" placeholder="e.g. Exam Day, Special Schedule, Early Dismissal" value="'+escapeHtml((existing&&existing.label)||"")+'"></div>';
+    html += '<label style="display:block;font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-muted);">Periods</label>';
+    for(let i=0;i<rows.length;i++){
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+        '<input type="time" class="dovTimeInput" data-idx="'+i+'" value="'+(rows[i].time||"")+'" style="flex:0 0 118px;padding:10px 8px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">'+
+        '<input type="text" class="dovSubjInput" data-idx="'+i+'" placeholder="Period '+(i+1)+'" value="'+escapeHtml(rows[i].subject||"")+'" style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">'+
+        '</div>';
+    }
+  }
+  html += '<div class="modal-actions" style="margin-top:10px;">'+(existing?'<button class="btn danger" data-action="clearDayOverride" data-v="'+dateStr+'">Remove Override</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveDayOverride" data-v="'+dateStr+'" style="flex:1">Save</button></div>';
+  return html;
+}
+function openDayOverrideForm(dateStr){
+  const existing = (state.scheduleOverrides||{})[dateStr];
+  dayOvFormMode = (existing && existing.mode) || "letter";
+  dayOvChosenLetter = (existing && existing.mode==="letter") ? existing.letter : null;
+  openModal(dayOverrideFormHtml(dateStr));
 }
 function scheduleSettingsCardHtml(){
   const sems = getSemesters();
@@ -1879,8 +1976,8 @@ function scheduleSettingsCardHtml(){
     '</div></div>';
   if(active){
     html += scheduleClassesCardHtml(active);
-    html += scheduleHolidaysCardHtml(active);
   }
+  html += plannerHolidaysCardHtml();
   return html;
 }
 
@@ -2322,7 +2419,10 @@ function accountFormHtml(mode){
     '</div>'+
     (acctFormMode==="signup"?'<div class="field"><label>Your name</label><input id="acct_name" type="text" placeholder="e.g. Jordan Smith"></div>':'')+
     '<div class="field"><label>Email</label><input id="acct_email" type="email" placeholder="you@example.com"></div>'+
-    '<div class="field"><label>Password</label><input id="acct_pw" type="password" placeholder="At least 6 characters"></div>'+
+    '<div class="field"><label>Password</label><div style="position:relative;">'+
+    '<input id="acct_pw" type="password" placeholder="At least 6 characters" style="padding-right:42px;">'+
+    '<span data-action="toggleAcctPwVisibility" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="'+(acctFormMode==="signup"?"doSignUp":"doLogIn")+'" style="flex:1">'+(acctFormMode==="signup"?"Create Account":"Log In")+'</button></div>';
 }
@@ -3071,21 +3171,65 @@ document.addEventListener("click", async function(e){
       toast(scheduleEditLetter+" Day classes saved");
       break;
     }
-    case "addHoliday": {
-      const active = activeSemester();
-      if(!active) return;
-      const d = document.getElementById("sem_holidayDate").value;
-      if(!d){ toast("Pick a date first"); return; }
-      active.holidays = active.holidays || [];
-      if(!active.holidays.includes(d)) active.holidays.push(d);
-      saveState(); render();
+    case "openHolidayForm": openHolidayForm(id||null, v||null); break;
+    case "pickHolType": {
+      holFormType = v;
+      document.querySelectorAll('[data-action="pickHolType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
       break;
     }
-    case "removeHoliday": {
-      const active = activeSemester();
-      if(!active) return;
-      active.holidays = (active.holidays||[]).filter(x=>x!==v);
-      saveState(); render();
+    case "savePlannerHoliday": {
+      const label = document.getElementById("hol_label").value.trim();
+      const startDate = document.getElementById("hol_start").value;
+      const endDate = document.getElementById("hol_end").value;
+      if(!startDate || !endDate || endDate<startDate){ toast("Check the dates"); return; }
+      const payload = {
+        label: label || (holFormType==="break"?"Break":holFormType==="day_off"?"Day Off":"Holiday"),
+        type: holFormType, startDate, endDate
+      };
+      state.plannerHolidays = state.plannerHolidays || [];
+      if(id){ Object.assign(state.plannerHolidays.find(x=>x.id===id), payload); } else { payload.id = uid(); state.plannerHolidays.push(payload); }
+      saveState(); closeModal(); render();
+      toast("Saved");
+      break;
+    }
+    case "deletePlannerHoliday": {
+      state.plannerHolidays = (state.plannerHolidays||[]).filter(x=>x.id!==id);
+      saveState(); closeModal(); render();
+      break;
+    }
+    case "openDayOverrideForm": openDayOverrideForm(v); break;
+    case "pickDayOvMode": { dayOvFormMode = v; openModal(dayOverrideFormHtml(t.getAttribute("data-date"))); break; }
+    case "pickDayOvLetter": {
+      dayOvChosenLetter = v;
+      document.querySelectorAll('[data-action="pickDayOvLetter"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
+      break;
+    }
+    case "saveDayOverride": {
+      const dateStr = v;
+      state.scheduleOverrides = state.scheduleOverrides || {};
+      if(dayOvFormMode==="letter"){
+        if(!dayOvChosenLetter){ toast("Pick a day to swap to"); return; }
+        state.scheduleOverrides[dateStr] = { mode:"letter", letter:dayOvChosenLetter };
+      } else {
+        const label = document.getElementById("dov_label").value.trim();
+        const classes = [];
+        document.querySelectorAll(".dovSubjInput").forEach(inp=>{
+          const idx = inp.getAttribute("data-idx");
+          const timeInp = document.querySelector('.dovTimeInput[data-idx="'+idx+'"]');
+          const subject = inp.value.trim();
+          if(subject) classes.push({subject, time: timeInp?timeInp.value:""});
+        });
+        if(!classes.length){ toast("Add at least one class"); return; }
+        state.scheduleOverrides[dateStr] = { mode:"custom", label, classes };
+      }
+      saveState(); closeModal(); render();
+      toast("Day override saved");
+      break;
+    }
+    case "clearDayOverride": {
+      if(state.scheduleOverrides) delete state.scheduleOverrides[v];
+      saveState(); closeModal(); render();
+      toast("Override removed");
       break;
     }
 
@@ -3299,6 +3443,15 @@ document.addEventListener("click", async function(e){
     }
     case "openAccountForm": openAccountForm(v); break;
     case "setAcctFormMode": openModal(accountFormHtml(v)); break;
+    case "toggleAcctPwVisibility": {
+      const inp = document.getElementById("acct_pw");
+      if(inp){
+        const showing = inp.type === "text";
+        inp.type = showing ? "password" : "text";
+        t.textContent = showing ? "👁️" : "🙈";
+      }
+      break;
+    }
     case "doSignUp": {
       const email = document.getElementById("acct_email").value.trim();
       const pw = document.getElementById("acct_pw").value;
