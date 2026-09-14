@@ -282,6 +282,10 @@ const DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 // Public VAPID key for Web Push -- safe to embed client-side (it's the public half of the keypair).
 // Only meaningful once you've deployed the Supabase push backend from supabase-schema.sql / send-scheduled-alerts.ts.
 const VAPID_PUBLIC_KEY = "BMlAUJLoE9ePByckfiTIEeHDLsuAwfazX40aHG_xW7EaoRC45W5vxddRTXZ4zXrW0C3rIz8S5Ph-H-WT8IRTVLg";
+// Accounts backend (Supabase Auth + Postgres). The anon key is safe to embed client-side —
+// it only grants what Row Level Security allows, same idea as the VAPID public key above.
+const SB_ACCOUNTS_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co";
+const SB_ACCOUNTS_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlra2JkdHNqZWR3ZGhhZG5tYWxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzMTYyMTYsImV4cCI6MjEwNDg5MjIxNn0.mVpGAd2PHPdisJLZVS9eojyl4EgjS_oGrYrxFE4nJcs";
 const CATEGORIES = [
   {v:"health",l:"Health",e:"❤️"},{v:"mindfulness",l:"Mindfulness",e:"🧘"},
   {v:"productivity",l:"Productivity",e:"⚡"},{v:"social",l:"Social",e:"👥"},
@@ -413,7 +417,8 @@ function defaultState(){
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", alertSound:"classic", alertVolume:80,
-      username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false },
+      username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
+      cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null
   };
@@ -437,7 +442,7 @@ function loadState(){
     return merged;
   }catch(e){ return defaultState(); }
 }
-function saveState(){ if(STORE_KEY) localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function saveState(){ if(STORE_KEY) localStorage.setItem(STORE_KEY, JSON.stringify(state)); if(typeof maybeAutoSyncCloud==="function") maybeAutoSyncCloud(); }
 function displayName(){ return state.profile.nickname || state.profile.firstName || "there"; }
 function fullName(){ return (state.profile.firstName+" "+state.profile.lastName).trim(); }
 
@@ -686,6 +691,162 @@ async function syncAllAlertsToServer(force){
     }
   }catch(e){}
 }
+/* ============ Accounts (Supabase Auth) + Admin ============ */
+function acctHeaders(withAuth){
+  const h = {apikey: SB_ACCOUNTS_KEY, "Content-Type":"application/json"};
+  h.Authorization = "Bearer "+((withAuth && state.profile.cloudSession) ? state.profile.cloudSession.access_token : SB_ACCOUNTS_KEY);
+  return h;
+}
+function applySession(json){
+  state.profile.cloudSession = {
+    access_token: json.access_token, refresh_token: json.refresh_token,
+    expires_at: Date.now() + ((json.expires_in||3600)*1000) - 30000,
+    user_id: json.user.id, email: json.user.email
+  };
+  saveState();
+}
+async function acctSignUp(email, password, displayName){
+  const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/signup", {method:"POST", headers: acctHeaders(false), body: JSON.stringify({email, password, data:{display_name:displayName||""}})});
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error_description || json.msg || json.error || "Sign up failed");
+  return json;
+}
+async function acctSignIn(email, password){
+  const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/token?grant_type=password", {method:"POST", headers: acctHeaders(false), body: JSON.stringify({email, password})});
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error_description || json.msg || "Log in failed — check your email/password");
+  return json;
+}
+async function acctRefreshSession(){
+  const sess = state.profile.cloudSession;
+  if(!sess || !sess.refresh_token) return false;
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/token?grant_type=refresh_token", {method:"POST", headers: acctHeaders(false), body: JSON.stringify({refresh_token: sess.refresh_token})});
+    const json = await res.json();
+    if(!res.ok) return false;
+    applySession(json);
+    return true;
+  }catch(e){ return false; }
+}
+async function ensureFreshSession(){
+  const sess = state.profile.cloudSession;
+  if(!sess) return false;
+  if(Date.now() < sess.expires_at) return true;
+  return await acctRefreshSession();
+}
+async function acctFetchProfileFlags(){
+  if(!(await ensureFreshSession())) return null;
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+state.profile.cloudSession.user_id+"&select=display_name,is_admin", {headers: acctHeaders(true)});
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return rows[0]||null;
+  }catch(e){ return null; }
+}
+function serializableStateSnapshot(){
+  const copy = JSON.parse(JSON.stringify(state));
+  if(copy.profile) delete copy.profile.cloudSession;
+  return copy;
+}
+async function syncStateToCloud(){
+  if(!state.profile.cloudSession || !state.profile.cloudSyncEnabled) return false;
+  if(!(await ensureFreshSession())) return false;
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify({ user_id: state.profile.cloudSession.user_id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
+    });
+    if(!res.ok) return false;
+    state.profile.lastCloudSync = new Date().toISOString();
+    saveState();
+    return true;
+  }catch(e){ return false; }
+}
+let _lastCloudSyncCheck = 0;
+function maybeAutoSyncCloud(){
+  if(_adminViewing) return; // never sync while browsing as a client — would overwrite the admin's own row with client data
+  if(!state.profile.cloudSyncEnabled) return;
+  const now = Date.now();
+  if(now - _lastCloudSyncCheck < 120000) return;
+  _lastCloudSyncCheck = now;
+  syncStateToCloud();
+}
+
+/* ---- Admin: view/edit any client's cloud data using the same app screens ---- */
+let adminClientList = null;
+let _adminOwnState = null, _adminOwnKey = null, _adminViewing = null;
+async function loadAdminClientList(){
+  if(!(await ensureFreshSession())) return [];
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?select=id,display_name,is_admin,created_at&order=created_at.desc", {headers: acctHeaders(true)});
+    if(!res.ok) return [];
+    return await res.json();
+  }catch(e){ return []; }
+}
+function renderAdmin(){
+  if(!state.profile.isCloudAdmin) return renderHome();
+  if(adminClientList===null){
+    adminClientList = [];
+    loadAdminClientList().then(list=>{ adminClientList = list; render(); });
+    return topbarHtml("🛡️ Admin","View or edit any client's data.")+'<div class="empty"><div class="big">⏳</div>Loading client list…</div>';
+  }
+  let html = topbarHtml("🛡️ Admin","View or edit any client's data.");
+  if(!adminClientList.length){ html += emptyState("👥","No clients yet","Once someone signs up in the app, they'll show up here."); return html; }
+  html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
+    '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
+    '<div class="hc-meta">Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
+    (c.is_admin?'':'<button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>')+'</div>').join("");
+  html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
+  return html;
+}
+async function openAsClient(clientId){
+  if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+  try{
+    const [stateRes, profRes] = await Promise.all([
+      fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+clientId+"&select=state_json", {headers: acctHeaders(true)}),
+      fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+clientId+"&select=display_name", {headers: acctHeaders(true)})
+    ]);
+    if(!stateRes.ok){ toast("Couldn't load that client's data"); return; }
+    const rows = await stateRes.json();
+    const profRows = profRes.ok ? await profRes.json() : [];
+    const clientName = (profRows[0] && profRows[0].display_name) || "Client";
+    _adminOwnState = state; _adminOwnKey = STORE_KEY;
+    const snap = rows[0] ? rows[0].state_json : null;
+    const fresh = defaultState();
+    state = snap ? Object.assign(fresh, snap) : fresh;
+    state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+    STORE_KEY = null;
+    _adminViewing = {id: clientId, name: clientName};
+    location.hash = "#/home";
+    render();
+    toast("Now viewing "+clientName+"'s data");
+  }catch(e){ toast("Couldn't open that client"); }
+}
+async function saveAndExitClientView(){
+  if(!_adminViewing) return;
+  let ok = false;
+  if(await ensureFreshSession()){
+    try{
+      const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
+        method:"POST",
+        headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+        body: JSON.stringify({ user_id: _adminViewing.id, state_json: state, updated_at: new Date().toISOString() })
+      });
+      ok = res.ok;
+    }catch(e){ ok = false; }
+  }
+  exitClientView(ok ? "Saved changes for "+_adminViewing.name : "Couldn't save — check your connection and try again");
+}
+function exitClientView(msg){
+  const name = _adminViewing ? _adminViewing.name : "";
+  state = _adminOwnState; STORE_KEY = _adminOwnKey;
+  _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
+  location.hash = "#/admin";
+  render();
+  if(msg) toast(msg);
+}
+
 function bootApp(){
   setupPwaMeta();
   const profiles = loadProfiles();
@@ -1116,7 +1277,9 @@ if(window.matchMedia){
 
 /* ============ Render dispatcher ============ */
 function navHtml(active){
-  const items = ROUTES.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
+  let routeList = ROUTES;
+  if(state && state.profile && state.profile.isCloudAdmin) routeList = ROUTES.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
+  const items = routeList.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
   return '<nav class="sidebar"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
          '<nav class="bottombar">'+items+'</nav>';
 }
@@ -1145,8 +1308,14 @@ function render(){
   else if(route==="focus") body = renderFocus();
   else if(route==="sharing") body = renderSharing();
   else if(route==="settings") body = renderSettings();
+  else if(route==="admin") body = renderAdmin();
   else body = renderHome();
-  app.innerHTML = navHtml(route) + '<div class="page">' + body + '</div>';
+  const adminBanner = _adminViewing ?
+    '<div style="position:sticky;top:0;z-index:60;background:var(--danger);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;font-size:13px;">'+
+    '<div>🛡️ Viewing as <b>'+escapeHtml(_adminViewing.name)+'</b> — changes save to their account, not yours.</div>'+
+    '<div style="display:flex;gap:8px;"><button class="btn sm secondary" data-action="discardExitClientView">Discard &amp; Exit</button>'+
+    '<button class="btn sm" style="background:#fff;color:var(--danger);" data-action="saveExitClientView">Save &amp; Exit</button></div></div>' : "";
+  app.innerHTML = adminBanner + navHtml(route) + '<div class="page">' + body + '</div>';
   window.scrollTo(0,0);
   if(route==="focus" && !focusTimer){
     const activeF = state.focusSessions.find(s=>s.status==="active");
@@ -1459,13 +1628,17 @@ let plannerViewMode = "day";
 let plannerMonthCursor = todayStr().slice(0,7);
 function renderPlanner(){
   let html = topbarHtml("Planner","Plan your day, week, and month.");
-  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
+  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month","schedule"].map(v=>
     '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div>'+
-    '<div class="dropdown-btn" data-action="openManageTemplates">⚙️ Templates ⌄</div></div>';
+    (plannerViewMode==="schedule"?"":'<div class="dropdown-btn" data-action="openManageTemplates">⚙️ Templates ⌄</div>')+'</div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
   else if(plannerViewMode==="week") html += renderPlannerWeek();
+  else if(plannerViewMode==="schedule") html += renderPlannerSchedule();
   else html += renderPlannerMonth();
   return html;
+}
+function renderPlannerSchedule(){
+  return scheduleSettingsCardHtml();
 }
 function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, expandable){
   const [y,m] = monthCursor.split("-").map(Number);
@@ -2138,6 +2311,38 @@ function renderSharing(){
   return html;
 }
 
+/* ============ Account & Cloud Sync — Settings UI ============ */
+let acctFormMode = "login";
+function accountFormHtml(mode){
+  acctFormMode = mode || "login";
+  return '<h2>'+(acctFormMode==="signup"?"Sign Up":"Log In")+'</h2>'+
+    '<div class="chip-group" style="margin-bottom:14px;">'+
+    '<div class="chip '+(acctFormMode==="login"?"selected":"")+'" data-action="setAcctFormMode" data-v="login">Log In</div>'+
+    '<div class="chip '+(acctFormMode==="signup"?"selected":"")+'" data-action="setAcctFormMode" data-v="signup">Sign Up</div>'+
+    '</div>'+
+    (acctFormMode==="signup"?'<div class="field"><label>Your name</label><input id="acct_name" type="text" placeholder="e.g. Jordan Smith"></div>':'')+
+    '<div class="field"><label>Email</label><input id="acct_email" type="email" placeholder="you@example.com"></div>'+
+    '<div class="field"><label>Password</label><input id="acct_pw" type="password" placeholder="At least 6 characters"></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="'+(acctFormMode==="signup"?"doSignUp":"doLogIn")+'" style="flex:1">'+(acctFormMode==="signup"?"Create Account":"Log In")+'</button></div>';
+}
+function openAccountForm(mode){ openModal(accountFormHtml(mode)); }
+function accountCardHtml(){
+  const sess = state.profile.cloudSession;
+  if(!sess){
+    return '<div class="card" style="margin-top:14px;"><h2>🔐 Account &amp; Cloud Sync</h2>'+
+      '<p class="hc-meta">Optional — sign up so a mentor/coach can view your progress, or sync your data across devices. Nothing changes if you skip this; the app keeps working fully offline.</p>'+
+      '<div class="modal-actions" style="margin-top:8px;"><button class="btn secondary" style="flex:1" data-action="openAccountForm" data-v="signup">Sign Up</button>'+
+      '<button class="btn" style="flex:1" data-action="openAccountForm" data-v="login">Log In</button></div></div>';
+  }
+  return '<div class="card" style="margin-top:14px;"><h2>🔐 Account &amp; Cloud Sync</h2>'+
+    '<p class="hc-meta">Signed in as <b>'+escapeHtml(sess.email)+'</b>'+(state.profile.isCloudAdmin?' <span class="tag">Admin</span>':'')+'</p>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">☁️ Sync this profile\'s data to the cloud</div><div class="switch '+(state.profile.cloudSyncEnabled?"on":"")+'" data-action="toggleCloudSync"></div></div>'+
+    '<p class="hc-meta">'+(state.profile.cloudSyncEnabled ? ("Last synced: "+(state.profile.lastCloudSync ? new Date(state.profile.lastCloudSync).toLocaleString() : "not yet")) : "Turn this on so your mentor can see your progress.")+'</p>'+
+    '<div class="modal-actions" style="margin-top:8px;">'+(state.profile.cloudSyncEnabled?'<button class="btn secondary sm" style="flex:1" data-action="syncNowCloud">Sync Now</button>':'<div style="flex:1"></div>')+
+    '<button class="btn danger sm" style="flex:1" data-action="doLogOut">Log Out</button></div></div>';
+}
+
 /* ============ Settings ============ */
 function renderSettings(){
   let html = topbarHtml("Settings","Personalize ImpowerUp.");
@@ -2146,8 +2351,10 @@ function renderSettings(){
     '<div class="field"><label>Nickname (optional)</label><input id="set_nick" type="text" value="'+escapeHtml(state.profile.nickname||"")+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Username (optional)</label><input id="set_username" type="text" placeholder="e.g. jsmith" value="'+escapeHtml(state.profile.username||"")+'"></div>'+
     '<div class="field"><label>Email (optional)</label><input id="set_email" type="email" placeholder="you@example.com" value="'+escapeHtml(state.profile.email||"")+'"></div></div>'+
-    '<p class="hc-meta">These are just profile labels — this app has no account system or login, so there\'s no password to set.</p>'+
+    '<p class="hc-meta">These are just local profile labels, separate from the optional cloud account below.</p>'+
     '<button class="btn secondary sm" data-action="saveName">Save name</button></div>';
+
+  html += accountCardHtml();
 
   html += '<div class="card" style="margin-top:14px;"><div class="field"><label>Theme</label><div class="chip-group">'+
     [["light","☀️ Light"],["dark","🌙 Dark"],["auto","🔄 Auto"]].map(t=>'<div class="chip '+(state.profile.theme===t[0]?"selected":"")+'" data-action="setTheme" data-v="'+t[0]+'">'+t[1]+'</div>').join("")+'</div></div>'+
@@ -2192,8 +2399,6 @@ function renderSettings(){
     '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
 
   html += renderAllProfilesSection();
-
-  html += scheduleSettingsCardHtml();
 
   html += '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>'+
     '<p class="hc-meta">Live two-way sync with Google/Outlook/Apple isn\'t possible here — that needs a registered API app and a hosted backend, which this offline single-file app doesn\'t have. The reliable offline equivalent: export your alerts as a standard .ics file and import it into whichever calendar you use.</p>'+
@@ -2437,7 +2642,7 @@ function checkReminders(){
 }
 
 /* ============ Event delegation ============ */
-document.addEventListener("click", function(e){
+document.addEventListener("click", async function(e){
   unlockAudio();
   const t = e.target.closest("[data-action]");
   if(!t) return;
@@ -3092,6 +3297,66 @@ document.addEventListener("click", function(e){
       saveState(); toast("Saved"); render();
       break;
     }
+    case "openAccountForm": openAccountForm(v); break;
+    case "setAcctFormMode": openModal(accountFormHtml(v)); break;
+    case "doSignUp": {
+      const email = document.getElementById("acct_email").value.trim();
+      const pw = document.getElementById("acct_pw").value;
+      const name = document.getElementById("acct_name").value.trim();
+      if(!email || !pw){ toast("Enter an email and password"); return; }
+      if(pw.length<6){ toast("Password needs at least 6 characters"); return; }
+      try{
+        const json = await acctSignUp(email, pw, name);
+        if(json.access_token){
+          applySession(json);
+          const flags = await acctFetchProfileFlags();
+          state.profile.isCloudAdmin = !!(flags && flags.is_admin);
+          saveState(); closeModal(); render();
+          toast("Account created — signed in!");
+        } else {
+          closeModal();
+          toast("Check your email to confirm your account, then log in.");
+        }
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "doLogIn": {
+      const email = document.getElementById("acct_email").value.trim();
+      const pw = document.getElementById("acct_pw").value;
+      if(!email || !pw){ toast("Enter your email and password"); return; }
+      try{
+        const json = await acctSignIn(email, pw);
+        applySession(json);
+        const flags = await acctFetchProfileFlags();
+        state.profile.isCloudAdmin = !!(flags && flags.is_admin);
+        saveState(); closeModal(); render();
+        toast("Logged in!");
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "doLogOut": {
+      state.profile.cloudSession = null;
+      state.profile.isCloudAdmin = false;
+      state.profile.cloudSyncEnabled = false;
+      saveState();
+      if(currentRoute()==="admin") location.hash = "#/home";
+      render();
+      toast("Logged out");
+      break;
+    }
+    case "toggleCloudSync": {
+      state.profile.cloudSyncEnabled = !state.profile.cloudSyncEnabled;
+      saveState();
+      render();
+      if(state.profile.cloudSyncEnabled){ const ok = await syncStateToCloud(); render(); toast(ok?"Cloud sync on":"Sync on, but the first upload failed — check your connection"); }
+      break;
+    }
+    case "syncNowCloud": { const ok = await syncStateToCloud(); render(); toast(ok?"Synced":"Sync failed — check your connection"); break; }
+    case "refreshAdminList": adminClientList = null; render(); break;
+    case "openAsClient": await openAsClient(id); break;
+    case "saveExitClientView": await saveAndExitClientView(); break;
+    case "discardExitClientView": exitClientView("Discarded changes"); break;
+
     case "setTheme": state.profile.theme=v; saveState(); render(); break;
     case "pickAccent": state.profile.accent=v; saveState(); render(); break;
     case "pickAlertSound": { state.profile.alertSound = v; saveState(); render(); previewAlertSound(v); break; }
