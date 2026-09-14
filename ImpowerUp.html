@@ -972,10 +972,17 @@ async function saveAdminAssessTemplateEdits(templateId){
   const titleEl = document.getElementById("edt_title");
   const title = titleEl ? titleEl.value.trim() : "";
   if(!title){ toast("Title can't be empty"); return; }
+  const sections = buildEditedSectionsFromForm(hub.template);
+  const blankSection = sections.findIndex(s=>!s.deleted && !s.title.trim());
+  if(blankSection>-1){
+    toast("Section "+(blankSection+1)+"'s title can't be empty");
+    const el = document.getElementById("edt_sec_"+blankSection+"_title");
+    if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+    return;
+  }
   if(!confirm("Save these wording changes? They'll apply immediately to every client using this assessment.")) return;
   const descEl = document.getElementById("edt_desc");
   const description = descEl ? descEl.value.trim() : "";
-  const sections = buildEditedSectionsFromForm(hub.template);
   if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
   try{
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/assessment_templates?id=eq."+encodeURIComponent(templateId), {
