@@ -2611,7 +2611,7 @@ function floatXp(x,y,amount){
 /* ============ Modal ============ */
 function openModal(html){
   const host = document.getElementById("modalHost");
-  host.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this) closeModal()"><div class="modal">'+
+  host.innerHTML = '<div class="modal-overlay"><div class="modal">'+
     '<span class="modal-close-x" data-action="closeModal" title="Close">✕</span>'+html+'</div></div>';
 }
 function closeModal(){ document.getElementById("modalHost").innerHTML = ""; }
@@ -3180,12 +3180,12 @@ function customEventFormHtml(dateStr, ev){
     '<div class="row-inline"><div class="field"><label>Date</label><input id="ce_date" type="date" value="'+(ev.date||dateStr)+'"></div>'+
     '<div class="field"><label>Time</label><input id="ce_time" type="time" value="'+(ev.time||"09:00")+'"></div></div>'+
     '<div class="field"><label>Duration (min)</label><input id="ce_duration" type="number" min="5" value="'+(ev.duration_minutes||30)+'"></div>'+
-    '<div class="field"><label>Repeat</label><select id="ce_repeat" onchange="updateEventRepeatUI()">'+
+    '<div class="field"><label>Repeat</label><select id="ce_repeat">'+
       Object.keys(repeatLabels).map(r=>'<option value="'+r+'" '+(repeat===r?"selected":"")+'>'+repeatLabels[r]+'</option>').join("")+
     '</select></div>'+
     '<div id="ce_repeatCustomBlock" style="'+(repeat==="custom"?"":"display:none;")+'"><div class="row-inline">'+
       '<div class="field" style="flex:0 0 90px;"><label>Every</label><input id="ce_repeatInterval" type="number" min="1" value="'+(ev.repeat_interval||1)+'"></div>'+
-      '<div class="field" style="flex:1;"><label>&nbsp;</label><select id="ce_repeatUnit" onchange="updateEventRepeatUI()">'+
+      '<div class="field" style="flex:1;"><label>&nbsp;</label><select id="ce_repeatUnit">'+
         Object.keys(unitLabels).map(u=>'<option value="'+u+'" '+(repeatUnit===u?"selected":"")+'>'+unitLabels[u]+'</option>').join("")+
       '</select></div></div></div>'+
     '<div id="ce_repeatDaysBlock" style="'+(showDays?"":"display:none;")+'"><div class="field"><label>Repeat on</label><div class="chip-group">'+
@@ -3636,7 +3636,7 @@ function renderFocus(){
     if(focusMode==="pomodoro"){
       const presets = state.pomodoroPresets||[];
       if(presets.length){
-        html += '<div class="field"><label>Saved presets</label><select id="pomo_preset" onchange="loadPomodoroPresetIntoForm(this.value)">'+
+        html += '<div class="field"><label>Saved presets</label><select id="pomo_preset">'+
           '<option value="">Custom…</option>'+presets.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+' ('+p.workMin+'/'+p.shortBreakMin+'/'+p.longBreakMin+')</option>').join("")+'</select></div>';
       }
       html += '<div class="row-inline">'+
@@ -4282,6 +4282,7 @@ function checkReminders(){
 /* ============ Event delegation ============ */
 document.addEventListener("click", async function(e){
   unlockAudio();
+  if(e.target.classList && e.target.classList.contains("modal-overlay")){ closeModal(); return; }
   const t = e.target.closest("[data-action]");
   if(!t) return;
   const action = t.getAttribute("data-action");
@@ -5311,6 +5312,14 @@ document.addEventListener("change", function(e){
     state.profile.alertVolume = Number(e.target.value);
     saveState();
     previewAlertSound(state.profile.alertSound || "classic");
+    return;
+  }
+  if(e.target.id === "ce_repeat" || e.target.id === "ce_repeatUnit"){
+    updateEventRepeatUI();
+    return;
+  }
+  if(e.target.id === "pomo_preset"){
+    loadPomodoroPresetIntoForm(e.target.value);
     return;
   }
   if(e.target.id === "customAlarmFileInput"){
