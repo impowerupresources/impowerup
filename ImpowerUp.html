@@ -473,7 +473,7 @@ function defaultState(){
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", alertSound:"classic", alertVolume:80,
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null },
-    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
+    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}
   };
 }
@@ -2218,8 +2218,22 @@ function checkLevelUp(prevXp){
 function getTemplateForDate(dateStr){
   if(isPlannerHoliday(dateStr)) return null; // holidays/breaks/days off suppress the assigned day template
   const dp = state.dayPlans.find(x=>x.date===dateStr);
-  if(!dp) return null;
-  return state.scheduleTemplates.find(t=>t.id===dp.template_id) || null;
+  if(dp){
+    // An explicit one-off assignment for this exact date always wins — including a
+    // "skip" marker (template_id:null) used to override a recurring rule for one day.
+    return dp.template_id ? (state.scheduleTemplates.find(t=>t.id===dp.template_id) || null) : null;
+  }
+  const rule = templateRuleForDate(dateStr);
+  if(rule) return state.scheduleTemplates.find(t=>t.id===rule.template_id) || null;
+  return null;
+}
+/* Recurring weekly rule (if any) that covers this date, respecting its optional start/end range. */
+function templateRuleForDate(dateStr){
+  return (state.templateRules||[]).find(r=>{
+    if(r.startDate && dateStr < r.startDate) return false;
+    if(r.endDate && dateStr > r.endDate) return false;
+    return (r.days||[]).includes(weekdayIndexOf(dateStr));
+  }) || null;
 }
 function getEffectiveReminderTime(reminder, dateStr){
   const template = getTemplateForDate(dateStr);
@@ -2239,10 +2253,29 @@ function getVirtualEventAlarms(dateStr){
   }));
 }
 function getCustomEventAlarms(dateStr){
-  return (state.customEvents||[]).filter(e=>e.date===dateStr && e.alarm_enabled && e.time).map(e=>({
+  return (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr) && e.alarm_enabled && e.time).map(e=>({
     id:"cevt_"+e.id, title:e.label||"Event", time:e.time,
     alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true
   }));
+}
+/* Whether a (possibly repeating) custom event occurs on a given date. */
+function eventOccursOnDate(ev, dateStr){
+  if(!ev || !ev.date) return false;
+  if(dateStr < ev.date) return false;
+  if(ev.repeat_until && dateStr > ev.repeat_until) return false;
+  const repeat = ev.repeat || "none";
+  if(repeat==="none") return ev.date===dateStr;
+  if(repeat==="daily") return true;
+  if(repeat==="weekly"){
+    const days = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days : [weekdayIndexOf(ev.date)];
+    return days.includes(weekdayIndexOf(dateStr));
+  }
+  if(repeat==="monthly"){
+    const day1 = Number(ev.date.split("-")[2]);
+    const day2 = Number(dateStr.split("-")[2]);
+    return day1===day2;
+  }
+  return ev.date===dateStr;
 }
 /* ============ Block/Rotation Class Schedule (A/B/C/D day rotation) ============ */
 function weekdayIndexOf(dateStr){ const [y,m,d]=dateStr.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
@@ -2350,7 +2383,7 @@ function getDayTimelineItems(dateStr){
     state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr)}));
     state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id}));
   }
-  (state.customEvents||[]).filter(e=>e.date===dateStr).forEach(e=>items.push({time:e.time||"", label:e.label, emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes}));
+  (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes}));
   const sched = getScheduleDayInfo(dateStr);
   if(sched && !sched.noSchool){
     sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:(sched.semester&&sched.semester.periodMinutes)||30}));
@@ -2962,17 +2995,30 @@ function renderPlannerMonth(){
   return html;
 }
 
-/* One-off custom Planner events (not tied to a template) */
+/* One-off (or repeating) custom Planner events (not tied to a template) */
 let customEventAlarmOn = false;
+let ceRepeatDays = [1,2,3,4,5];
+const WEEKDAY_OPTS = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
 function customEventFormHtml(dateStr, ev){
-  ev = ev || {date:dateStr, time:"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate"};
+  ev = ev || {date:dateStr, time:"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate", repeat:"none", repeat_days:[], repeat_until:""};
   customEventAlarmOn = !!ev.alarm_enabled;
+  ceRepeatDays = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days.slice() : [weekdayIndexOf(ev.date||dateStr)];
+  const repeat = ev.repeat || "none";
+  const repeatLabels = {none:"Does not repeat", daily:"Every day", weekly:"Weekly", monthly:"Monthly (same date)"};
   return '<h2>'+(ev.id?"Edit Event":"New Event")+'</h2>'+
     '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="ce_emoji" type="text" maxlength="4" value="'+escapeHtml(ev.emoji)+'"></div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="ce_label" type="text" placeholder="e.g. Dentist appointment" value="'+escapeHtml(ev.label)+'"></div></div>'+
     '<div class="row-inline"><div class="field"><label>Date</label><input id="ce_date" type="date" value="'+(ev.date||dateStr)+'"></div>'+
     '<div class="field"><label>Time</label><input id="ce_time" type="time" value="'+(ev.time||"09:00")+'"></div></div>'+
     '<div class="field"><label>Duration (min)</label><input id="ce_duration" type="number" min="5" value="'+(ev.duration_minutes||30)+'"></div>'+
+    '<div class="field"><label>Repeat</label><select id="ce_repeat" onchange="document.getElementById(\'ce_repeatDaysBlock\').style.display=this.value===\'weekly\'?\'\':\'none\';document.getElementById(\'ce_repeatUntilBlock\').style.display=this.value===\'none\'?\'none\':\'\';">'+
+      Object.keys(repeatLabels).map(r=>'<option value="'+r+'" '+(repeat===r?"selected":"")+'>'+repeatLabels[r]+'</option>').join("")+
+    '</select></div>'+
+    '<div id="ce_repeatDaysBlock" style="'+(repeat==="weekly"?"":"display:none;")+'"><div class="field"><label>Repeat on</label><div class="chip-group">'+
+      WEEKDAY_OPTS.map(w=>'<div class="chip '+(ceRepeatDays.includes(w[0])?"selected":"")+'" data-action="pickEventRepeatDay" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+
+    '</div></div></div>'+
+    '<div id="ce_repeatUntilBlock" style="'+(repeat!=="none"?"":"display:none;")+'"><div class="field"><label>Repeat until (optional)</label><input id="ce_repeatUntil" type="date" value="'+(ev.repeat_until||"")+'"></div></div>'+
+    (ev.id && repeat!=="none" ? '<p class="hc-meta">Editing or deleting updates the whole repeating series.</p>' : "")+
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
     '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
@@ -3197,13 +3243,45 @@ function openApplyTemplateModal(dateStr){
   if(state.scheduleTemplates.length===0){
     html += '<p class="hc-meta">No schedules yet. Create one first.</p><button class="btn block" data-action="openTemplateForm">+ New Schedule</button>';
   } else {
-    html += '<div style="display:flex;flex-direction:column;gap:8px;">'+state.scheduleTemplates.map(tm=>
-      '<button class="btn secondary block" style="justify-content:flex-start;" data-action="applyTemplate" data-id="'+tm.id+'" data-date="'+dateStr+'">'+tm.emoji+' '+escapeHtml(tm.name)+'</button>').join("")+'</div>';
+    const dp = state.dayPlans.find(x=>x.date===dateStr);
+    const rule = templateRuleForDate(dateStr);
+    if(!dp && rule){
+      const rtm = state.scheduleTemplates.find(t=>t.id===rule.template_id);
+      html += '<p class="hc-meta">🔁 Currently following the recurring "'+(rtm?escapeHtml(rtm.name):"")+'" schedule ('+(rule.days||[]).map(d=>WEEKDAY_OPTS[d][1]).join("/")+').</p>';
+    }
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">'+state.scheduleTemplates.map(tm=>{
+      const tmRule = (state.templateRules||[]).find(r=>r.template_id===tm.id);
+      return '<div style="display:flex;gap:6px;">'+
+        '<button class="btn secondary block" style="flex:1;justify-content:flex-start;" data-action="applyTemplate" data-id="'+tm.id+'" data-date="'+dateStr+'">'+tm.emoji+' '+escapeHtml(tm.name)+(tmRule?' <span class="tag" style="margin-left:6px;">🔁</span>':'')+'</button>'+
+        '<button class="icon-btn" data-action="openTemplateRepeatForm" data-id="'+tm.id+'" title="Set up repeat">🔁</button>'+
+        '</div>';
+    }).join("")+'</div>';
     const current = getTemplateForDate(dateStr);
     if(current) html += '<button class="btn ghost block" style="margin-top:10px;" data-action="clearTemplate" data-date="'+dateStr+'">Clear schedule for this day</button>';
     html += '<button class="btn ghost sm" style="margin-top:6px;" data-action="openTemplateForm">+ New Schedule</button>';
   }
   openModal(html);
+}
+
+/* Recurring weekly schedule-template rules ("this schedule repeats every Mon/Wed/Fri…") */
+let trRepeatDays = [1,2,3,4,5];
+function templateRepeatFormHtml(templateId, rule){
+  const tm = state.scheduleTemplates.find(x=>x.id===templateId);
+  rule = rule || {template_id:templateId, days:[], startDate:todayStr(), endDate:""};
+  trRepeatDays = (rule.days && rule.days.length) ? rule.days.slice() : [1,2,3,4,5];
+  return '<h2>🔁 Repeat "'+escapeHtml(tm?tm.name:"Schedule")+'"</h2>'+
+    '<p class="hc-meta">Automatically apply this schedule on the selected days going forward, without adding it to each day one at a time.</p>'+
+    '<div class="field"><label>Repeat on</label><div class="chip-group">'+WEEKDAY_OPTS.map(w=>'<div class="chip '+(trRepeatDays.includes(w[0])?"selected":"")+'" data-action="pickTemplateRepeatDay" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div>'+
+    '<div class="row-inline"><div class="field"><label>Starting</label><input id="tr_start" type="date" value="'+(rule.startDate||todayStr())+'"></div>'+
+    '<div class="field"><label>Ending (optional)</label><input id="tr_end" type="date" value="'+(rule.endDate||"")+'"></div></div>'+
+    '<p class="hc-meta">A specific day can still be changed or cleared individually — that always overrides the repeat.</p>'+
+    '<div class="modal-actions">'+(rule.id?'<button class="btn danger" data-action="deleteTemplateRepeatRule" data-id="'+templateId+'">Stop Repeating</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveTemplateRepeatRule" data-id="'+templateId+'" style="flex:1">Save</button></div>';
+}
+function openTemplateRepeatForm(templateId){
+  const rule = (state.templateRules||[]).find(r=>r.template_id===templateId) || null;
+  openModal(templateRepeatFormHtml(templateId, rule));
 }
 
 /* ============ Reminders (simplified) ============ */
@@ -4191,13 +4269,50 @@ document.addEventListener("click", async function(e){
     case "clearTemplate": {
       const date = t.getAttribute("data-date");
       state.dayPlans = state.dayPlans.filter(dp=>dp.date!==date);
+      // If a recurring rule still covers this date, leave an explicit "skip" marker
+      // (template_id:null) so the rule doesn't just re-apply on the next render.
+      if(templateRuleForDate(date)) state.dayPlans.push({id:uid(), date, template_id:null});
       saveState(); closeModal(); render();
+      toast("Schedule cleared for this day");
+      break;
+    }
+    case "openTemplateRepeatForm": openTemplateRepeatForm(id); break;
+    case "pickTemplateRepeatDay": {
+      const wd = Number(v);
+      const idx = trRepeatDays.indexOf(wd);
+      if(idx>=0) trRepeatDays.splice(idx,1); else trRepeatDays.push(wd);
+      document.querySelectorAll('[data-action="pickTemplateRepeatDay"]').forEach(c=>c.classList.toggle("selected", trRepeatDays.includes(Number(c.getAttribute("data-v")))));
+      break;
+    }
+    case "saveTemplateRepeatRule": {
+      if(trRepeatDays.length===0){ toast("Pick at least one day"); return; }
+      const startDate = (document.getElementById("tr_start").value)||todayStr();
+      const endDate = document.getElementById("tr_end").value||"";
+      if(endDate && endDate<startDate){ toast("End date must be on or after the start date"); return; }
+      state.templateRules = state.templateRules || [];
+      let rule = state.templateRules.find(r=>r.template_id===id);
+      if(rule){ rule.days=trRepeatDays.slice(); rule.startDate=startDate; rule.endDate=endDate; }
+      else state.templateRules.push({id:uid(), template_id:id, days:trRepeatDays.slice(), startDate, endDate});
+      saveState(); closeModal(); render();
+      toast("Repeating schedule saved");
+      break;
+    }
+    case "deleteTemplateRepeatRule": {
+      state.templateRules = (state.templateRules||[]).filter(r=>r.template_id!==id);
+      saveState(); closeModal(); render();
+      toast("Stopped repeating");
       break;
     }
     case "openManageTemplates": {
       let html = "<h2>Schedule Templates</h2>";
       if(state.scheduleTemplates.length===0) html += '<p class="hc-meta">No schedules yet.</p>';
-      else html += state.scheduleTemplates.map(tm=>'<div class="habit-card"><div class="emoji-badge" style="background:'+tm.color+'22">'+tm.emoji+'</div><div class="hc-body"><div class="hc-title">'+escapeHtml(tm.name)+'</div><div class="hc-meta">'+(tm.time_blocks||[]).length+' items</div></div><button class="icon-btn" data-action="openTemplateForm" data-id="'+tm.id+'">✏️</button></div>').join("");
+      else html += state.scheduleTemplates.map(tm=>{
+        const rule = (state.templateRules||[]).find(r=>r.template_id===tm.id);
+        const ruleMeta = rule ? ('🔁 Repeats '+(rule.days||[]).map(d=>WEEKDAY_OPTS[d][1]).join("/")+(rule.endDate?' until '+fmtDatePretty(rule.endDate):'')) : (tm.time_blocks||[]).length+' items';
+        return '<div class="habit-card"><div class="emoji-badge" style="background:'+tm.color+'22">'+tm.emoji+'</div><div class="hc-body"><div class="hc-title">'+escapeHtml(tm.name)+'</div><div class="hc-meta">'+ruleMeta+'</div></div>'+
+          '<button class="icon-btn" data-action="openTemplateRepeatForm" data-id="'+tm.id+'" title="Repeat">🔁</button>'+
+          '<button class="icon-btn" data-action="openTemplateForm" data-id="'+tm.id+'">✏️</button></div>';
+      }).join("");
       html += '<button class="btn block" style="margin-top:12px;" data-action="openTemplateForm">+ New Schedule</button>';
       openModal(html);
       break;
@@ -4220,6 +4335,7 @@ document.addEventListener("click", async function(e){
     case "deleteTemplate": {
       state.scheduleTemplates = state.scheduleTemplates.filter(x=>x.id!==id);
       state.dayPlans = state.dayPlans.filter(dp=>dp.template_id!==id);
+      state.templateRules = (state.templateRules||[]).filter(r=>r.template_id!==id);
       saveState(); closeModal(); render();
       break;
     }
@@ -4237,9 +4353,17 @@ document.addEventListener("click", async function(e){
       customEventAlarmOn = isOn;
       break;
     }
+    case "pickEventRepeatDay": {
+      const wd = Number(v);
+      const idx = ceRepeatDays.indexOf(wd);
+      if(idx>=0) ceRepeatDays.splice(idx,1); else ceRepeatDays.push(wd);
+      document.querySelectorAll('[data-action="pickEventRepeatDay"]').forEach(c=>c.classList.toggle("selected", ceRepeatDays.includes(Number(c.getAttribute("data-v")))));
+      break;
+    }
     case "saveCustomEvent": {
       const label = document.getElementById("ce_label").value.trim();
       if(!label){ toast("Please enter a title"); return; }
+      const repeat = document.getElementById("ce_repeat") ? document.getElementById("ce_repeat").value : "none";
       const payload = {
         label, emoji: document.getElementById("ce_emoji").value.trim()||"📌",
         date: document.getElementById("ce_date").value,
@@ -4247,7 +4371,10 @@ document.addEventListener("click", async function(e){
         duration_minutes: Number(document.getElementById("ce_duration").value)||30,
         description: document.getElementById("ce_desc").value.trim(),
         alarm_enabled: customEventAlarmOn,
-        alarm_level: customEventAlarmOn ? (document.getElementById("ce_alarm_level")?document.getElementById("ce_alarm_level").value:"moderate") : "moderate"
+        alarm_level: customEventAlarmOn ? (document.getElementById("ce_alarm_level")?document.getElementById("ce_alarm_level").value:"moderate") : "moderate",
+        repeat: repeat,
+        repeat_days: repeat==="weekly" ? ceRepeatDays.slice() : [],
+        repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : ""
       };
       state.customEvents = state.customEvents || [];
       if(id){ Object.assign(state.customEvents.find(x=>x.id===id), payload); } else { payload.id = uid(); state.customEvents.push(payload); }
