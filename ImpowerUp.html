@@ -472,9 +472,10 @@ function defaultState(){
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", alertSound:"classic", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
-      cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null },
+      cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
+      brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle" },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[]
   };
 }
 let state = null;
@@ -1726,9 +1727,40 @@ function eventOccursOnDate(ev, dateStr){
   }
   return ev.date===dateStr;
 }
-/* ============ Block/Rotation Class Schedule (A/B/C/D day rotation) ============ */
+/* ============ Class Schedule — Fixed / Week Rotation / Day Rotation ============ */
 function weekdayIndexOf(dateStr){ const [y,m,d]=dateStr.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
-function getSemesters(){ return state.semesters || (state.semesters=[]); }
+function periodTimesFor(sem){
+  // Legacy helper — only used to migrate old uniform-period-time semesters into per-class time slots.
+  const count = sem.periodsPerDay||6;
+  const [sh,sm] = (sem.defaultStartTime||"08:00").split(":").map(Number);
+  let mins = (sh||0)*60+(sm||0);
+  const dur = sem.periodMinutes||50, gap = sem.passingMinutes==null?5:sem.passingMinutes;
+  const times = [];
+  for(let i=0;i<count;i++){
+    const h = Math.floor(mins/60)%24, mm = mins%60;
+    times.push(String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"));
+    mins += dur+gap;
+  }
+  return times;
+}
+function migrateSemesterToClassSubjects(sem){
+  if(!sem.scheduleType) sem.scheduleType = "day_rotation";
+  if(!sem.terms) sem.terms = [];
+  if(sem.classSubjects) return;
+  const classSubjects = [];
+  if(sem.classes){
+    const times = periodTimesFor(sem);
+    Object.keys(sem.classes).forEach(letter=>{
+      (sem.classes[letter]||[]).forEach((subj,i)=>{
+        const name = (subj||"").trim();
+        if(!name) return;
+        classSubjects.push({ id: uid(), name, color: COLORS[classSubjects.length % COLORS.length], slots: [{ id: uid(), dayKey: letter, time: times[i]||"09:00", duration: sem.periodMinutes||50, dateRangeMode:"none", termId:null, startDate:null, endDate:null }] });
+      });
+    });
+  }
+  sem.classSubjects = classSubjects;
+}
+function getSemesters(){ const list = state.semesters || (state.semesters=[]); list.forEach(migrateSemesterToClassSubjects); return list; }
 function activeSemester(){ return getSemesters().find(s=>s.id===state.activeSemesterId) || null; }
 function semesterForDate(dateStr){
   const active = activeSemester();
@@ -1746,33 +1778,70 @@ function plannerHolidayBadgeHtml(dateStr, size){
   const typeIcon = {holiday:"🎉", break:"🏖️", day_off:"📴"};
   return '<span class="tag" style="background:var(--surface-2);'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+(typeIcon[h.type]||"🌴")+' '+escapeHtml(h.label)+'</span>';
 }
-function rotationLetters(sem){ const n = sem.rotationLength||4; return Array.from({length:n},(_,i)=>String.fromCharCode(65+i)); }
-function getRotationLetter(sem, dateStr){
-  if(dateStr<sem.startDate || dateStr>sem.endDate) return null;
-  if(!isSchoolWeekday(sem, dateStr) || isHolidayDate(sem, dateStr)) return null;
-  // Holidays are skipped entirely from the count, so the letter sequence "bumps" forward
-  // onto the next real school day instead of being consumed by the day off.
-  let count = 0, cur = sem.startDate;
-  while(cur < dateStr){
-    if(isSchoolWeekday(sem, cur) && !isHolidayDate(sem, cur)) count++;
-    cur = addDays(cur, 1);
+const WEEKDAY_KEY_NAMES = {0:"Sun",1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri",6:"Sat"};
+function dayKeyOptions(sem){
+  if(sem.scheduleType==="fixed"){
+    return [1,2,3,4,5,6,0].filter(wd=>(sem.activeWeekdays||[1,2,3,4,5]).includes(wd)).map(wd=>({key:String(wd), label:WEEKDAY_KEY_NAMES[wd]}));
   }
   const n = sem.rotationLength||4;
+  return Array.from({length:n},(_,i)=>{ const l = String.fromCharCode(65+i); return {key:l, label:l}; });
+}
+function dayKeyLabel(sem, dayKey){
+  if(dayKey==null) return null;
+  if(sem.scheduleType==="fixed") return WEEKDAY_KEY_NAMES[Number(dayKey)]||dayKey;
+  if(sem.scheduleType==="week_rotation") return dayKey+" Week";
+  return dayKey+" Day";
+}
+function scheduleTypeHint(type){
+  if(type==="fixed") return "Same schedule every week — classes are tied to a day of the week, no rotation.";
+  if(type==="week_rotation") return "Whole weeks alternate (e.g. \"A Week\", \"B Week\") — classes are tied to which week it is. Holidays don't consume a week.";
+  return "Classes rotate day by day (A, B, C, D…) — classes are tied to the rotation day. Weekends and holidays don't consume a day.";
+}
+function mondayOf(dateStr){ const dow = weekdayIndexOf(dateStr); const offset = dow===0 ? -6 : (1-dow); return addDays(dateStr, offset); }
+function weekHasSchoolDay(sem, mondayDateStr){
+  for(let i=0;i<7;i++){ const d = addDays(mondayDateStr, i); if(d>sem.endDate) break; if(isSchoolWeekday(sem,d) && !isHolidayDate(sem,d)) return true; }
+  return false;
+}
+function getScheduleDayKey(sem, dateStr){
+  if(sem.scheduleType==="fixed") return String(weekdayIndexOf(dateStr));
+  const n = sem.rotationLength||4;
+  if(sem.scheduleType==="week_rotation"){
+    const startWeekMonday = mondayOf(sem.startDate), dateWeekMonday = mondayOf(dateStr);
+    let count = 0, cur = startWeekMonday;
+    while(cur < dateWeekMonday){ if(weekHasSchoolDay(sem, cur)) count++; cur = addDays(cur, 7); }
+    const idx = ((sem.startLetterIndex||0) + count) % n;
+    return String.fromCharCode(65+idx);
+  }
+  // day_rotation — holidays are skipped entirely from the count, so the letter sequence "bumps" forward
+  // onto the next real school day instead of being consumed by the day off.
+  let count = 0, cur = sem.startDate;
+  while(cur < dateStr){ if(isSchoolWeekday(sem, cur) && !isHolidayDate(sem, cur)) count++; cur = addDays(cur, 1); }
   const idx = ((sem.startLetterIndex||0) + count) % n;
   return String.fromCharCode(65+idx);
 }
-function periodTimesFor(sem){
-  const count = sem.periodsPerDay||6;
-  const [sh,sm] = (sem.defaultStartTime||"08:00").split(":").map(Number);
-  let mins = (sh||0)*60+(sm||0);
-  const dur = sem.periodMinutes||50, gap = sem.passingMinutes==null?5:sem.passingMinutes;
-  const times = [];
-  for(let i=0;i<count;i++){
-    const h = Math.floor(mins/60)%24, mm = mins%60;
-    times.push(String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"));
-    mins += dur+gap;
+function classDateRangeCovers(sem, slot, dateStr){
+  if(slot.dateRangeMode==="manual"){
+    return (!slot.startDate || dateStr>=slot.startDate) && (!slot.endDate || dateStr<=slot.endDate);
   }
-  return times;
+  if(slot.dateRangeMode==="term" && slot.termId){
+    const term = (sem.terms||[]).find(t=>t.id===slot.termId);
+    if(term) return dateStr>=term.startDate && dateStr<=term.endDate;
+  }
+  return true;
+}
+function classesForDayKey(sem, dayKey, dateStr){
+  const list = [];
+  (sem.classSubjects||[]).forEach(cls=>{
+    if(!cls.name || !cls.name.trim()) return;
+    (cls.slots||[]).forEach(slot=>{
+      if(String(slot.dayKey)!==String(dayKey)) return;
+      if(dateStr<sem.startDate || dateStr>sem.endDate) return;
+      if(!classDateRangeCovers(sem, slot, dateStr)) return;
+      list.push({subject:cls.name.trim(), time:slot.time||"", duration:slot.duration||30, classId:cls.id, slotId:slot.id, color:cls.color||COLORS[0]});
+    });
+  });
+  list.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
+  return list;
 }
 function getScheduleDayInfo(dateStr){
   const override = (state.scheduleOverrides||{})[dateStr];
@@ -1781,24 +1850,19 @@ function getScheduleDayInfo(dateStr){
     const effSem = sem || activeSemester();
     if(override.mode==="custom"){
       const classes = (override.classes||[]).filter(c=>c.subject&&c.subject.trim());
-      return {semester:effSem, letter:null, noSchool:false, reason:null, classes, overridden:true, overrideLabel:override.label||"Custom Schedule"};
+      return {semester:effSem, dayKey:null, letter:null, dayLabel:null, noSchool:false, reason:null, classes, overridden:true, overrideLabel:override.label||"Custom Schedule"};
     }
     if(override.mode==="letter" && effSem){
-      const subjects = (effSem.classes && effSem.classes[override.letter]) || [];
-      const times = periodTimesFor(effSem);
-      const classes = subjects.map((subj,i)=>({subject:(subj||"").trim(), time:times[i]||""})).filter(c=>c.subject);
-      return {semester:effSem, letter:override.letter, noSchool:false, reason:null, classes, overridden:true};
+      const classes = classesForDayKey(effSem, override.letter, dateStr);
+      return {semester:effSem, dayKey:override.letter, letter:override.letter, dayLabel:dayKeyLabel(effSem, override.letter), noSchool:false, reason:null, classes, overridden:true};
     }
   }
   if(!sem) return null;
-  if(!isSchoolWeekday(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"weekend", classes:[]};
-  if(isHolidayDate(sem, dateStr)) return {semester:sem, letter:null, noSchool:true, reason:"holiday", classes:[]};
-  const letter = getRotationLetter(sem, dateStr);
-  if(!letter) return {semester:sem, letter:null, noSchool:true, reason:"out_of_range", classes:[]};
-  const subjects = (sem.classes && sem.classes[letter]) || [];
-  const times = periodTimesFor(sem);
-  const classes = subjects.map((subj,i)=>({subject:(subj||"").trim(), time:times[i]||""})).filter(c=>c.subject);
-  return {semester:sem, letter, noSchool:false, reason:null, classes};
+  if(!isSchoolWeekday(sem, dateStr)) return {semester:sem, dayKey:null, letter:null, dayLabel:null, noSchool:true, reason:"weekend", classes:[]};
+  if(isHolidayDate(sem, dateStr)) return {semester:sem, dayKey:null, letter:null, dayLabel:null, noSchool:true, reason:"holiday", classes:[]};
+  const dayKey = getScheduleDayKey(sem, dateStr);
+  const classes = classesForDayKey(sem, dayKey, dateStr);
+  return {semester:sem, dayKey, letter: sem.scheduleType==="fixed"?null:dayKey, dayLabel: dayKeyLabel(sem,dayKey), noSchool:false, reason:null, classes};
 }
 function dayLetterBadgeHtml(dateStr, size){
   const info = getScheduleDayInfo(dateStr);
@@ -1806,7 +1870,7 @@ function dayLetterBadgeHtml(dateStr, size){
   if(info.noSchool){
     return info.reason==="holiday" ? '<span class="tag" style="background:var(--surface-2);'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">No School</span>' : "";
   }
-  const label = info.letter ? (info.letter+" Day"+(info.overridden?" (swapped)":"")) : (info.overrideLabel||"Custom Schedule");
+  const label = info.dayLabel ? (info.dayLabel+(info.overridden?" (swapped)":"")) : (info.overrideLabel||"Custom Schedule");
   return '<span class="tag" style="background:var(--accent);color:#fff;'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+escapeHtml(label)+'</span>';
 }
 function getDayTimelineItems(dateStr){
@@ -1816,27 +1880,31 @@ function getDayTimelineItems(dateStr){
     (template.time_blocks||[]).forEach(b=>{
       if(b.type==="habit"){
         const h = state.habits.find(x=>x.id===b.habit_id);
-        if(h) items.push({time:b.time, label:b.label||h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), duration:b.duration_minutes});
+        if(h) items.push({time:b.time, label:b.label||h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), duration:b.duration_minutes, color:h.color});
       } else if(b.type==="reminder"){
         const r = state.reminders.find(x=>x.id===b.reminder_id);
-        if(r) items.push({time:b.time, label:b.label||r.title, emoji:"⏰", type:"reminder", id:r.id, duration:b.duration_minutes});
+        if(r) items.push({time:b.time, label:b.label||r.title, emoji:"⏰", type:"reminder", id:r.id, duration:b.duration_minutes, color:r.color});
       } else {
         items.push({time:b.time, label:b.label||"Scheduled item", emoji:b.alarm_enabled?"🔔":"📌", type:"event", duration:b.duration_minutes});
       }
     });
     const coveredHabitIds = new Set((template.time_blocks||[]).filter(b=>b.type==="habit").map(b=>b.habit_id));
     const coveredReminderIds = new Set((template.time_blocks||[]).filter(b=>b.type==="reminder").map(b=>b.reminder_id));
-    state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr) && !coveredHabitIds.has(h.id)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr)}));
-    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr)) && !coveredReminderIds.has(r.id)).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id}));
+    state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr) && !coveredHabitIds.has(h.id)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), color:h.color}));
+    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr)) && !coveredReminderIds.has(r.id)).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   } else {
-    state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr)}));
-    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id}));
+    state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), color:h.color}));
+    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   }
-  (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes}));
+  (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color}));
   const sched = getScheduleDayInfo(dateStr);
   if(sched && !sched.noSchool){
-    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:(sched.semester&&sched.semester.periodMinutes)||30}));
+    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:c.duration||30, color:c.color}));
   }
+  (state.tasks||[]).filter(t=>t.date===dateStr).forEach(t=>{
+    const link = taskLinkedInfo(t);
+    items.push({time:"", label:t.title, emoji:"📝", type:"task", id:t.id, done:t.status==="done", color:t.color, duration:t.planned_minutes, linkLabel: link?link.label:null});
+  });
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
 }
@@ -1846,6 +1914,7 @@ const ROUTES = [
   {path:"home", label:"Home", icon:"🏠"},
   {path:"habits", label:"Habits", icon:"✅"},
   {path:"goals", label:"Goals", icon:"🎯"},
+  {path:"tasks", label:"Tasks", icon:"📝"},
   {path:"planner", label:"Planner", icon:"🗓️"},
   {path:"assessments", label:"Assessments", icon:"📋"},
   {path:"reminders", label:"Alerts", icon:"⏰"},
@@ -1954,6 +2023,7 @@ function render(){
   if(route==="home") body = renderHome();
   else if(route==="habits") body = renderHabits();
   else if(route==="goals") body = renderGoals();
+  else if(route==="tasks") body = renderTasks();
   else if(route==="planner") body = renderPlanner();
   else if(route==="assessments") body = renderAssessments();
   else if(route==="reminders") body = renderReminders();
@@ -1975,6 +2045,7 @@ function render(){
     if(activeF) startFocusTicker(activeF);
   }
   if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
+  if(route==="tasks") startTasksCountdownTicker();
 }
 
 /* ============ Onboarding ============ */
@@ -2340,11 +2411,16 @@ function dayTimelineListHtml(dateStr){
         '</div>';
     } else if(it.type==="custom_event"){
       controls = '<button class="icon-btn" data-action="editCustomEvent" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>';
+    } else if(it.type==="task"){
+      controls = it.done
+        ? '<button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>'
+        : '<div style="display:flex;gap:6px;flex-shrink:0;"><button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+it.id+'">Done</button><button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'">✏️</button></div>';
     }
-    return '<div class="timeline-item" style="align-items:center;"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
-      '<div class="timeline-line"><div class="timeline-dot" style="background:'+(tmpl?tmpl.color:"var(--accent)")+'"></div></div>'+
+    const itColor = it.color||(tmpl?tmpl.color:"var(--accent)");
+    return '<div class="timeline-item" style="align-items:center;'+(it.color?"border-left:3px solid "+it.color+";padding-left:8px;":"")+'"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
+      '<div class="timeline-line"><div class="timeline-dot" style="background:'+itColor+'"></div></div>'+
       '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
-      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):"Event")+'</div></div>'+controls+'</div>';
+      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):it.type==="task"?("Task"+(it.linkLabel?" · "+escapeHtml(it.linkLabel):"")):"Event")+'</div></div>'+controls+'</div>';
   }).join("");
 }
 function dayPreviewModalHtml(dateStr){
@@ -2354,8 +2430,11 @@ function dayPreviewModalHtml(dateStr){
   return '<h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+dayLabel+' '+dayLetterBadgeHtml(dateStr)+plannerHolidayBadgeHtml(dateStr)+'</h2>'+
     (tmpl?'<p class="hc-meta" style="margin-top:-8px;margin-bottom:10px;">'+tmpl.emoji+' '+escapeHtml(tmpl.name)+'</p>':"")+
     '<div style="max-height:55vh;overflow-y:auto;">'+dayTimelineListHtml(dateStr)+'</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">'+
+    '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+dateStr+'">+ Event</button>'+
+    '<button class="btn ghost sm" data-action="openTaskForm" data-v="'+dateStr+'">+ Task</button>'+
+    '</div>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Close</button>'+
-    '<button class="btn secondary" data-action="openCustomEventForm" data-v="'+dateStr+'" style="flex:1">+ Event</button>'+
     '<button class="btn" data-action="jumpToDay" data-v="'+dateStr+'" style="flex:1">Open full day ›</button></div>';
 }
 function renderPlannerDay(){
@@ -2373,6 +2452,7 @@ function renderPlannerDay(){
     '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
     '<button class="icon-btn" data-action="togglePlannerDayCalPos" title="'+(calPos==="bottom"?"Move calendar above":"Move calendar below")+'">'+(calPos==="bottom"?"⬆️":"⬇️")+'</button>'+
     '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
+    '<button class="btn ghost sm" data-action="openTaskForm" data-v="'+plannerDate+'">+ Task</button>'+
     '<button class="btn ghost sm" data-action="openHolidayForm" data-v="'+plannerDate+'">+ Day Off</button>'+
     '<button class="btn ghost sm" data-action="openDayOverrideForm" data-v="'+plannerDate+'">🔀 Override Day</button>'+
     '<button class="btn ghost sm" data-action="openApplyTemplateModal">'+(tmpl?tmpl.emoji+" "+escapeHtml(tmpl.name):"Change schedule")+'</button>'+
@@ -2445,10 +2525,12 @@ function renderPlannerMonth(){
 /* One-off (or repeating) custom Planner events (not tied to a template) */
 let customEventAlarmOn = false;
 let ceRepeatDays = [1,2,3,4,5];
+let ceFormColor = COLORS[0];
 const WEEKDAY_OPTS = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
 function customEventFormHtml(dateStr, ev){
   ev = ev || {date:dateStr, time:"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate", repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week"};
   customEventAlarmOn = !!ev.alarm_enabled;
+  ceFormColor = ev.color || COLORS[(state.customEvents||[]).length % COLORS.length];
   ceRepeatDays = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days.slice() : [weekdayIndexOf(ev.date||dateStr)];
   const repeat = ev.repeat || "none";
   const repeatUnit = ev.repeat_unit || "week";
@@ -2474,6 +2556,7 @@ function customEventFormHtml(dateStr, ev){
     '</div></div></div>'+
     '<div id="ce_repeatUntilBlock" style="'+(repeat!=="none"?"":"display:none;")+'"><div class="field"><label>Repeat until (optional)</label><input id="ce_repeatUntil" type="date" value="'+(ev.repeat_until||"")+'"></div></div>'+
     (ev.id && repeat!=="none" ? '<p class="hc-meta">Editing or deleting updates the whole repeating series.</p>' : "")+
+    '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(ceFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickCEColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="ce_colorWheel" value="'+ceFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
     '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
@@ -2497,49 +2580,137 @@ function updateEventRepeatUI(){
 
 /* ============ Block/Rotation Class Schedule — Settings UI ============ */
 let semFormWeekdays = [1,2,3,4,5];
-let scheduleEditLetter = "A";
+let semFormScheduleType = "day_rotation";
 function semesterFormHtml(sem){
-  sem = sem || {name:"", startDate:todayStr(), endDate:addDays(todayStr(),120), rotationLength:4, startLetterIndex:0, activeWeekdays:[1,2,3,4,5], periodsPerDay:7, defaultStartTime:"08:00", periodMinutes:50, passingMinutes:5};
+  sem = sem || {name:"", startDate:todayStr(), endDate:addDays(todayStr(),120), scheduleType:"day_rotation", rotationLength:4, startLetterIndex:0, activeWeekdays:[1,2,3,4,5]};
   semFormWeekdays = (sem.activeWeekdays||[1,2,3,4,5]).slice();
+  semFormScheduleType = sem.scheduleType || "day_rotation";
   const weekdayOpts = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
   const rotLenOpts = [2,3,4,5,6,7,8];
   const letterOpts = Array.from({length:10},(_,i)=>String.fromCharCode(65+i));
-  return '<h2>'+(sem.id?"Edit Semester":"New Semester")+'</h2>'+
+  let html = '<h2>'+(sem.id?"Edit Semester":"New Semester")+'</h2>'+
     '<div class="field"><label>Name</label><input id="sem_name" type="text" placeholder="e.g. Fall 2026" value="'+escapeHtml(sem.name)+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Start date</label><input id="sem_start" type="date" value="'+sem.startDate+'"></div>'+
     '<div class="field"><label>End date</label><input id="sem_end" type="date" value="'+sem.endDate+'"></div></div>'+
-    '<div class="field"><label>School days (count toward the rotation)</label><div class="chip-group">'+weekdayOpts.map(w=>'<div class="chip '+(semFormWeekdays.includes(w[0])?"selected":"")+'" data-action="pickSemWeekday" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div>'+
-    '<div class="row-inline"><div class="field"><label>Rotation length</label><select id="sem_rotLen">'+rotLenOpts.map(n=>'<option value="'+n+'" '+((sem.rotationLength||4)===n?"selected":"")+'>'+n+' days (A–'+String.fromCharCode(65+n-1)+')</option>').join("")+'</select></div>'+
-    '<div class="field"><label>Start date is a…</label><select id="sem_startLetter">'+letterOpts.map((l,i)=>'<option value="'+i+'" '+((sem.startLetterIndex||0)===i?"selected":"")+'>'+l+' Day</option>').join("")+'</select></div></div>'+
-    '<p class="hc-meta">Holidays don’t consume a letter — mark them below once this is saved, and the rotation just picks up on the next real school day.</p>'+
-    '<div class="row-inline"><div class="field"><label>Periods per day</label><input id="sem_periods" type="number" min="1" max="14" value="'+(sem.periodsPerDay||7)+'"></div>'+
-    '<div class="field"><label>First period starts</label><input id="sem_startTime" type="time" value="'+(sem.defaultStartTime||"08:00")+'"></div></div>'+
-    '<div class="row-inline"><div class="field"><label>Period length (min)</label><input id="sem_periodMin" type="number" min="5" value="'+(sem.periodMinutes||50)+'"></div>'+
-    '<div class="field"><label>Passing time (min)</label><input id="sem_passMin" type="number" min="0" value="'+(sem.passingMinutes==null?5:sem.passingMinutes)+'"></div></div>'+
+    '<div class="field"><label>Schedule type</label><div class="chip-group">'+
+    [["fixed","📌 Fixed"],["week_rotation","🔁 Week Rotation"],["day_rotation","🔀 Day Rotation"]].map(o=>'<div class="chip '+(semFormScheduleType===o[0]?"selected":"")+'" data-action="pickSemScheduleType" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
+    '</div><p class="hc-meta" id="sem_schedTypeHint" style="margin-top:6px;">'+scheduleTypeHint(semFormScheduleType)+'</p></div>'+
+    '<div class="field"><label>School days</label><div class="chip-group">'+weekdayOpts.map(w=>'<div class="chip '+(semFormWeekdays.includes(w[0])?"selected":"")+'" data-action="pickSemWeekday" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div>'+
+    '<div id="sem_rotationBlock" style="display:'+(semFormScheduleType==="fixed"?"none":"")+';">'+
+    '<div class="row-inline"><div class="field"><label>Rotation length</label><select id="sem_rotLen">'+rotLenOpts.map(n=>'<option value="'+n+'" '+((sem.rotationLength||4)===n?"selected":"")+'>'+n+' (A–'+String.fromCharCode(65+n-1)+')</option>').join("")+'</select></div>'+
+    '<div class="field"><label>Starts on…</label><select id="sem_startLetter">'+letterOpts.map((l,i)=>'<option value="'+i+'" '+((sem.startLetterIndex||0)===i?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    '</div>'+
     '<div class="modal-actions">'+(sem.id?'<button class="btn danger" data-action="deleteSemester" data-id="'+sem.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveSemester" data-id="'+(sem.id||"")+'" style="flex:1">Save</button></div>';
+  return html;
 }
 function openSemesterForm(id){
   const sem = id ? getSemesters().find(x=>x.id===id) : null;
   openModal(semesterFormHtml(sem));
 }
-function scheduleClassesCardHtml(sem){
-  const letters = rotationLetters(sem);
-  if(!letters.includes(scheduleEditLetter)) scheduleEditLetter = letters[0];
-  const times = periodTimesFor(sem);
-  const subjects = (sem.classes && sem.classes[scheduleEditLetter]) || [];
-  let html = '<div class="card" style="margin-top:14px;"><h2>📚 Classes by Rotation Day</h2>'+
-    '<p class="hc-meta">Set what’s in each period for '+letters.join("/")+' Days. Times come from the semester’s period settings above.</p>'+
-    '<div class="chip-group" style="margin:10px 0;">'+letters.map(l=>'<div class="chip '+(scheduleEditLetter===l?"selected":"")+'" data-action="pickScheduleLetter" data-v="'+l+'">'+l+' Day</div>').join("")+'</div>';
-  for(let i=0;i<(sem.periodsPerDay||7);i++){
-    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">'+
-      '<div style="flex:0 0 76px;font-size:11.5px;color:var(--text-muted);font-weight:700;">'+fmtTime12(times[i]||"")+'</div>'+
-      '<input type="text" class="clsSubjInput" data-idx="'+i+'" placeholder="Period '+(i+1)+'" value="'+escapeHtml(subjects[i]||"")+'" style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">'+
-      '</div>';
-  }
-  html += '<button class="btn secondary sm" style="margin-top:4px;" data-action="saveScheduleClasses">Save '+scheduleEditLetter+' Day Classes</button></div>';
+let classFormSlots = [];
+function renderClassSlotRows(sem, slots){
+  if(!slots || slots.length===0) return '<p class="hc-meta">No time slots yet — add one below.</p>';
+  const dayOpts = dayKeyOptions(sem);
+  return slots.map((s,i)=>{
+    let row = '<div class="card" style="margin-bottom:8px;padding:10px;" data-slotrow="'+i+'">';
+    row += '<div class="field"><label>'+(sem.scheduleType==="fixed"?"Day of week":(sem.scheduleType==="week_rotation"?"Week":"Day"))+'</label><div class="chip-group">'+dayOpts.map(o=>'<div class="chip '+(String(s.dayKey)===o.key?"selected":"")+'" data-action="pickClassSlotDayKey" data-idx="'+i+'" data-v="'+o.key+'">'+o.label+'</div>').join("")+'</div></div>';
+    row += '<div class="row-inline"><div class="field" style="flex:0 0 118px;"><label>Time</label><input class="cs_time" type="time" data-idx="'+i+'" value="'+(s.time||"09:00")+'"></div>'+
+      '<div class="field" style="flex:0 0 90px;"><label>Mins</label><input class="cs_dur" type="number" min="5" data-idx="'+i+'" value="'+(s.duration||50)+'"></div></div>';
+    row += '<div class="field"><label>Dates</label><div class="chip-group">'+
+      [["none","Whole semester"],["term","Pick a term"],["manual","Custom range"]].map(o=>'<div class="chip '+(s.dateRangeMode===o[0]?"selected":"")+'" data-action="pickClassSlotRangeMode" data-idx="'+i+'" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+'</div></div>';
+    if(s.dateRangeMode==="term"){
+      if((sem.terms||[]).length){
+        row += '<div class="field"><label>Term</label><select class="cs_term" data-idx="'+i+'">'+sem.terms.map(tm=>'<option value="'+tm.id+'" '+(s.termId===tm.id?"selected":"")+'>'+escapeHtml(tm.name)+'</option>').join("")+'</select></div>';
+      } else {
+        row += '<p class="hc-meta">No terms set up yet — add one in Terms below, or use Custom range instead.</p>';
+      }
+    } else if(s.dateRangeMode==="manual"){
+      row += '<div class="row-inline"><div class="field"><label>Start</label><input class="cs_start" type="date" data-idx="'+i+'" value="'+(s.startDate||sem.startDate)+'"></div>'+
+        '<div class="field"><label>End</label><input class="cs_end" type="date" data-idx="'+i+'" value="'+(s.endDate||sem.endDate)+'"></div></div>';
+    }
+    row += '<button class="btn ghost sm" type="button" data-action="removeClassSlotRow" data-idx="'+i+'">Remove time slot</button></div>';
+    return row;
+  }).join("");
+}
+function collectClassSlotsFromDOM(){
+  document.querySelectorAll("#classSlotList [data-slotrow]").forEach(row=>{
+    const idx = Number(row.getAttribute("data-slotrow"));
+    if(!classFormSlots[idx]) return;
+    const s = classFormSlots[idx];
+    const timeEl = row.querySelector(".cs_time"); if(timeEl) s.time = timeEl.value;
+    const durEl = row.querySelector(".cs_dur"); if(durEl) s.duration = Number(durEl.value)||50;
+    const termEl = row.querySelector(".cs_term"); if(termEl) s.termId = termEl.value;
+    const startEl = row.querySelector(".cs_start"); if(startEl) s.startDate = startEl.value;
+    const endEl = row.querySelector(".cs_end"); if(endEl) s.endDate = endEl.value;
+  });
+}
+function rerenderClassSlotList(){
+  const sem = activeSemester();
+  const el = document.getElementById("classSlotList");
+  if(sem && el) el.innerHTML = renderClassSlotRows(sem, classFormSlots);
+}
+let classFormColor = COLORS[0];
+function classFormHtml(sem, cls){
+  cls = cls || {name:""};
+  return '<h2>'+(cls.id?"Edit Class":"New Class")+'</h2>'+
+    '<div class="field"><label>Class name</label><input id="cls_name" type="text" placeholder="e.g. Algebra II" value="'+escapeHtml(cls.name||"")+'"></div>'+
+    '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(classFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickClassColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="cls_colorWheel" value="'+classFormColor+'" title="Pick any color"></div></div>'+
+    '<div class="field"><label>Time slots</label><div id="classSlotList">'+renderClassSlotRows(sem, classFormSlots)+'</div>'+
+    '<button class="btn secondary sm" type="button" data-action="addClassSlotRow">+ Add time slot</button></div>'+
+    '<div class="modal-actions">'+(cls.id?'<button class="btn danger" data-action="deleteClassSubject" data-id="'+cls.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveClassSubject" data-id="'+(cls.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openClassForm(id){
+  const sem = activeSemester();
+  if(!sem){ toast("Set up a semester first"); return; }
+  const cls = id ? (sem.classSubjects||[]).find(x=>x.id===id) : null;
+  classFormSlots = cls ? cls.slots.map(s=>Object.assign({},s)) : [];
+  classFormColor = cls ? (cls.color||COLORS[0]) : COLORS[(sem.classSubjects||[]).length % COLORS.length];
+  openModal(classFormHtml(sem, cls));
+}
+function classesCardHtml(sem){
+  const classes = (sem.classSubjects||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  let html = '<div class="card" style="margin-top:14px;"><h2>📚 Classes</h2>'+
+    '<p class="hc-meta">Add each class once, then give it one or more time slots — each tied to a '+(sem.scheduleType==="fixed"?"day of the week":(sem.scheduleType==="week_rotation"?"rotation week":"rotation day"))+' and time. A class can meet at different times on different days.</p>'+
+    '<button class="btn secondary sm" style="margin:8px 0;" data-action="openClassForm">+ Add Class</button>';
+  if(!classes.length){ html += '<p class="hc-meta">No classes yet.</p></div>'; return html; }
+  html += '<div style="display:flex;flex-direction:column;gap:8px;">'+classes.map(cls=>{
+    const slotSummary = (cls.slots||[]).slice().sort((a,b)=>(a.time||"").localeCompare(b.time||"")).map(s=>dayKeyLabel(sem,s.dayKey)+' '+fmtTime12(s.time||"")).join(", ");
+    return '<div class="habit-card"><div class="emoji-badge" style="background:'+(cls.color||COLORS[0])+'22;">📚</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(cls.name)+'</div><div class="hc-meta">'+(slotSummary||"No time slots")+'</div></div>'+
+      '<button class="icon-btn" data-action="openClassForm" data-id="'+cls.id+'">✏️</button></div>';
+  }).join("")+'</div></div>';
   return html;
+}
+function termFormHtml(term){
+  const sem = activeSemester();
+  term = term || {name:"", startDate:(sem?sem.startDate:todayStr()), endDate:(sem?sem.endDate:todayStr())};
+  return '<h2>'+(term.id?"Edit Term":"New Term")+'</h2>'+
+    '<div class="field"><label>Name</label><input id="term_name" type="text" placeholder="e.g. Term 1, Quarter 2, Trimester 1" value="'+escapeHtml(term.name||"")+'"></div>'+
+    '<div class="row-inline"><div class="field"><label>Start date</label><input id="term_start" type="date" value="'+term.startDate+'"></div>'+
+    '<div class="field"><label>End date</label><input id="term_end" type="date" value="'+term.endDate+'"></div></div>'+
+    '<div class="modal-actions">'+(term.id?'<button class="btn danger" data-action="deleteTerm" data-id="'+term.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveTerm" data-id="'+(term.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openTermForm(id){
+  const sem = activeSemester();
+  if(!sem){ toast("Set up a semester first"); return; }
+  const term = id ? (sem.terms||[]).find(x=>x.id===id) : null;
+  openModal(termFormHtml(term));
+}
+function termsCardHtml(sem){
+  const terms = (sem.terms||[]).slice().sort((a,b)=>a.startDate.localeCompare(b.startDate));
+  return '<div class="card" style="margin-top:14px;"><h2>📆 Terms</h2>'+
+    '<p class="hc-meta">Optional — define named date ranges (Term 1, Quarter 2, etc.) so a class’s time slot can be limited to just part of the semester.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="openTermForm">+ Add Term</button>'+
+    (terms.length?'<div style="margin-top:10px;">'+terms.map(tm=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">📆</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(tm.name)+'</div><div class="hc-meta">'+fmtDatePretty(tm.startDate)+' – '+fmtDatePretty(tm.endDate)+'</div></div>'+
+      '<button class="icon-btn" data-action="openTermForm" data-id="'+tm.id+'">✏️</button></div>').join("")+'</div>':'<p class="hc-meta" style="margin-top:8px;">None added yet.</p>')+
+    '</div>';
 }
 let holFormType = "holiday";
 const HOLIDAY_TYPE_ICON = {holiday:"🎉", break:"🏖️", day_off:"📴"};
@@ -2576,34 +2747,46 @@ function plannerHolidaysCardHtml(){
 /* ---- Per-day schedule override: swap in another rotation day, or write a fully custom one-off day (Exam Day, Special Schedule, etc.) ---- */
 let dayOvFormMode = "letter";
 let dayOvChosenLetter = null;
+let dayOvCustomRows = [];
+function renderDayOvRows(rows){
+  return rows.map((r,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;" data-dovrow="'+i+'">'+
+      '<input type="time" class="dovTimeInput" data-idx="'+i+'" value="'+(r.time||"")+'" style="flex:0 0 118px;padding:10px 8px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">'+
+      '<input type="text" class="dovSubjInput" data-idx="'+i+'" placeholder="Period '+(i+1)+'" value="'+escapeHtml(r.subject||"")+'" style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">'+
+      '<button class="icon-btn" type="button" data-action="removeDayOvRow" data-idx="'+i+'">✕</button>'+
+      '</div>'
+  ).join("");
+}
+function collectDayOvRowsFromDOM(){
+  document.querySelectorAll("#dovRowList [data-dovrow]").forEach(row=>{
+    const idx = Number(row.getAttribute("data-dovrow"));
+    if(!dayOvCustomRows[idx]) return;
+    const timeEl = row.querySelector(".dovTimeInput"); if(timeEl) dayOvCustomRows[idx].time = timeEl.value;
+    const subjEl = row.querySelector(".dovSubjInput"); if(subjEl) dayOvCustomRows[idx].subject = subjEl.value;
+  });
+}
+function rerenderDayOvRowList(){ const el = document.getElementById("dovRowList"); if(el) el.innerHTML = renderDayOvRows(dayOvCustomRows); }
 function dayOverrideFormHtml(dateStr){
   const existing = (state.scheduleOverrides||{})[dateStr];
   const sem = semesterForDate(dateStr) || activeSemester();
-  const letters = sem ? rotationLetters(sem) : [];
+  const opts = sem ? dayKeyOptions(sem) : [];
   let html = '<h2>Override Schedule</h2><p class="hc-meta" style="margin-top:-8px;margin-bottom:10px;">'+fmtDatePretty(dateStr)+'</p>'+
-    '<p class="hc-meta">Swap in another rotation day\'s classes, or write a fully custom one-off schedule for something like an Exam Day or Special Schedule. Either way, it overrides the normal rotation (and any holiday marking) for just this date.</p>'+
+    '<p class="hc-meta">Swap in another day\'s classes, or write a fully custom one-off schedule for something like an Exam Day or Special Schedule. Either way, it overrides the normal schedule (and any holiday marking) for just this date.</p>'+
     '<div class="chip-group" style="margin:10px 0;">'+
     '<div class="chip '+(dayOvFormMode==="letter"?"selected":"")+'" data-action="pickDayOvMode" data-v="letter" data-date="'+dateStr+'">Swap to another day</div>'+
     '<div class="chip '+(dayOvFormMode==="custom"?"selected":"")+'" data-action="pickDayOvMode" data-v="custom" data-date="'+dateStr+'">Fully custom</div>'+
     '</div>';
   if(dayOvFormMode==="letter"){
-    if(!letters.length){
-      html += '<p class="hc-meta">Set up a Class Schedule first (Planner → Schedule tab) to swap between lettered days.</p>';
+    if(!opts.length){
+      html += '<p class="hc-meta">Set up a Class Schedule first (Planner → Schedule tab) to swap between days.</p>';
     } else {
-      html += '<div class="field"><label>Run this day\'s schedule instead</label><div class="chip-group">'+letters.map(l=>'<div class="chip '+(dayOvChosenLetter===l?"selected":"")+'" data-action="pickDayOvLetter" data-v="'+l+'">'+l+' Day</div>').join("")+'</div></div>';
+      html += '<div class="field"><label>Run this day\'s schedule instead</label><div class="chip-group">'+opts.map(o=>'<div class="chip '+(dayOvChosenLetter===o.key?"selected":"")+'" data-action="pickDayOvLetter" data-v="'+o.key+'">'+o.label+'</div>').join("")+'</div></div>';
     }
   } else {
-    const count = sem ? (sem.periodsPerDay||7) : 6;
-    const defTimes = sem ? periodTimesFor(sem) : [];
-    const rows = (existing && existing.mode==="custom" && existing.classes && existing.classes.length) ? existing.classes : Array.from({length:count},(_,i)=>({subject:"",time:defTimes[i]||""}));
     html += '<div class="field"><label>Label</label><input id="dov_label" type="text" placeholder="e.g. Exam Day, Special Schedule, Early Dismissal" value="'+escapeHtml((existing&&existing.label)||"")+'"></div>';
     html += '<label style="display:block;font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-muted);">Periods</label>';
-    for(let i=0;i<rows.length;i++){
-      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
-        '<input type="time" class="dovTimeInput" data-idx="'+i+'" value="'+(rows[i].time||"")+'" style="flex:0 0 118px;padding:10px 8px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">'+
-        '<input type="text" class="dovSubjInput" data-idx="'+i+'" placeholder="Period '+(i+1)+'" value="'+escapeHtml(rows[i].subject||"")+'" style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">'+
-        '</div>';
-    }
+    html += '<div id="dovRowList">'+renderDayOvRows(dayOvCustomRows)+'</div>';
+    html += '<button class="btn secondary sm" type="button" data-action="addDayOvRow">+ Add period</button>';
   }
   html += '<div class="modal-actions" style="margin-top:10px;">'+(existing?'<button class="btn danger" data-action="clearDayOverride" data-v="'+dateStr+'">Remove Override</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
@@ -2614,13 +2797,14 @@ function openDayOverrideForm(dateStr){
   const existing = (state.scheduleOverrides||{})[dateStr];
   dayOvFormMode = (existing && existing.mode) || "letter";
   dayOvChosenLetter = (existing && existing.mode==="letter") ? existing.letter : null;
+  dayOvCustomRows = (existing && existing.mode==="custom" && existing.classes && existing.classes.length) ? existing.classes.map(c=>Object.assign({},c)) : [{subject:"",time:"09:00"}];
   openModal(dayOverrideFormHtml(dateStr));
 }
 function scheduleSettingsCardHtml(){
   const sems = getSemesters();
   const active = activeSemester();
-  let html = '<div class="card" style="margin-top:14px;"><h2>🎓 Class Schedule (Block Rotation)</h2>'+
-    '<p class="hc-meta">Set up A/B/C/D (or longer) rotating school days — the Planner shows which day it is and lists that day’s classes automatically.</p>';
+  let html = '<div class="card" style="margin-top:14px;"><h2>🎓 Class Schedule</h2>'+
+    '<p class="hc-meta">Set up your school schedule — fixed, week rotation, or day rotation — and the Planner shows what\'s happening each day automatically.</p>';
   if(sems.length){
     html += '<div class="field" style="margin-top:10px;"><label>Active semester</label><select id="sem_activeSelect">'+
       sems.map(s=>'<option value="'+s.id+'" '+(state.activeSemesterId===s.id?"selected":"")+'>'+escapeHtml(s.name)+' ('+s.startDate+' – '+s.endDate+')</option>').join("")+
@@ -2631,7 +2815,8 @@ function scheduleSettingsCardHtml(){
     '<button class="btn'+(active?" secondary":"")+'" style="flex:1" data-action="openSemesterForm">+ New Semester</button>'+
     '</div></div>';
   if(active){
-    html += scheduleClassesCardHtml(active);
+    html += termsCardHtml(active);
+    html += classesCardHtml(active);
   }
   html += plannerHolidaysCardHtml();
   return html;
@@ -2794,8 +2979,8 @@ function renderReminders(){
   html += state.reminders.slice().sort((a,b)=>(a.time||"").localeCompare(b.time||"")).map(r=>{
     const linkedHabit = state.habits.find(h=>h.id===r.habit_id);
     const linkedGoal = state.goals.find(g=>g.id===r.goal_id);
-    return '<div class="reminder-card">'+
-      '<div class="emoji-badge" style="background:var(--surface-2);font-size:18px;">⏰</div>'+
+    return '<div class="reminder-card" style="'+(r.color?"border-left:3px solid "+r.color+";":"")+'">'+
+      '<div class="emoji-badge" style="background:'+(r.color||"var(--surface-2)")+'22;font-size:18px;">⏰</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(r.title)+'</div>'+
       '<div class="hc-meta"><span>'+fmtTime12(r.time)+'</span><span class="tag">'+(r.alarm_level||"moderate")+'</span><span>'+(r.days||[]).join(", ")+'</span>'+
       (linkedHabit?'<span class="tag">habit</span>':linkedGoal?'<span class="tag">goal</span>':'<span class="tag">standalone</span>')+'</div>'+
@@ -2805,6 +2990,7 @@ function renderReminders(){
   }).join("");
   return html;
 }
+let reminderFormColor = COLORS[0];
 function reminderFormHtml(r){
   r = r || {title:"",time:"08:00",days:["Mon","Tue","Wed","Thu","Fri"],alarm_level:"moderate",message:"",is_active:true};
   return '<h2>'+(r.id?"Edit Reminder":"New Reminder")+'</h2>'+
@@ -2812,6 +2998,7 @@ function reminderFormHtml(r){
     '<div class="row-inline"><div class="field"><label>Time</label><input id="r_time" type="time" value="'+r.time+'"></div>'+
     '<div class="field"><label>Alert level</label><select id="r_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(r.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
     '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+((r.days||[]).includes(d)?"selected":"")+'" data-action="pickRDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
+    '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(reminderFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickRColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="r_colorWheel" value="'+reminderFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Motivational message</label><input id="r_msg" type="text" value="'+escapeHtml(r.message||"")+'"></div>'+
     '<div class="modal-actions">'+(r.id?'<button class="btn danger" data-action="deleteReminder" data-id="'+r.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
@@ -2821,6 +3008,7 @@ let reminderFormDays=[];
 function openReminderForm(id){
   const r = id ? state.reminders.find(x=>x.id===id) : null;
   reminderFormDays = r ? (r.days||[]).slice() : ["Mon","Tue","Wed","Thu","Fri"];
+  reminderFormColor = r ? (r.color||COLORS[0]) : COLORS[state.reminders.length % COLORS.length];
   openModal(reminderFormHtml(r));
 }
 
@@ -2913,6 +3101,11 @@ function renderFocus(){
       '<div class="field"><label>Mode</label><div class="chip-group">'+
       '<div class="chip '+(focusMode==="single"?"selected":"")+'" data-action="setFocusMode" data-v="single">⏱️ Single Timer</div>'+
       '<div class="chip '+(focusMode==="pomodoro"?"selected":"")+'" data-action="setFocusMode" data-v="pomodoro">🍅 Pomodoro</div>'+
+      '</div></div>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🧠 Brain Interruption check-ins</div><div class="hc-meta" style="margin-top:2px;">A popup + sound nudges you back on track at an interval you choose.</div></div><div class="switch '+(state.profile.brainInterruptEnabled?"on":"")+'" data-action="toggleBrainInterrupt"></div></div>'+
+      '<div id="brainInterruptBlock" style="'+(state.profile.brainInterruptEnabled?"":"display:none;")+'"><div class="row-inline">'+
+      '<div class="field"><label>Every (minutes)</label><input id="bi_minutes" type="number" min="1" max="180" value="'+(state.profile.brainInterruptMinutes||10)+'"></div>'+
+      '<div class="field"><label>Alert level</label><select id="bi_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+((state.profile.brainInterruptLevel||"gentle")===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+
       '</div></div>';
     if(focusMode==="pomodoro"){
       const presets = state.pomodoroPresets||[];
@@ -2987,12 +3180,27 @@ function renderActiveFocus(session){
     '<button class="btn" data-action="completeFocus" data-id="'+session.id+'">Finish Now</button>'+
     '</div></div>';
 }
+function checkBrainInterrupt(session){
+  if(!state.profile.brainInterruptEnabled) return;
+  if(document.getElementById("alarmOverlay")) return;
+  const isWorkPhase = session.mode==="pomodoro" ? (session.phases[session.phaseIndex] && session.phases[session.phaseIndex].type==="work") : true;
+  if(!isWorkPhase) return;
+  const intervalMs = Math.max(1, Number(state.profile.brainInterruptMinutes)||10) * 60000;
+  const fallbackStart = session.mode==="pomodoro" ? session.phaseStartTime : session.start_time;
+  const last = session.lastBrainInterruptAt || fallbackStart;
+  if(Date.now() - new Date(last).getTime() >= intervalMs){
+    session.lastBrainInterruptAt = new Date().toISOString();
+    saveState();
+    fireAlarm({id:"brain_"+session.id+"_"+Date.now(), title:"🧠 Stay Focused!", message:"Are you staying focused? Get back on track!", alarm_level: state.profile.brainInterruptLevel||"gentle"});
+  }
+}
 function startFocusTicker(session){
   if(focusTimer) clearInterval(focusTimer);
   let checkinShown = false;
   function tick(){
     const el = document.getElementById("focusTimeDisplay");
     if(!el) { clearInterval(focusTimer); return; }
+    checkBrainInterrupt(session);
     if(session.mode==="pomodoro"){
       const phase = session.phases[session.phaseIndex];
       if(!phase){ clearInterval(focusTimer); return; }
@@ -3046,6 +3254,209 @@ function advancePomodoroPhase(session){
   session.lastCheckinMsg = next.type==="work" ? "Break's over — let's get back to it." : (next.long ? "Great push! Take a longer breather." : "Nice work! Short break time.");
   saveState();
   render();
+}
+
+/* ============ Tasks — planned vs actual time, reflection, and a bedtime countdown ============ */
+function fmtMinutesDuration(mins){
+  mins = Math.max(0, Math.round(mins||0));
+  const h = Math.floor(mins/60), m = mins%60;
+  if(h && m) return h+"h "+m+"m";
+  if(h) return h+"h";
+  return m+"m";
+}
+function pendingTasksTotalMinutes(){
+  return (state.tasks||[]).filter(t=>t.status!=="done").reduce((sum,t)=>sum+(Number(t.planned_minutes)||0),0);
+}
+function bedtimeTargetDate(){
+  const bt = state.profile.bedtime||"22:00";
+  const [bh,bm] = bt.split(":").map(Number);
+  const now = new Date();
+  let target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), bh||22, bm||0, 0, 0);
+  if(target.getTime() <= now.getTime()) target = new Date(target.getTime() + 24*60*60*1000);
+  return target;
+}
+let tasksCountdownTimer = null;
+function startTasksCountdownTicker(){
+  if(tasksCountdownTimer) clearInterval(tasksCountdownTimer);
+  function tick(){
+    const el = document.getElementById("bedtimeCountdown");
+    if(!el){ clearInterval(tasksCountdownTimer); tasksCountdownTimer=null; return; }
+    const remainMs = bedtimeTargetDate().getTime() - Date.now();
+    el.textContent = fmtMinutesDuration(remainMs/60000);
+    const totalPending = pendingTasksTotalMinutes();
+    const fitEl = document.getElementById("bedtimeFitNote");
+    if(fitEl){
+      if(totalPending<=0){ fitEl.textContent = ""; }
+      else if(totalPending*60000 <= remainMs){ fitEl.textContent = "✅ You have time for everything on your list."; fitEl.style.color = "var(--accent2)"; }
+      else { fitEl.textContent = "⚠️ Your pending tasks ("+fmtMinutesDuration(totalPending)+") won't all fit before bedtime."; fitEl.style.color = "var(--danger)"; }
+    }
+  }
+  tick();
+  tasksCountdownTimer = setInterval(tick, 15000);
+}
+function bedtimeWidgetHtml(){
+  return '<div class="card" style="margin-bottom:14px;"><h2>⏳ Time Check</h2>'+
+    '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'+
+    stat(fmtMinutesDuration(pendingTasksTotalMinutes()), "Pending task time")+
+    '<div class="stat"><div class="num" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
+    '</div>'+
+    '<div id="bedtimeFitNote" style="font-size:12.5px;font-weight:700;margin-top:8px;"></div>'+
+    '<button class="btn ghost sm" style="margin-top:8px;" data-action="openBedtimeForm">✏️ Change bedtime</button>'+
+    '</div>';
+}
+function bedtimeFormHtml(){
+  return '<h2>Change Bedtime</h2>'+
+    '<div class="field"><label>Bedtime</label><input id="bt_time" type="time" value="'+(state.profile.bedtime||"22:00")+'"></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveBedtime" style="flex:1">Save</button></div>';
+}
+let taskFormColor = COLORS[0];
+let taskFormCat = "";
+function taskLinkOptionsHtml(selectedValue){
+  let html = '<option value="">None</option>';
+  const sem = activeSemester();
+  if(sem && (sem.classSubjects||[]).length){
+    html += '<optgroup label="Classes">'+sem.classSubjects.map(c=>'<option value="class:'+c.id+'" '+(selectedValue==="class:"+c.id?"selected":"")+'>'+escapeHtml(c.name)+'</option>').join("")+'</optgroup>';
+  }
+  if((state.habits||[]).length){
+    html += '<optgroup label="Habits">'+state.habits.map(h=>'<option value="habit:'+h.id+'" '+(selectedValue==="habit:"+h.id?"selected":"")+'>'+escapeHtml(h.title)+'</option>').join("")+'</optgroup>';
+  }
+  if((state.goals||[]).length){
+    html += '<optgroup label="Goals">'+state.goals.map(g=>'<option value="goal:'+g.id+'" '+(selectedValue==="goal:"+g.id?"selected":"")+'>'+escapeHtml(g.title)+'</option>').join("")+'</optgroup>';
+  }
+  if((state.customEvents||[]).length){
+    html += '<optgroup label="Events">'+state.customEvents.map(e=>'<option value="event:'+e.id+'" '+(selectedValue==="event:"+e.id?"selected":"")+'>'+escapeHtml(e.label)+'</option>').join("")+'</optgroup>';
+  }
+  return html;
+}
+function taskLinkedInfo(t){
+  if(!t || !t.linked_type || !t.linked_id) return null;
+  if(t.linked_type==="class"){
+    const sem = activeSemester();
+    const c = sem && (sem.classSubjects||[]).find(x=>x.id===t.linked_id);
+    return c ? {emoji:"📚", label:c.name, color:c.color} : null;
+  }
+  if(t.linked_type==="habit"){
+    const h = (state.habits||[]).find(x=>x.id===t.linked_id);
+    return h ? {emoji:h.emoji, label:h.title, color:h.color} : null;
+  }
+  if(t.linked_type==="goal"){
+    const g = (state.goals||[]).find(x=>x.id===t.linked_id);
+    return g ? {emoji:g.emoji, label:g.title, color:g.color} : null;
+  }
+  if(t.linked_type==="event"){
+    const e = (state.customEvents||[]).find(x=>x.id===t.linked_id);
+    return e ? {emoji:e.emoji||"📌", label:e.label, color:e.color} : null;
+  }
+  return null;
+}
+function taskLinkBadgeHtml(t){
+  const link = taskLinkedInfo(t);
+  if(!link) return "";
+  return '<span class="tag" style="'+(link.color?"background:"+link.color+"22;":"")+'margin-left:6px;">'+link.emoji+' '+escapeHtml(link.label)+'</span>';
+}
+function taskFormHtml(t){
+  t = t || {title:"", planned_minutes:30, category:"", date:""};
+  const linkValue = (t.linked_type && t.linked_id) ? (t.linked_type+":"+t.linked_id) : "";
+  return '<h2>'+(t.id?"Edit Task":"New Task")+'</h2>'+
+    '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
+    '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
+    '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
+    '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
+    '<div class="field"><label>Category (optional)</label><div class="chip-group" id="taskCatChips">'+
+      '<div class="chip '+(taskFormCat===""?"selected":"")+'" data-action="pickTaskCat" data-v="">None</div>'+
+      allCategories().map(c=>'<div class="chip '+(taskFormCat===c.v?"selected":"")+'" data-action="pickTaskCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+
+      '<div class="chip" data-action="addCustomCategory" data-prefix="task">+ Custom</div>'+
+    '</div></div>'+
+    '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(taskFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickTaskColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="tsk_colorWheel" value="'+taskFormColor+'" title="Pick any color"></div></div>'+
+    '<div class="modal-actions">'+(t.id?'<button class="btn danger" data-action="deleteTask" data-id="'+t.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openTaskForm(id, prefillDate){
+  const t = id ? (state.tasks||[]).find(x=>x.id===id) : (prefillDate ? {title:"", planned_minutes:30, category:"", date:prefillDate} : null);
+  taskFormColor = t ? (t.color||COLORS[0]) : COLORS[(state.tasks||[]).length % COLORS.length];
+  taskFormCat = t ? (t.category||"") : "";
+  openModal(taskFormHtml(t));
+}
+let taskCompleteFollowUp = false;
+function taskCompleteFormHtml(t){
+  taskCompleteFollowUp = false;
+  return '<h2>Finish "'+escapeHtml(t.title)+'"</h2>'+
+    '<div class="field"><label>Actual time it took (minutes)</label><input id="tskc_actual" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
+    '<div class="field"><label>What distracted you? (optional)</label><input id="tskc_distraction" type="text" placeholder="e.g. Phone notifications"></div>'+
+    '<div class="field"><label>What helped you stay on task? (optional)</label><input id="tskc_helped" type="text" placeholder="e.g. Noise-canceling headphones"></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔁 Needs a follow-up</div><div class="switch" data-action="toggleTaskFollowUp"></div></div>'+
+    '<div id="tskc_followUpBlock" style="display:none;">'+
+    '<div class="field"><label>Follow-up date</label><input id="tskc_followUpDate" type="date" value="'+todayStr()+'"></div>'+
+    '<div class="field"><label>Follow-up notes</label><input id="tskc_followUpNotes" type="text" placeholder="What needs to happen"></div>'+
+    '</div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveTaskComplete" data-id="'+t.id+'" style="flex:1">Mark Done</button></div>';
+}
+function openTaskCompleteForm(id){
+  const t = (state.tasks||[]).find(x=>x.id===id);
+  if(!t) return;
+  openModal(taskCompleteFormHtml(t));
+}
+function renderTasks(){
+  let html = topbarHtml("Tasks","Plan your time, track how it actually went, and see what's next.");
+  html += bedtimeWidgetHtml();
+  html += '<button class="btn block" style="margin-bottom:14px;" data-action="openTaskForm">+ New Task</button>';
+  const pending = (state.tasks||[]).filter(t=>t.status!=="done").slice().sort((a,b)=>{
+    const ad = a.date||"9999-99-99", bd = b.date||"9999-99-99";
+    if(ad!==bd) return ad.localeCompare(bd);
+    return (a.created_at||"").localeCompare(b.created_at||"");
+  });
+  const done = (state.tasks||[]).filter(t=>t.status==="done");
+  const followUps = done.filter(t=>t.follow_up_needed).slice().sort((a,b)=>(a.follow_up_date||"").localeCompare(b.follow_up_date||""));
+  if(!pending.length && !done.length){
+    html += emptyState("📝","No tasks yet","Add your first task above — a time estimate helps the countdown above know what's really on your plate.");
+    return html;
+  }
+  html += '<div class="section-head"><h2>To Do</h2></div>';
+  if(!pending.length) html += '<p class="hc-meta">Nothing pending — nice!</p>';
+  else html += pending.map(t=>{
+    const cat = t.category ? catInfo(t.category) : null;
+    return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
+      '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+(cat?' · '+escapeHtml(cat.l):'')+'</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:6px;">'+
+      '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
+      '<button class="icon-btn" data-action="openTaskForm" data-id="'+t.id+'">✏️</button>'+
+      '</div></div>';
+  }).join("");
+  if(followUps.length){
+    html += '<div class="section-head"><h2>🔁 Follow-ups</h2></div>';
+    html += followUps.map(t=>
+      '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
+        '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">🔁</div>'+
+        '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.follow_up_notes||("Follow up: "+t.title))+'</div>'+
+        '<div class="hc-meta">'+(t.follow_up_date?("By "+fmtDatePretty(t.follow_up_date)):"No date set")+' · from "'+escapeHtml(t.title)+'"</div></div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px;">'+
+        '<button class="btn secondary sm" data-action="startFollowUpTask" data-id="'+t.id+'">▶️ Start as task</button>'+
+        '<button class="icon-btn" data-action="dismissFollowUp" data-id="'+t.id+'">✓</button>'+
+        '</div></div>'
+    ).join("");
+  }
+  if(done.length){
+    html += '<div class="section-head"><h2>Completed</h2></div>';
+    html += done.slice().reverse().slice(0,15).map(t=>{
+      const delta = (t.actual_minutes!=null && t.planned_minutes) ? (t.actual_minutes - t.planned_minutes) : null;
+      const deltaLabel = delta==null ? "" : (delta===0 ? " · on estimate" : (delta>0 ? (" · "+fmtMinutesDuration(delta)+" over") : (" · "+fmtMinutesDuration(-delta)+" under")));
+      return '<div class="habit-card" style="opacity:.85;'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
+        '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">✅</div>'+
+        '<div class="hc-body"><div class="hc-title" style="text-decoration:line-through;opacity:.7;">'+escapeHtml(t.title)+'</div>'+
+        '<div class="hc-meta">Planned '+fmtMinutesDuration(t.planned_minutes||0)+(t.actual_minutes!=null?' · Actual '+fmtMinutesDuration(t.actual_minutes):'')+deltaLabel+'</div>'+
+        (t.distraction?'<div style="font-size:12px;margin-top:4px;color:var(--text-muted);">🌀 Distraction: '+escapeHtml(t.distraction)+'</div>':'')+
+        (t.helped?'<div style="font-size:12px;margin-top:2px;color:var(--text-muted);">✨ Helped: '+escapeHtml(t.helped)+'</div>':'')+
+        '</div>'+
+        '<button class="icon-btn" data-action="reopenTask" data-id="'+t.id+'" title="Reopen">↺</button>'+
+        '</div>';
+    }).join("");
+  }
+  return html;
 }
 
 /* ============ Sharing ============ */
@@ -3172,6 +3583,11 @@ function renderSettings(){
     '<div class="field"><label>Secondary color</label><input type="color" class="colorwheel-input" id="customAccentPicker2" value="'+(state.profile.accent2||"#14B8A6")+'" title="Pick any color"></div>'+
     '</div></div>';
 
+  html += '<div class="card" style="margin-top:14px;"><h2>🌙 Bedtime</h2>'+
+    '<p class="hc-meta">Used by the countdown on the Tasks tab to show how much time you have left tonight.</p>'+
+    '<div class="field" style="margin-top:8px;"><input id="set_bedtime" type="time" value="'+(state.profile.bedtime||"22:00")+'"></div>'+
+    '<button class="btn secondary sm" data-action="saveBedtimeFromSettings">Save</button></div>';
+
   const notifSupported = ("Notification" in window);
   const notifPerm = notifSupported ? Notification.permission : "unsupported";
   const isSecure = location.protocol==="https:" || location.hostname==="localhost";
@@ -3192,8 +3608,11 @@ function renderSettings(){
     '</div>';
 
   if((state.customCategories||[]).length){
-    html += '<div class="card" style="margin-top:14px;"><h2>🏷️ Custom Categories</h2><p class="hc-meta">Categories you\'ve added from Habits or Goals forms.</p>'+
-      '<div class="chip-group" style="margin-top:8px;">'+state.customCategories.map(c=>'<div class="chip" style="display:flex;align-items:center;gap:6px;">'+c.e+' '+escapeHtml(c.l)+'<span data-action="deleteCustomCategory" data-id="'+c.v+'" style="opacity:.6;cursor:pointer;">✕</span></div>').join("")+'</div></div>';
+    html += '<div class="card" style="margin-top:14px;"><h2>🏷️ Custom Categories</h2><p class="hc-meta">Categories you\'ve added from Habits or Goals forms. Tap a color to recolor a category.</p>'+
+      '<div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">'+state.customCategories.map(c=>
+        '<div style="'+(c.color?"border-left:3px solid "+c.color+";padding-left:8px;":"")+'"><div class="chip" style="display:inline-flex;align-items:center;gap:6px;">'+c.e+' '+escapeHtml(c.l)+'<span data-action="deleteCustomCategory" data-id="'+c.v+'" style="opacity:.6;cursor:pointer;">✕</span></div>'+
+        '<div class="swatch-group" style="margin-top:4px;">'+COLORS.map(col=>'<div class="swatch '+((c.color||COLORS[0])===col?"selected":"")+'" style="background:'+col+'" data-action="pickCategoryColor" data-id="'+c.v+'" data-v="'+col+'"></div>').join("")+'</div></div>'
+      ).join("")+'</div></div>';
   }
 
   html += '<div class="card" style="margin-top:14px;"><h2>👥 Profile</h2><p class="hc-meta">Switch to a different person\'s profile on this device, or manage this one.</p>'+
@@ -3729,13 +4148,99 @@ document.addEventListener("click", async function(e){
       const name = prompt("Name your new category:");
       if(!name || !name.trim()) return;
       const emoji = prompt("Pick an emoji for it (optional):", "🏷️") || "🏷️";
-      const cat = {v:"custom_"+uid(), l:name.trim(), e:emoji.trim().slice(0,4)||"🏷️"};
+      const cat = {v:"custom_"+uid(), l:name.trim(), e:emoji.trim().slice(0,4)||"🏷️", color: COLORS[(state.customCategories||[]).length % COLORS.length]};
       state.customCategories = state.customCategories || [];
       state.customCategories.push(cat);
       saveState();
       if(prefix==="habit"){ formCat = cat.v; insertCategoryChip("habitCatChips", cat, "pickCat"); }
+      else if(prefix==="task"){ taskFormCat = cat.v; insertCategoryChip("taskCatChips", cat, "pickTaskCat"); }
       else { goalFormCat = cat.v; insertCategoryChip("goalCatChips", cat, "pickGCat"); }
-      toast("Category added");
+      toast("Category added — recolor it anytime from Settings");
+      break;
+    }
+    case "pickCategoryColor": {
+      const cat = (state.customCategories||[]).find(c=>c.v===id);
+      if(cat){ cat.color = v; saveState(); render(); }
+      break;
+    }
+    case "openBedtimeForm": openModal(bedtimeFormHtml()); break;
+    case "saveBedtime": {
+      state.profile.bedtime = document.getElementById("bt_time").value || "22:00";
+      saveState(); closeModal(); render();
+      toast("Bedtime updated");
+      break;
+    }
+    case "saveBedtimeFromSettings": {
+      state.profile.bedtime = document.getElementById("set_bedtime").value || "22:00";
+      saveState(); render();
+      toast("Bedtime updated");
+      break;
+    }
+    case "openTaskForm": openTaskForm(id||null, v||null); break;
+    case "pickTaskColor": { taskFormColor = v; document.querySelectorAll('[data-action="pickTaskColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
+    case "pickTaskCat": { taskFormCat = v; document.querySelectorAll('[data-action="pickTaskCat"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
+    case "saveTask": {
+      const title = document.getElementById("tsk_title").value.trim();
+      if(!title){ toast("Please enter a task"); return; }
+      const planned = Math.max(1, Number(document.getElementById("tsk_planned").value)||30);
+      const linkVal = document.getElementById("tsk_link") ? document.getElementById("tsk_link").value : "";
+      const linkParts = linkVal ? linkVal.split(":") : ["",""];
+      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: document.getElementById("tsk_date").value||"", linked_type: linkParts[0]||"", linked_id: linkParts[1]||"" };
+      state.tasks = state.tasks || [];
+      if(id){ Object.assign(state.tasks.find(x=>x.id===id), payload); }
+      else {
+        payload.id = uid(); payload.status = "pending"; payload.actual_minutes = null;
+        payload.distraction = ""; payload.helped = ""; payload.follow_up_needed = false;
+        payload.follow_up_date = ""; payload.follow_up_notes = ""; payload.created_at = new Date().toISOString(); payload.completed_at = null;
+        state.tasks.push(payload);
+      }
+      saveState(); closeModal(); render();
+      toast("Task saved");
+      break;
+    }
+    case "deleteTask": { state.tasks = (state.tasks||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
+    case "openTaskCompleteForm": openTaskCompleteForm(id); break;
+    case "toggleTaskFollowUp": {
+      const isOn = t.classList.toggle("on");
+      taskCompleteFollowUp = isOn;
+      const block = document.getElementById("tskc_followUpBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
+    case "saveTaskComplete": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      if(!tsk) return;
+      tsk.status = "done";
+      tsk.actual_minutes = Math.max(0, Number(document.getElementById("tskc_actual").value)||0);
+      tsk.distraction = document.getElementById("tskc_distraction").value.trim();
+      tsk.helped = document.getElementById("tskc_helped").value.trim();
+      tsk.follow_up_needed = taskCompleteFollowUp;
+      tsk.follow_up_date = taskCompleteFollowUp ? document.getElementById("tskc_followUpDate").value : "";
+      tsk.follow_up_notes = taskCompleteFollowUp ? document.getElementById("tskc_followUpNotes").value.trim() : "";
+      tsk.completed_at = new Date().toISOString();
+      saveState(); closeModal(); render();
+      toast("Nice work! Task complete.");
+      break;
+    }
+    case "reopenTask": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      if(tsk){ tsk.status = "pending"; saveState(); render(); }
+      break;
+    }
+    case "startFollowUpTask": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      if(!tsk) return;
+      const newTask = { id:uid(), title: tsk.follow_up_notes ? tsk.follow_up_notes : ("Follow up: "+tsk.title), planned_minutes: 30, color: tsk.color, category: tsk.category, status:"pending", actual_minutes:null, distraction:"", helped:"", follow_up_needed:false, follow_up_date:"", follow_up_notes:"", created_at:new Date().toISOString(), completed_at:null };
+      state.tasks = state.tasks || [];
+      state.tasks.push(newTask);
+      tsk.follow_up_needed = false;
+      saveState(); render();
+      toast("Added as a new task");
+      break;
+    }
+    case "dismissFollowUp": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      if(tsk){ tsk.follow_up_needed = false; saveState(); render(); }
       break;
     }
     case "pickFreq": {
@@ -3956,6 +4461,7 @@ document.addEventListener("click", async function(e){
       document.querySelectorAll('[data-action="pickEventRepeatDay"]').forEach(c=>c.classList.toggle("selected", ceRepeatDays.includes(Number(c.getAttribute("data-v")))));
       break;
     }
+    case "pickCEColor": { ceFormColor = v; document.querySelectorAll('[data-action="pickCEColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "saveCustomEvent": {
       const label = document.getElementById("ce_label").value.trim();
       if(!label){ toast("Please enter a title"); return; }
@@ -3969,6 +4475,7 @@ document.addEventListener("click", async function(e){
         date: document.getElementById("ce_date").value,
         time: document.getElementById("ce_time").value,
         duration_minutes: Number(document.getElementById("ce_duration").value)||30,
+        color: ceFormColor,
         description: document.getElementById("ce_desc").value.trim(),
         alarm_enabled: customEventAlarmOn,
         alarm_level: customEventAlarmOn ? (document.getElementById("ce_alarm_level")?document.getElementById("ce_alarm_level").value:"moderate") : "moderate",
@@ -3998,29 +4505,35 @@ document.addEventListener("click", async function(e){
       document.querySelectorAll('[data-action="pickSemWeekday"]').forEach(c=>c.classList.toggle("selected", semFormWeekdays.includes(Number(c.getAttribute("data-v")))));
       break;
     }
+    case "pickSemScheduleType": {
+      semFormScheduleType = v;
+      document.querySelectorAll('[data-action="pickSemScheduleType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
+      const block = document.getElementById("sem_rotationBlock");
+      if(block) block.style.display = v==="fixed" ? "none" : "";
+      const hint = document.getElementById("sem_schedTypeHint");
+      if(hint) hint.textContent = scheduleTypeHint(v);
+      break;
+    }
     case "saveSemester": {
       const name = document.getElementById("sem_name").value.trim();
       if(!name){ toast("Please enter a name"); return; }
       const startDate = document.getElementById("sem_start").value;
       const endDate = document.getElementById("sem_end").value;
       if(!startDate || !endDate || endDate<startDate){ toast("Check the start/end dates"); return; }
-      const rotationLength = Number(document.getElementById("sem_rotLen").value)||4;
-      const payload = {
-        name, startDate, endDate, rotationLength,
-        startLetterIndex: Number(document.getElementById("sem_startLetter").value)%rotationLength,
-        activeWeekdays: semFormWeekdays.slice().sort(),
-        periodsPerDay: Math.max(1, Number(document.getElementById("sem_periods").value)||7),
-        defaultStartTime: document.getElementById("sem_startTime").value||"08:00",
-        periodMinutes: Math.max(5, Number(document.getElementById("sem_periodMin").value)||50),
-        passingMinutes: Math.max(0, Number(document.getElementById("sem_passMin").value)||0)
-      };
+      const scheduleType = semFormScheduleType || "day_rotation";
+      const payload = { name, startDate, endDate, scheduleType, activeWeekdays: semFormWeekdays.slice().sort() };
+      if(scheduleType!=="fixed"){
+        const rotationLength = Number(document.getElementById("sem_rotLen").value)||4;
+        payload.rotationLength = rotationLength;
+        payload.startLetterIndex = Number(document.getElementById("sem_startLetter").value)%rotationLength;
+      }
       let semId = id;
       if(id){
         const existing = getSemesters().find(x=>x.id===id);
         Object.assign(existing, payload);
       } else {
         semId = uid();
-        payload.id = semId; payload.holidays = []; payload.classes = {};
+        payload.id = semId; payload.classSubjects = []; payload.terms = [];
         getSemesters().push(payload);
         if(!state.activeSemesterId) state.activeSemesterId = semId;
       }
@@ -4034,16 +4547,59 @@ document.addEventListener("click", async function(e){
       saveState(); closeModal(); render();
       break;
     }
-    case "pickScheduleLetter": { scheduleEditLetter = v; render(); break; }
-    case "saveScheduleClasses": {
-      const active = activeSemester();
-      if(!active) return;
-      const arr = [];
-      document.querySelectorAll(".clsSubjInput").forEach(inp=>{ arr[Number(inp.getAttribute("data-idx"))] = inp.value.trim(); });
-      active.classes = active.classes || {};
-      active.classes[scheduleEditLetter] = arr;
-      saveState(); render();
-      toast(scheduleEditLetter+" Day classes saved");
+    case "openTermForm": openTermForm(id||null); break;
+    case "saveTerm": {
+      const sem = activeSemester();
+      if(!sem) return;
+      const name = document.getElementById("term_name").value.trim();
+      if(!name){ toast("Please enter a name"); return; }
+      const startDate = document.getElementById("term_start").value;
+      const endDate = document.getElementById("term_end").value;
+      if(!startDate || !endDate || endDate<startDate){ toast("Check the dates"); return; }
+      sem.terms = sem.terms || [];
+      const payload = {name, startDate, endDate};
+      if(id){ Object.assign(sem.terms.find(x=>x.id===id), payload); } else { payload.id = uid(); sem.terms.push(payload); }
+      saveState(); closeModal(); render();
+      toast("Term saved");
+      break;
+    }
+    case "deleteTerm": {
+      const sem = activeSemester();
+      if(sem) sem.terms = (sem.terms||[]).filter(x=>x.id!==id);
+      saveState(); closeModal(); render();
+      break;
+    }
+    case "openClassForm": openClassForm(id||null); break;
+    case "addClassSlotRow": {
+      collectClassSlotsFromDOM();
+      const sem = activeSemester();
+      const opts = sem ? dayKeyOptions(sem) : [];
+      classFormSlots.push({id:uid(), dayKey: opts.length?opts[0].key:"A", time:"09:00", duration:50, dateRangeMode:"none", termId:null, startDate:null, endDate:null});
+      rerenderClassSlotList();
+      break;
+    }
+    case "removeClassSlotRow": { collectClassSlotsFromDOM(); classFormSlots.splice(Number(t.getAttribute("data-idx")),1); rerenderClassSlotList(); break; }
+    case "pickClassSlotDayKey": { collectClassSlotsFromDOM(); const idx=Number(t.getAttribute("data-idx")); if(classFormSlots[idx]) classFormSlots[idx].dayKey = v; rerenderClassSlotList(); break; }
+    case "pickClassSlotRangeMode": { collectClassSlotsFromDOM(); const idx=Number(t.getAttribute("data-idx")); if(classFormSlots[idx]) classFormSlots[idx].dateRangeMode = v; rerenderClassSlotList(); break; }
+    case "pickClassColor": { classFormColor = v; document.querySelectorAll('[data-action="pickClassColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
+    case "saveClassSubject": {
+      const sem = activeSemester();
+      if(!sem) return;
+      const name = document.getElementById("cls_name").value.trim();
+      if(!name){ toast("Please enter a class name"); return; }
+      collectClassSlotsFromDOM();
+      if(classFormSlots.length===0){ toast("Add at least one time slot"); return; }
+      sem.classSubjects = sem.classSubjects || [];
+      const payload = { name, color: classFormColor, slots: classFormSlots.map(s=>({id:s.id||uid(), dayKey:s.dayKey, time:s.time||"09:00", duration:Number(s.duration)||50, dateRangeMode:s.dateRangeMode||"none", termId:s.termId||null, startDate:s.startDate||null, endDate:s.endDate||null})) };
+      if(id){ Object.assign(sem.classSubjects.find(x=>x.id===id), payload); } else { payload.id = uid(); sem.classSubjects.push(payload); }
+      saveState(); closeModal(); render();
+      toast("Class saved");
+      break;
+    }
+    case "deleteClassSubject": {
+      const sem = activeSemester();
+      if(sem) sem.classSubjects = (sem.classSubjects||[]).filter(x=>x.id!==id);
+      saveState(); closeModal(); render();
       break;
     }
     case "openHolidayForm": openHolidayForm(id||null, v||null); break;
@@ -4074,6 +4630,8 @@ document.addEventListener("click", async function(e){
     }
     case "openDayOverrideForm": openDayOverrideForm(v); break;
     case "pickDayOvMode": { dayOvFormMode = v; openModal(dayOverrideFormHtml(t.getAttribute("data-date"))); break; }
+    case "addDayOvRow": { collectDayOvRowsFromDOM(); dayOvCustomRows.push({subject:"",time:"09:00"}); rerenderDayOvRowList(); break; }
+    case "removeDayOvRow": { collectDayOvRowsFromDOM(); dayOvCustomRows.splice(Number(t.getAttribute("data-idx")),1); rerenderDayOvRowList(); break; }
     case "pickDayOvLetter": {
       dayOvChosenLetter = v;
       document.querySelectorAll('[data-action="pickDayOvLetter"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
@@ -4111,10 +4669,11 @@ document.addEventListener("click", async function(e){
     case "openReminderForm": openReminderForm(null); break;
     case "editReminder": openReminderForm(id); break;
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
+    case "pickRColor": { reminderFormColor = v; document.querySelectorAll('[data-action="pickRColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "saveReminder": {
       const title = document.getElementById("r_title").value.trim();
       if(!title){ toast("Please enter a title"); return; }
-      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), message: document.getElementById("r_msg").value.trim(), is_active:true };
+      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true };
       if(id){ Object.assign(state.reminders.find(x=>x.id===id), payload); } else { payload.id = uid(); state.reminders.push(payload); }
       saveState(); closeModal(); render();
       toast("Reminder saved");
@@ -4149,6 +4708,14 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "setFocusMode": { focusMode = v; render(); break; }
+    case "toggleBrainInterrupt": {
+      const isOn = t.classList.toggle("on");
+      state.profile.brainInterruptEnabled = isOn;
+      saveState();
+      const block = document.getElementById("brainInterruptBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
     case "savePomodoroPreset": {
       const work = Number(document.getElementById("pomo_work").value)||20;
       const short = Number(document.getElementById("pomo_short").value)||5;
@@ -4527,6 +5094,12 @@ document.addEventListener("change", function(e){
     state.profile.accent2 = e.target.value; saveState(); applyTheme();
     return;
   }
+  if(e.target.id === "cls_colorWheel"){ classFormColor = e.target.value; return; }
+  if(e.target.id === "r_colorWheel"){ reminderFormColor = e.target.value; return; }
+  if(e.target.id === "ce_colorWheel"){ ceFormColor = e.target.value; return; }
+  if(e.target.id === "tsk_colorWheel"){ taskFormColor = e.target.value; return; }
+  if(e.target.id === "bi_minutes"){ state.profile.brainInterruptMinutes = Math.max(1, Number(e.target.value)||10); saveState(); return; }
+  if(e.target.id === "bi_level"){ state.profile.brainInterruptLevel = e.target.value; saveState(); return; }
   if(e.target.id === "sem_activeSelect"){
     state.activeSemesterId = e.target.value;
     saveState(); render();
