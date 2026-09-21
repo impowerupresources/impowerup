@@ -246,6 +246,13 @@
   .cal-cell.selected{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:none;}
   .cal-cell .dot{width:5px;height:5px;border-radius:50%;background:var(--accent2);margin:3px auto 0;}
   .cal-cell .expand-ic{position:absolute;top:1px;right:2px;font-size:8px;opacity:.5;line-height:1;padding:2px;cursor:pointer;}
+  .cal-cell.rich{text-align:left;padding:5px 4px;min-height:80px;display:flex;flex-direction:column;gap:2px;border-radius:12px;}
+  .cal-cell.rich .cal-daynum{font-size:12px;font-weight:800;text-align:right;padding-right:14px;}
+  .cal-cell.rich .cal-chip{font-size:9px;font-weight:700;line-height:1.3;border-radius:5px;padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:rgba(var(--accent-rgb),.15);}
+  .cal-cell.rich.selected .cal-chip{background:rgba(255,255,255,.28);color:#fff;}
+  .cal-cell.rich .cal-more{font-size:9px;font-weight:700;color:var(--text-muted);}
+  .cal-cell.rich.selected .cal-more{color:rgba(255,255,255,.85);}
+  @media(max-width:520px){ .cal-cell.rich{min-height:58px;} .cal-cell.rich .cal-chip:nth-child(n+3){display:none;} }
   .week-glance-vert .wg-row{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:14px;cursor:pointer;}
   .week-glance-vert .wg-row + .wg-row{margin-top:4px;}
   .week-glance-vert .wg-daycol{width:44px;flex-shrink:0;text-align:center;}
@@ -477,7 +484,7 @@ function defaultState(){
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
-      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", alertSound:"classic", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"classic", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
@@ -2403,7 +2410,7 @@ function renderPlanner(){
 function renderPlannerSchedule(){
   return scheduleSettingsCardHtml();
 }
-function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, expandable){
+function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, expandable, richView){
   const [y,m] = monthCursor.split("-").map(Number);
   const firstOfMonth = y+"-"+String(m).padStart(2,"0")+"-01";
   const firstDow = new Date(y,m-1,1).getDay();
@@ -2414,19 +2421,31 @@ function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, ex
     '<div style="font-weight:800;font-size:17px;">'+new Date(y,m-1,1).toLocaleDateString(undefined,{month:"long",year:"numeric"})+'</div>'+
     '<div style="display:flex;gap:6px;"><button class="icon-btn" data-action="'+navAction+'" data-v="-1">‹</button><button class="icon-btn" data-action="'+navAction+'" data-v="1">›</button></div></div>';
   html += '<div class="cal-grid">'+monLabels.map(l=>'<div class="cal-daylabel">'+l+'</div>').join("")+'</div><div class="cal-grid">';
+  const maxChips = 3;
   for(let i=0;i<42;i++){
     const d2 = addDays(gridStart, i);
     const inMonth = d2.slice(0,7)===monthCursor;
     const dnum = Number(d2.slice(8,10));
     const isToday = d2===todayStr();
     const isSelected = d2===selectedDate;
-    const hasCompletion = state.habitLogs.some(l=>l.completed_date===d2);
     const rotInfo = inMonth ? getScheduleDayInfo(d2) : null;
     const rotLetter = (rotInfo && !rotInfo.noSchool) ? rotInfo.letter : "";
-    html += '<div class="cal-cell '+(inMonth?"":"dim")+' '+(isToday&&!isSelected?"today":"")+' '+(isSelected?"selected":"")+'" data-action="'+clickAction+'" data-v="'+d2+'">'+
-      (expandable?'<div class="expand-ic" data-action="expandDayPreview" data-v="'+d2+'" title="Preview this day">🔍</div>':"")+
-      dnum+(hasCompletion&&!isSelected?'<div class="dot"></div>':'')+
-      (rotLetter?'<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:1px;">'+rotLetter+'</div>':'')+'</div>';
+    if(richView){
+      const items = inMonth ? getDayTimelineItems(d2) : [];
+      const chips = items.slice(0,maxChips).map(it=>'<div class="cal-chip" style="'+(it.color?"background:"+it.color+"33;":"")+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+(it.emoji||"•")+' '+escapeHtml(it.label||"")+'</div>').join("");
+      const moreCount = items.length - maxChips;
+      html += '<div class="cal-cell rich '+(inMonth?"":"dim")+' '+(isToday&&!isSelected?"today":"")+' '+(isSelected?"selected":"")+'" data-action="'+clickAction+'" data-v="'+d2+'">'+
+        (expandable?'<div class="expand-ic" data-action="expandDayPreview" data-v="'+d2+'" title="Preview this day">🔍</div>':"")+
+        '<div class="cal-daynum">'+dnum+(rotLetter?' <span style="font-size:9px;font-weight:800;color:var(--accent);">'+rotLetter+'</span>':'')+'</div>'+
+        chips+(moreCount>0?'<div class="cal-more">+'+moreCount+' more</div>':'')+
+        '</div>';
+    } else {
+      const hasCompletion = state.habitLogs.some(l=>l.completed_date===d2);
+      html += '<div class="cal-cell '+(inMonth?"":"dim")+' '+(isToday&&!isSelected?"today":"")+' '+(isSelected?"selected":"")+'" data-action="'+clickAction+'" data-v="'+d2+'">'+
+        (expandable?'<div class="expand-ic" data-action="expandDayPreview" data-v="'+d2+'" title="Preview this day">🔍</div>':"")+
+        dnum+(hasCompletion&&!isSelected?'<div class="dot"></div>':'')+
+        (rotLetter?'<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:1px;">'+rotLetter+'</div>':'')+'</div>';
+    }
   }
   html += '</div>';
   return html;
@@ -2555,8 +2574,12 @@ function renderPlannerWeek(){
   return html;
 }
 function renderPlannerMonth(){
-  let html = '<div class="card">'+monthCalendarHtml(plannerMonthCursor, plannerDate, "shiftMonth", "jumpToDay", true)+'</div>';
-  html += '<p class="hc-meta" style="margin-top:10px;text-align:center;">Tap a day to open it, or tap 🔍 to preview it here. Dots mark days with completed habits.</p>';
+  const view = state.profile.monthGlanceView || "compact";
+  const expanded = view==="expanded";
+  let html = '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">'+
+    '<button class="btn ghost sm" data-action="toggleMonthGlanceView" title="'+(expanded?"Switch to compact view":"Switch to expanded view")+'">'+(expanded?"☰ Compact":"▦ Expand")+'</button></div>';
+  html += '<div class="card">'+monthCalendarHtml(plannerMonthCursor, plannerDate, "shiftMonth", "jumpToDay", true, expanded)+'</div>';
+  html += '<p class="hc-meta" style="margin-top:10px;text-align:center;">'+(expanded?"Tap a day to open it, or tap 🔍 to preview it here.":"Tap a day to open it, or tap 🔍 to preview it here. Dots mark days with completed habits — switch to Expand to see events.")+'</p>';
   return html;
 }
 
@@ -4653,6 +4676,7 @@ document.addEventListener("click", async function(e){
     case "expandDayPreview": openModal(dayPreviewModalHtml(v)); break;
     case "togglePlannerDayCalPos": state.profile.plannerDayCalPos = (state.profile.plannerDayCalPos==="bottom"?"top":"bottom"); saveState(); render(); break;
     case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="horizontal"?"vertical":"horizontal"); saveState(); render(); break;
+    case "toggleMonthGlanceView": state.profile.monthGlanceView = (state.profile.monthGlanceView==="expanded"?"compact":"expanded"); saveState(); render(); break;
     case "openApplyTemplateModal": openApplyTemplateModal(plannerDate); break;
     case "applyTemplate": {
       const date = t.getAttribute("data-date");
