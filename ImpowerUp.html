@@ -3589,6 +3589,34 @@ function checkInTrendChartsHtml(){
     renderLineChart(moodDays, "#EC4899")+
     '<div class="hc-meta" style="margin-top:2px;">😤 Struggled · 😐 Okay · 🙂 Good · 😄 Great</div></div>';
 }
+function lerpNum(a,b,t){ return a+(b-a)*t; }
+function mixWithWhite(rgb, amt){ return rgb.map(c=>Math.round(c + (255-c)*amt)); }
+// Heatmap color range: fixed solemn red at the low end (0 = tough/negative day),
+// brightening into the user's current theme accent color at the high end (1 = positive day).
+function heatmapColorRange(){
+  const solemnRed = hexToRgb("#B91C1C");
+  const positiveHex = (state.profile && state.profile.accent2) || currentTheme().accent2 || "#14B8A6";
+  return {from: solemnRed, to: hexToRgb(positiveHex)};
+}
+function heatmapColorForScore(score){
+  if(score==null) return null;
+  const range = heatmapColorRange();
+  let rgb = [0,1,2].map(i=>Math.round(lerpNum(range.from[i], range.to[i], score)));
+  rgb = mixWithWhite(rgb, score*0.3); // brighter/lighter as the day trends more positive
+  return 'rgb('+rgb.join(',')+')';
+}
+// Combines that day's logged mood (from a check-in) with habit-completion volume into one
+// 0 (solemn/low) .. 1 (bright/positive) score. Returns null when nothing was logged that day.
+function dayPositivityScore(d, counts, maxCount){
+  const ci = checkInForDate(d);
+  const moodScore = (ci && ci.mood) ? (moodValueNum(ci.mood)-1)/3 : null;
+  const count = counts[d]||0;
+  const completionScore = maxCount>0 ? Math.min(1, count/maxCount) : 0;
+  if(moodScore!=null && count>0) return moodScore*0.65 + completionScore*0.35;
+  if(moodScore!=null) return moodScore;
+  if(count>0) return completionScore;
+  return null;
+}
 function habitHeatmapHtml(){
   const weeksBack = 12, totalDays = weeksBack*7;
   const endDow = new Date().getDay(); // 0=Sun..6=Sat
@@ -3605,13 +3633,26 @@ function habitHeatmapHtml(){
       const d = addDays(gridStart, col*7+row);
       const future = d>today;
       const c = counts[d]||0;
-      const alpha = future ? 0 : (c===0 ? 0.08 : Math.min(1, 0.25 + (c/max)*0.75));
-      rows += '<div title="'+fmtDatePretty(d)+(future?'':(' · '+c+' completion'+(c===1?'':'s')))+'" style="width:11px;height:11px;border-radius:3px;'+(future?'visibility:hidden;':'background:rgba(var(--accent-rgb),'+alpha.toFixed(2)+');border:1px solid rgba(var(--accent-rgb),0.15);')+'"></div>';
+      const score = future ? null : dayPositivityScore(d, counts, max);
+      const color = heatmapColorForScore(score);
+      const ci = checkInForDate(d);
+      const mood = ci && ci.mood ? (MOODS.find(m=>m.v===ci.mood)||{}).l : null;
+      const titleBits = [fmtDatePretty(d)];
+      if(!future){ if(c) titleBits.push(c+' completion'+(c===1?'':'s')); if(mood) titleBits.push('Mood: '+mood); if(!c && !mood) titleBits.push('No data logged'); }
+      rows += '<div title="'+titleBits.join(' · ')+'" style="width:11px;height:11px;border-radius:3px;'+
+        (future ? 'visibility:hidden;' : (color ? 'background:'+color+';border:1px solid rgba(0,0,0,0.08);' : 'background:var(--surface-2);border:1px solid var(--border);'))+
+        '"></div>';
     }
     cols += '<div style="display:flex;flex-direction:column;gap:3px;">'+rows+'</div>';
   }
+  const legendRange = heatmapColorRange();
+  const legendCss = 'linear-gradient(90deg, rgb('+legendRange.from.join(',')+'), '+heatmapColorForScore(1)+')';
   return '<div style="display:flex;gap:3px;overflow-x:auto;padding-bottom:4px;">'+cols+'</div>'+
-    '<div class="hc-meta" style="margin-top:6px;">Last 12 weeks of habit completions — darker means more completed that day.</div>';
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">'+
+    '<div style="width:70px;height:9px;border-radius:5px;background:'+legendCss+';flex-shrink:0;"></div>'+
+    '<div class="hc-meta">🔴 Tougher/solemn days → brighter '+escapeHtml(currentTheme().label)+'-tinted days for your best ones · ⬜ No data logged</div>'+
+    '</div>'+
+    '<div class="hc-meta" style="margin-top:4px;">Colors blend your logged mood and habit completions for each day — the bright end follows your Settings → Aesthetic theme color.</div>';
 }
 function successMatrixHtml(){
   const last30 = [];
