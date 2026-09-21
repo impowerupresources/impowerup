@@ -1914,7 +1914,7 @@ function getDayTimelineItems(dateStr){
   (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color}));
   const sched = getScheduleDayInfo(dateStr);
   if(sched && !sched.noSchool){
-    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:c.duration||30, color:c.color}));
+    sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:c.duration||30, color:c.color, classId:c.classId||null}));
   }
   (state.tasks||[]).filter(t=>t.date===dateStr).forEach(t=>{
     const link = taskLinkedInfo(t);
@@ -2474,7 +2474,8 @@ function dayTimelineListHtml(dateStr){
         : '<div style="display:flex;gap:6px;flex-shrink:0;"><button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+it.id+'">Done</button><button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'">✏️</button></div>';
     }
     const itColor = it.color||(tmpl?tmpl.color:"var(--accent)");
-    return '<div class="timeline-item" style="align-items:center;'+(it.color?"border-left:3px solid "+it.color+";padding-left:8px;":"")+'"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
+    const editId = it.id || it.classId || "";
+    return '<div class="timeline-item" data-action="openTimelineItemEditor" data-type="'+it.type+'" data-id="'+editId+'" data-date="'+dateStr+'" style="align-items:center;cursor:pointer;'+(it.color?"border-left:3px solid "+it.color+";padding-left:8px;":"")+'"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
       '<div class="timeline-line"><div class="timeline-dot" style="background:'+itColor+'"></div></div>'+
       '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
       '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):it.type==="task"?("Task"+(it.linkLabel?" · "+escapeHtml(it.linkLabel):"")):"Event")+'</div></div>'+controls+'</div>';
@@ -4987,6 +4988,17 @@ document.addEventListener("click", async function(e){
 
     case "openReminderForm": openReminderForm(null); break;
     case "editReminder": openReminderForm(id); break;
+    case "openTimelineItemEditor": {
+      const type = t.getAttribute("data-type");
+      const date = t.getAttribute("data-date");
+      if(type==="habit") openHabitForm(id);
+      else if(type==="reminder") openReminderForm(id);
+      else if(type==="custom_event"){ const ev=(state.customEvents||[]).find(x=>x.id===id); if(ev) openCustomEventForm(ev.date, id); }
+      else if(type==="task") openTaskForm(id);
+      else if(type==="class_period"){ if(id) openClassForm(id); else openDayOverrideForm(date); }
+      else if(type==="event") openApplyTemplateModal(date);
+      break;
+    }
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
     case "pickRColor": { reminderFormColor = v; document.querySelectorAll('[data-action="pickRColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "saveReminder": {
