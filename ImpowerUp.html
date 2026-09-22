@@ -488,7 +488,9 @@ function defaultState(){
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
-      checkInFrequency:"daily", checkInCustomDays:[] },
+      checkInFrequency:"daily", checkInCustomDays:[],
+      notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
+      resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"" },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
   };
@@ -1694,7 +1696,15 @@ function getVirtualEventAlarms(dateStr){
 function getCustomEventAlarms(dateStr){
   return (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr) && e.alarm_enabled && e.time).map(e=>({
     id:"cevt_"+e.id, title:e.label||"Event", time:e.time,
-    alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true
+    alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true,
+    notify_email:!!e.notify_email, notify_sms:!!e.notify_sms
+  }));
+}
+function getTaskAlarms(dateStr){
+  return (state.tasks||[]).filter(tk=>tk.date===dateStr && tk.alarm_enabled && tk.alarm_time && tk.status!=="done").map(tk=>({
+    id:"tsk_"+tk.id, title:"Task: "+tk.title, time:tk.alarm_time,
+    alarm_level:tk.alarm_level||"moderate", message:"", days:[dayOfWeekName(dateStr)], is_active:true,
+    notify_email:!!tk.notify_email, notify_sms:!!tk.notify_sms
   }));
 }
 /* Epoch day number for a Y-M-D date string — used for interval math in custom recurrence. */
@@ -2214,6 +2224,18 @@ function taskRow(t){
 /* ============ Alarm settings sub-block (shared by Habit + Goal forms) ============ */
 let habitAlarmOn=false, habitAlarmDays=[];
 let goalAlarmOn=false, goalAlarmDays=[];
+let notifyEmailOn=false, notifySmsOn=false;
+/* Shared "also notify me by email/text" chip pair, reused across every alarm/alert form.
+   Sending itself is wired up once a provider is connected in Settings -> Notifications;
+   the choice is saved either way so nothing needs to be re-entered later. */
+function notifyChannelChipsHtml(){
+  const emailReady = !!(state.profile.notifyEmail && state.profile.emailNotifyEnabled);
+  const smsReady = !!(state.profile.notifyPhone && state.profile.smsNotifyEnabled);
+  return '<div class="field"><label>Also notify me by</label><div class="chip-group">'+
+    '<div class="chip '+(notifyEmailOn?"selected":"")+'" data-action="toggleNotifyChannel" data-v="email">✉️ Email'+(emailReady?"":" (set up in Settings)")+'</div>'+
+    '<div class="chip '+(notifySmsOn?"selected":"")+'" data-action="toggleNotifyChannel" data-v="sms">📱 Text'+(smsReady?"":" (set up in Settings)")+'</div>'+
+    '</div></div>';
+}
 function alarmSettingsBlockHtml(prefix, existingReminder, defaultDays){
   const on = prefix==="habit" ? habitAlarmOn : goalAlarmOn;
   const days = prefix==="habit" ? habitAlarmDays : goalAlarmDays;
@@ -2227,6 +2249,7 @@ function alarmSettingsBlockHtml(prefix, existingReminder, defaultDays){
     '<p class="hc-meta" id="'+prefix+'_alarmHelp">'+(ALARM_HELP[r.alarm_level]||ALARM_HELP.moderate)+'</p>'+
     '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(days.includes(d)?"selected":"")+'" data-action="pickAlarmDay" data-prefix="'+prefix+'" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '<div class="field"><label>Message (optional)</label><input id="'+prefix+'_alarmMsg" type="text" value="'+escapeHtml(r.message||"")+'" placeholder="A little motivational nudge"></div>'+
+    notifyChannelChipsHtml()+
     '</div>';
 }
 
@@ -2283,6 +2306,8 @@ function openHabitForm(id, prefill){
   formColor = h ? h.color : COLORS[0];
   const linkedReminder = h && h.alarm_reminder_id ? state.reminders.find(r=>r.id===h.alarm_reminder_id) : null;
   habitAlarmOn = !!linkedReminder;
+  notifyEmailOn = !!(linkedReminder && linkedReminder.notify_email);
+  notifySmsOn = !!(linkedReminder && linkedReminder.notify_sms);
   habitAlarmDays = linkedReminder ? (linkedReminder.days||[]).slice() : defaultDaysForFrequency(formFreq, formDays);
   openModal(habitFormHtml(h));
 }
@@ -2294,7 +2319,8 @@ function syncHabitAlarm(habit){
       title: habit.title, time: timeEl.value, days: habitAlarmDays.slice(),
       alarm_level: document.getElementById("habit_alarmLevel").value,
       message: document.getElementById("habit_alarmMsg").value.trim(),
-      habit_id: habit.id, is_active:true
+      habit_id: habit.id, is_active:true,
+      notify_email: notifyEmailOn, notify_sms: notifySmsOn
     };
     if(habit.alarm_reminder_id && state.reminders.find(x=>x.id===habit.alarm_reminder_id)){
       Object.assign(state.reminders.find(x=>x.id===habit.alarm_reminder_id), payload);
@@ -2366,6 +2392,8 @@ function openGoalForm(id){
   goalFormMilestones = g ? (g.milestones||[]).slice() : [];
   const linkedReminder = g && g.alarm_reminder_id ? state.reminders.find(r=>r.id===g.alarm_reminder_id) : null;
   goalAlarmOn = !!linkedReminder;
+  notifyEmailOn = !!(linkedReminder && linkedReminder.notify_email);
+  notifySmsOn = !!(linkedReminder && linkedReminder.notify_sms);
   goalAlarmDays = linkedReminder ? (linkedReminder.days||[]).slice() : ["Mon","Wed","Fri"];
   openModal(goalFormHtml(g));
 }
@@ -2377,7 +2405,8 @@ function syncGoalAlarm(goal){
       title: "Goal check-in: "+goal.title, time: timeEl.value, days: goalAlarmDays.slice(),
       alarm_level: document.getElementById("goal_alarmLevel").value,
       message: document.getElementById("goal_alarmMsg").value.trim(),
-      goal_id: goal.id, is_active:true
+      goal_id: goal.id, is_active:true,
+      notify_email: notifyEmailOn, notify_sms: notifySmsOn
     };
     if(goal.alarm_reminder_id && state.reminders.find(x=>x.id===goal.alarm_reminder_id)){
       Object.assign(state.reminders.find(x=>x.id===goal.alarm_reminder_id), payload);
@@ -2592,6 +2621,8 @@ const WEEKDAY_OPTS = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"
 function customEventFormHtml(dateStr, ev){
   ev = ev || {date:dateStr, time:"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate", repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week"};
   customEventAlarmOn = !!ev.alarm_enabled;
+  notifyEmailOn = !!ev.notify_email;
+  notifySmsOn = !!ev.notify_sms;
   ceFormColor = ev.color || COLORS[(state.customEvents||[]).length % COLORS.length];
   ceRepeatDays = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days.slice() : [weekdayIndexOf(ev.date||dateStr)];
   const repeat = ev.repeat || "none";
@@ -2621,7 +2652,7 @@ function customEventFormHtml(dateStr, ev){
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(ceFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickCEColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="ce_colorWheel" value="'+ceFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
-    '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+notifyChannelChipsHtml()+'</div>'+
     '<div class="modal-actions">'+(ev.id?'<button class="btn danger" data-action="deleteCustomEvent" data-id="'+ev.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveCustomEvent" data-id="'+(ev.id||"")+'" style="flex:1">Save</button></div>';
@@ -3062,6 +3093,7 @@ function reminderFormHtml(r){
     '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+((r.days||[]).includes(d)?"selected":"")+'" data-action="pickRDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(reminderFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickRColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="r_colorWheel" value="'+reminderFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Motivational message</label><input id="r_msg" type="text" value="'+escapeHtml(r.message||"")+'"></div>'+
+    notifyChannelChipsHtml()+
     '<div class="modal-actions">'+(r.id?'<button class="btn danger" data-action="deleteReminder" data-id="'+r.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveReminder" data-id="'+(r.id||"")+'" style="flex:1">Save</button></div>';
@@ -3071,6 +3103,8 @@ function openReminderForm(id){
   const r = id ? state.reminders.find(x=>x.id===id) : null;
   reminderFormDays = r ? (r.days||[]).slice() : ["Mon","Tue","Wed","Thu","Fri"];
   reminderFormColor = r ? (r.color||COLORS[0]) : COLORS[state.reminders.length % COLORS.length];
+  notifyEmailOn = !!(r && r.notify_email);
+  notifySmsOn = !!(r && r.notify_sms);
   openModal(reminderFormHtml(r));
 }
 
@@ -3434,6 +3468,10 @@ function taskFormHtml(t){
     '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
+    '<div id="tsk_alarmBlock" style="'+(taskAlarmOn?"":"display:none;")+'"><div class="row-inline"><div class="field"><label>Time</label><input id="tsk_alarmTime" type="time" value="'+(t.alarm_time||"09:00")+'"></div>'+
+    '<div class="field"><label>Alert level</label><select id="tsk_alarmLevel">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+((t.alarm_level||"moderate")===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    notifyChannelChipsHtml()+'</div>'+
     '<div class="field"><label>Category (optional)</label><div class="chip-group" id="taskCatChips">'+
       '<div class="chip '+(taskFormCat===""?"selected":"")+'" data-action="pickTaskCat" data-v="">None</div>'+
       allCategories().map(c=>'<div class="chip '+(taskFormCat===c.v?"selected":"")+'" data-action="pickTaskCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+
@@ -3444,10 +3482,14 @@ function taskFormHtml(t){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
 }
+let taskAlarmOn = false;
 function openTaskForm(id, prefillDate){
   const t = id ? (state.tasks||[]).find(x=>x.id===id) : (prefillDate ? {title:"", planned_minutes:30, category:"", date:prefillDate} : null);
   taskFormColor = t ? (t.color||COLORS[0]) : COLORS[(state.tasks||[]).length % COLORS.length];
   taskFormCat = t ? (t.category||"") : "";
+  taskAlarmOn = !!(t && t.alarm_enabled);
+  notifyEmailOn = !!(t && t.notify_email);
+  notifySmsOn = !!(t && t.notify_sms);
   openModal(taskFormHtml(t));
 }
 let taskCompleteFollowUp = false;
@@ -3814,6 +3856,33 @@ function accountCardHtml(){
 }
 
 /* ============ Settings ============ */
+let notifyAdvancedOpen = false;
+function emailSmsNotificationsCardHtml(){
+  const p = state.profile;
+  const emailOn = !!p.emailNotifyEnabled;
+  const smsOn = !!p.smsNotifyEnabled;
+  const emailConnected = !!p.resendApiKey;
+  const smsConnected = !!(p.twilioAccountSid && p.twilioAuthToken && p.twilioFromNumber);
+  return '<div class="card" style="margin-top:14px;"><h2>✉️ Email &amp; Text Notifications</h2>'+
+    '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device.</p>'+
+    '<div class="row-inline" style="margin-top:10px;"><div class="field"><label>Notification email</label><input id="set_notifyEmail" type="email" placeholder="you@example.com" value="'+escapeHtml(p.notifyEmail||"")+'"></div>'+
+    '<div class="field"><label>Notification phone</label><input id="set_notifyPhone" type="tel" placeholder="+1 555 123 4567" value="'+escapeHtml(p.notifyPhone||"")+'"></div></div>'+
+    '<button class="btn secondary sm" data-action="saveNotifyContact" style="margin-top:4px;">Save contact info</button>'+
+    '<div class="toggle-row" style="padding:10px 0 4px;"><div><div style="font-weight:700;font-size:13px;">✉️ Email notifications</div><div class="hc-meta" style="margin-top:2px;">'+(emailConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(emailOn?"on":"")+'" data-action="toggleEmailNotify"></div></div>'+
+    '<div class="toggle-row" style="padding:4px 0 4px;"><div><div style="font-weight:700;font-size:13px;">📱 Text notifications</div><div class="hc-meta" style="margin-top:2px;">'+(smsConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(smsOn?"on":"")+'" data-action="toggleSmsNotify"></div></div>'+
+    '<button class="btn ghost sm" style="margin-top:8px;" data-action="toggleNotifyAdvanced">'+(notifyAdvancedOpen?"▲ Hide provider setup":"▼ Provider setup (advanced)")+'</button>'+
+    '<div id="notifyAdvancedBlock" style="'+(notifyAdvancedOpen?"":"display:none;")+'margin-top:10px;">'+
+      '<div class="hc-meta" style="margin-bottom:8px;">These keys stay on this device (and your optional cloud sync) — never shared elsewhere. Paste them in once you\'ve signed up with a provider and sending becomes fully automatic, no rebuild needed.</div>'+
+      '<p class="hc-meta" style="font-weight:700;">Email — Resend (resend.com)</p>'+
+      '<div class="field"><label>API key</label><input id="set_resendKey" type="password" placeholder="re_xxxxxxxx" value="'+escapeHtml(p.resendApiKey||"")+'"></div>'+
+      '<div class="field"><label>From address</label><input id="set_resendFrom" type="email" placeholder="alerts@yourdomain.com" value="'+escapeHtml(p.resendFromEmail||"")+'"></div>'+
+      '<p class="hc-meta" style="font-weight:700;margin-top:10px;">Text — Twilio (twilio.com)</p>'+
+      '<div class="field"><label>Account SID</label><input id="set_twilioSid" type="password" placeholder="ACxxxxxxxx" value="'+escapeHtml(p.twilioAccountSid||"")+'"></div>'+
+      '<div class="field"><label>Auth token</label><input id="set_twilioToken" type="password" value="'+escapeHtml(p.twilioAuthToken||"")+'"></div>'+
+      '<div class="field"><label>From number</label><input id="set_twilioFrom" type="tel" placeholder="+15551234567" value="'+escapeHtml(p.twilioFromNumber||"")+'"></div>'+
+      '<button class="btn secondary sm" data-action="saveNotifyProviders">Save provider keys</button>'+
+    '</div></div>';
+}
 function renderSettings(){
   let html = topbarHtml("Settings","Personalize ImpowerUp.");
   html += '<div class="card"><div class="row-inline"><div class="field"><label>First name</label><input id="set_first" type="text" value="'+escapeHtml(state.profile.firstName||"")+'"></div>'+
@@ -3852,6 +3921,8 @@ function renderSettings(){
     '<div class="field" style="margin-top:8px;"><div class="chip-group">'+CHECKIN_FREQUENCIES.map(f=>'<div class="chip '+(ciFreq===f.v?"selected":"")+'" data-action="pickCheckInFrequency" data-v="'+f.v+'">'+f.l+'</div>').join("")+'</div></div>'+
     '<div class="field" id="ciCustomDaysField" style="'+(ciFreq==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(ciCustomDays.includes(d)?"selected":"")+'" data-action="pickCheckInCustomDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '</div>';
+
+  html += emailSmsNotificationsCardHtml();
 
   const notifSupported = ("Notification" in window);
   const notifPerm = notifSupported ? Notification.permission : "unsupported";
@@ -4220,7 +4291,8 @@ function checkReminders(){
   const dow = dayOfWeekName(today);
   const queue = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, today)}))
     .concat(getVirtualEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
-    .concat(getCustomEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})));
+    .concat(getCustomEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
+    .concat(getTaskAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})));
   for(const r of queue){
     if(!(r.days||[]).includes(dow)) continue;
     const firedKey = r.id+"_"+today;
@@ -4441,6 +4513,26 @@ document.addEventListener("click", async function(e){
       toast("Bedtime updated");
       break;
     }
+    case "saveNotifyContact": {
+      state.profile.notifyEmail = document.getElementById("set_notifyEmail").value.trim();
+      state.profile.notifyPhone = document.getElementById("set_notifyPhone").value.trim();
+      saveState(); render();
+      toast("Contact info saved");
+      break;
+    }
+    case "toggleEmailNotify": { state.profile.emailNotifyEnabled = !state.profile.emailNotifyEnabled; saveState(); render(); break; }
+    case "toggleSmsNotify": { state.profile.smsNotifyEnabled = !state.profile.smsNotifyEnabled; saveState(); render(); break; }
+    case "toggleNotifyAdvanced": { notifyAdvancedOpen = !notifyAdvancedOpen; render(); break; }
+    case "saveNotifyProviders": {
+      state.profile.resendApiKey = document.getElementById("set_resendKey").value.trim();
+      state.profile.resendFromEmail = document.getElementById("set_resendFrom").value.trim();
+      state.profile.twilioAccountSid = document.getElementById("set_twilioSid").value.trim();
+      state.profile.twilioAuthToken = document.getElementById("set_twilioToken").value.trim();
+      state.profile.twilioFromNumber = document.getElementById("set_twilioFrom").value.trim();
+      saveState(); render();
+      toast("Provider keys saved");
+      break;
+    }
     case "pickCheckInFrequency": {
       state.profile.checkInFrequency = v;
       const cdf = document.getElementById("ciCustomDaysField"); if(cdf) cdf.style.display = v==="custom"?"":"none";
@@ -4456,13 +4548,26 @@ document.addEventListener("click", async function(e){
     case "openTaskForm": openTaskForm(id||null, v||null); break;
     case "pickTaskColor": { taskFormColor = v; document.querySelectorAll('[data-action="pickTaskColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "pickTaskCat": { taskFormCat = v; document.querySelectorAll('[data-action="pickTaskCat"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
+    case "toggleTaskAlarm": {
+      const isOn = t.classList.toggle("on");
+      taskAlarmOn = isOn;
+      const block = document.getElementById("tsk_alarmBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
     case "saveTask": {
       const title = document.getElementById("tsk_title").value.trim();
       if(!title){ toast("Please enter a task"); return; }
       const planned = Math.max(1, Number(document.getElementById("tsk_planned").value)||30);
       const linkVal = document.getElementById("tsk_link") ? document.getElementById("tsk_link").value : "";
       const linkParts = linkVal ? linkVal.split(":") : ["",""];
-      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: document.getElementById("tsk_date").value||"", linked_type: linkParts[0]||"", linked_id: linkParts[1]||"" };
+      const taskDate = document.getElementById("tsk_date").value||"";
+      if(taskAlarmOn && !taskDate){ toast("Add a date above to set a reminder"); return; }
+      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: taskDate, linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
+        alarm_enabled: taskAlarmOn,
+        alarm_time: taskAlarmOn ? document.getElementById("tsk_alarmTime").value : "",
+        alarm_level: taskAlarmOn ? document.getElementById("tsk_alarmLevel").value : "moderate",
+        notify_email: notifyEmailOn, notify_sms: notifySmsOn };
       state.tasks = state.tasks || [];
       if(id){ Object.assign(state.tasks.find(x=>x.id===id), payload); }
       else {
@@ -4803,7 +4908,8 @@ document.addEventListener("click", async function(e){
         repeat_days: (repeat==="weekly" || (repeat==="custom" && repeatUnit==="week")) ? ceRepeatDays.slice() : [],
         repeat_unit: repeat==="custom" ? repeatUnit : "",
         repeat_interval: repeat==="custom" ? repeatInterval : 1,
-        repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : ""
+        repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : "",
+        notify_email: notifyEmailOn, notify_sms: notifySmsOn
       };
       state.customEvents = state.customEvents || [];
       if(id){ Object.assign(state.customEvents.find(x=>x.id===id), payload); } else { payload.id = uid(); state.customEvents.push(payload); }
@@ -5001,10 +5107,15 @@ document.addEventListener("click", async function(e){
     }
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
     case "pickRColor": { reminderFormColor = v; document.querySelectorAll('[data-action="pickRColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
+    case "toggleNotifyChannel": {
+      if(v==="email") notifyEmailOn = !notifyEmailOn; else notifySmsOn = !notifySmsOn;
+      t.classList.toggle("selected");
+      break;
+    }
     case "saveReminder": {
       const title = document.getElementById("r_title").value.trim();
       if(!title){ toast("Please enter a title"); return; }
-      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true };
+      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true, notify_email: notifyEmailOn, notify_sms: notifySmsOn };
       if(id){ Object.assign(state.reminders.find(x=>x.id===id), payload); } else { payload.id = uid(); state.reminders.push(payload); }
       saveState(); closeModal(); render();
       toast("Reminder saved");
