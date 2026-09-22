@@ -490,7 +490,8 @@ function defaultState(){
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
-      resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"" },
+      resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
+      dashboardOrder:[], dashboardHidden:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
   };
@@ -2112,6 +2113,48 @@ function heroCardV2Html(lvl, xp, streakDays, doneCount, dueCount){
 function statIconCard(icon, iconBg, num, lbl){
   return '<div class="stat-icon-card"><div class="sic-icon" style="background:'+iconBg+';">'+icon+'</div><div class="sic-num">'+num+'</div><div class="sic-lbl">'+lbl+'</div></div>';
 }
+const DASHBOARD_WIDGETS = [
+  {id:"hero", label:"Level & Streak Card", icon:"🏆"},
+  {id:"quickLinks", label:"Quick Links", icon:"🧭"},
+  {id:"stats", label:"Stats Grid", icon:"📊"},
+  {id:"badges", label:"Badges", icon:"🏅"},
+  {id:"bedtime", label:"Time Check", icon:"⏳"},
+  {id:"checkin", label:"Sleep & Mood Check-In", icon:"🌙"},
+  {id:"tasks", label:"Today's Tasks", icon:"📝"},
+  {id:"habits", label:"Today's Habits", icon:"✅"},
+  {id:"alerts", label:"Today's Alerts", icon:"⏰"},
+  {id:"goals", label:"Goals in Progress", icon:"🎯"}
+];
+function getDashboardOrder(){
+  const allIds = DASHBOARD_WIDGETS.map(w=>w.id);
+  const saved = state.profile.dashboardOrder;
+  if(!saved || !saved.length) return allIds.slice();
+  const filtered = saved.filter(id=>allIds.includes(id));
+  const missing = allIds.filter(id=>!filtered.includes(id));
+  return filtered.concat(missing);
+}
+function dashboardOrderRowHtml(id, i, total){
+  const w = DASHBOARD_WIDGETS.find(x=>x.id===id);
+  const hidden = (state.profile.dashboardHidden||[]).includes(id);
+  return '<div class="row-inline" style="align-items:center;padding:7px 0;border-bottom:1px solid var(--border);margin:0;">'+
+    '<div style="flex:1;font-weight:700;'+(hidden?"opacity:.4;":"")+'">'+w.icon+' '+w.label+'</div>'+
+    '<div style="display:flex;gap:4px;flex-shrink:0;">'+
+    '<button class="icon-btn" data-action="moveDashWidget" data-v="up" data-id="'+id+'" '+(i===0?"disabled style=\"opacity:.3;\"":"")+'>⬆️</button>'+
+    '<button class="icon-btn" data-action="moveDashWidget" data-v="down" data-id="'+id+'" '+(i===total-1?"disabled style=\"opacity:.3;\"":"")+'>⬇️</button>'+
+    '<button class="icon-btn" data-action="toggleDashWidgetHidden" data-id="'+id+'" title="'+(hidden?"Show on dashboard":"Hide from dashboard")+'">'+(hidden?"🚫":"👁️")+'</button>'+
+    '</div></div>';
+}
+function dashboardEditModalHtml(){
+  const order = getDashboardOrder();
+  return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Reorder or hide sections on your Home screen.</p>'+
+    '<div id="dashOrderList">'+order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("")+'</div>'+
+    '<div class="modal-actions"><button class="btn block" data-action="closeModal">Done</button></div>';
+}
+function refreshDashOrderList(){
+  const order = getDashboardOrder();
+  const el = document.getElementById("dashOrderList");
+  if(el) el.innerHTML = order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("");
+}
 function renderHome(){
   const due = habitsDueToday();
   const doneCount = due.filter(h=>isHabitCompletedOn(h, todayStr())).length;
@@ -2120,51 +2163,48 @@ function renderHome(){
     .map(r=>Object.assign({}, r, {time:getEffectiveReminderTime(r, todayStr())})).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
   const lvl = levelFromXp(totalPoints());
   const earnedBadges = computeEarnedBadges();
+  const todaysEventCount = getDayTimelineItems(todayStr()).length;
+  const completionPct = due.length ? Math.round((doneCount/due.length)*100) : 0;
+  const todaysTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).slice().sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
+
+  const widgetHtml = {
+    hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
+    quickLinks: dashboardQuickLinksHtml(["planner","reminders","progress","focus"]),
+    stats: '<div class="grid cols-4">'+
+      statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
+      statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
+      statIconCard("🏅","#FEF3C7", bestActiveStreak()+"d", "Best Streak")+
+      statIconCard("📈","#FCE7F3", completionPct+"%", "Completion")+
+      '</div>',
+    badges: earnedBadges.length ? '<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
+      earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>' : "",
+    bedtime: bedtimeWidgetHtml(),
+    checkin: checkInWidgetHtml(),
+    tasks: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>'+
+      (todaysTasks.length===0 ? emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.") : todaysTasks.map(t=>taskRow(t)).join(""))+'</div>',
+    habits: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>'+
+      (due.length===0 ? emptyState("✨","No habits scheduled today","Add a habit to get started.") : due.slice().sort((a,b)=>Number(isHabitCompletedOn(a,todayStr()))-Number(isHabitCompletedOn(b,todayStr()))).map(h=>habitRow(h)).join(""))+'</div>',
+    alerts: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Alerts</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>'+
+      (upcomingReminders.length===0 ? emptyState("⏰","Nothing scheduled today","Set an alert from a habit, goal, or the planner.") : upcomingReminders.map(r=>reminderRow(r)).join(""))+'</div>',
+    goals: activeGoals.length ? '<div><div class="section-head" style="margin-top:0;"><h2>Goals in Progress</h2><a class="btn ghost sm" href="#/goals">View all</a></div>'+
+      activeGoals.slice(0,3).map(g=>goalRow(g)).join("")+'</div>' : ""
+  };
 
   let html = '<div class="topbar"><div><h1>Hey there, '+escapeHtml(displayName())+'! '+themeEmoji("greet")+'</h1><p class="subtitle" style="margin:2px 0 0">'+todayLongDate()+'</p></div>'+
     '<div style="display:flex;align-items:center;gap:8px;"><div class="points-pill">⭐ '+totalPoints()+' XP</div>'+
+    '<button class="icon-btn" data-action="openDashboardEditor" title="Customize dashboard">🧩</button>'+
     '<a href="#/settings" class="icon-btn" style="text-decoration:none;" title="Settings">⚙️</a></div></div>';
 
   html += '<div class="card" style="margin-bottom:16px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
 
-  html += heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length);
+  const hidden = state.profile.dashboardHidden || [];
+  getDashboardOrder().forEach(id=>{
+    if(hidden.includes(id)) return;
+    const chunk = widgetHtml[id];
+    if(!chunk) return;
+    html += '<div style="margin-top:14px;">'+chunk+'</div>';
+  });
 
-  html += dashboardQuickLinksHtml(["planner","reminders","progress","focus"]);
-
-  const todaysEventCount = getDayTimelineItems(todayStr()).length;
-  const completionPct = due.length ? Math.round((doneCount/due.length)*100) : 0;
-  html += '<div class="grid cols-4">'+
-    statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
-    statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
-    statIconCard("🏅","#FEF3C7", bestActiveStreak()+"d", "Best Streak")+
-    statIconCard("📈","#FCE7F3", completionPct+"%", "Completion")+
-    '</div>';
-
-  if(earnedBadges.length){
-    html += '<div class="card" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
-      earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>';
-  }
-
-  html += '<div style="margin-top:14px;">'+bedtimeWidgetHtml()+'</div>';
-  html += checkInWidgetHtml();
-
-  const todaysTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).slice().sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
-  html += '<div class="section-head"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>';
-  if(todaysTasks.length===0) html += emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.");
-  else html += todaysTasks.map(t=>taskRow(t)).join("");
-
-  html += '<div class="section-head"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>';
-  if(due.length===0) html += emptyState("✨","No habits scheduled today","Add a habit to get started.");
-  else html += due.slice().sort((a,b)=>Number(isHabitCompletedOn(a,todayStr()))-Number(isHabitCompletedOn(b,todayStr()))).map(h=>habitRow(h)).join("");
-
-  html += '<div class="section-head"><h2>Today\'s Alerts</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>';
-  if(upcomingReminders.length===0) html += emptyState("⏰","Nothing scheduled today","Set an alert from a habit, goal, or the planner.");
-  else html += upcomingReminders.map(r=>reminderRow(r)).join("");
-
-  if(activeGoals.length){
-    html += '<div class="section-head"><h2>Goals in Progress</h2><a class="btn ghost sm" href="#/goals">View all</a></div>';
-    html += activeGoals.slice(0,3).map(g=>goalRow(g)).join("");
-  }
   return html;
 }
 function todayLongDate(){ return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}); }
@@ -4511,6 +4551,26 @@ document.addEventListener("click", async function(e){
       state.profile.bedtime = document.getElementById("set_bedtime").value || "22:00";
       saveState(); render();
       toast("Bedtime updated");
+      break;
+    }
+    case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
+    case "moveDashWidget": {
+      const order = getDashboardOrder();
+      const idx = order.indexOf(id);
+      const swapWith = v==="up" ? idx-1 : idx+1;
+      if(idx<0 || swapWith<0 || swapWith>=order.length) return;
+      const tmp = order[idx]; order[idx] = order[swapWith]; order[swapWith] = tmp;
+      state.profile.dashboardOrder = order;
+      saveState();
+      refreshDashOrderList();
+      break;
+    }
+    case "toggleDashWidgetHidden": {
+      state.profile.dashboardHidden = state.profile.dashboardHidden || [];
+      const idx = state.profile.dashboardHidden.indexOf(id);
+      if(idx>=0) state.profile.dashboardHidden.splice(idx,1); else state.profile.dashboardHidden.push(id);
+      saveState();
+      refreshDashOrderList();
       break;
     }
     case "saveNotifyContact": {
