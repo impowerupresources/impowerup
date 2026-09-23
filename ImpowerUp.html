@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ImpowerUp</title>
+<meta name="description" content="ImpowerUp — build habits, hit goals, plan your day, and track your progress, all in one place.">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ImpowerUp">
+<meta property="og:description" content="Build habits, hit goals, plan your day, and track your progress, all in one place.">
+<meta property="og:image" content="https://impowerupresources.github.io/impowerup/icon-512.png">
+<meta property="og:url" content="https://impowerupresources.github.io/impowerup/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="ImpowerUp">
+<meta name="twitter:description" content="Build habits, hit goals, plan your day, and track your progress, all in one place.">
+<meta name="twitter:image" content="https://impowerupresources.github.io/impowerup/icon-512.png">
 <style>
   :root{
     --accent:#2563EB;
@@ -79,6 +92,8 @@
   }
   nav.bottombar a{flex-direction:column;gap:1px;font-size:9.5px;padding:6px 3px;flex:1;text-align:center;border-radius:10px;min-width:40px;}
   nav.bottombar a .ic{font-size:19px;}
+  nav.sidebar a .ic, nav.bottombar a .ic{display:inline-flex;align-items:center;justify-content:center;}
+  nav.sidebar a .ic svg, nav.bottombar a .ic svg{display:block;}
   @media(min-width:900px){nav.bottombar{display:none;}}
 
   h1{font-size:25px;margin:0 0 4px;font-weight:800;}
@@ -203,6 +218,13 @@
   .hero-v2-pill{flex:1;background:rgba(255,255,255,.18);border-radius:16px;padding:12px 14px;min-width:0;}
   .hero-v2-pill-label{font-size:12px;opacity:.9;display:flex;align-items:center;gap:5px;font-weight:700;}
   .hero-v2-pill-value{font-size:19px;font-weight:900;margin-top:3px;}
+  .hero-stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+  .hero-level-box{background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;padding:16px;color:#fff;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;justify-content:space-between;min-height:132px;}
+  .hero-stat-box{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;justify-content:space-between;min-height:132px;}
+  .hero-stat-box .hsb-icon{font-size:20px;}
+  .hero-stat-box .hsb-val{font-size:22px;font-weight:900;}
+  .hero-stat-box .hsb-lbl{font-size:12px;color:var(--text-muted);font-weight:700;margin-top:2px;}
+  @media(max-width:600px){.hero-stat-grid{gap:8px;}.hero-level-box,.hero-stat-box{padding:12px;min-height:112px;border-radius:16px;}}
   .stat-icon-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:16px 14px;box-shadow:var(--shadow);}
   .stat-icon-card .sic-icon{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:12px;}
   .stat-icon-card .sic-num{font-size:21px;font-weight:900;}
@@ -2287,14 +2309,50 @@ function getOrderedRouteList(routeList){
   const missing = ids.filter(id=>!filtered.includes(id));
   return filtered.concat(missing).map(id=>routeList.find(r=>r.path===id));
 }
-function navHtml(active){
+function navIconSvg(inner){ return '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>'; }
+const NAV_ICONS = {
+  home: navIconSvg('<path d="M4 11l8-7 8 7"/><path d="M6 10v9h5v-5h2v5h5v-9"/>'),
+  habits: navIconSvg('<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>'),
+  goals: navIconSvg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>'),
+  tasks: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="14" x2="15" y2="14"/>'),
+  planner: navIconSvg('<rect x="4" y="5" width="16" height="15" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/><line x1="8" y1="3" x2="8" y2="6"/><line x1="16" y1="3" x2="16" y2="6"/>'),
+  assessments: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><path d="M9 13l2 2 4-4"/>'),
+  reminders: navIconSvg('<path d="M6 10a6 6 0 0112 0c0 4 1.5 5.5 1.5 5.5H4.5S6 14 6 10z"/><path d="M10 18a2 2 0 004 0"/>'),
+  progress: navIconSvg('<line x1="5" y1="19" x2="5" y2="13"/><line x1="12" y1="19" x2="12" y2="9"/><line x1="19" y1="19" x2="19" y2="5"/>'),
+  focus: navIconSvg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
+  sharing: navIconSvg('<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><line x1="8.2" y1="10.8" x2="15.8" y2="7.2"/><line x1="8.2" y1="13.2" x2="15.8" y2="16.8"/>'),
+  settings: navIconSvg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.2 6.2l1.4 1.4M18.4 16.4l1.4 1.4M3 12h2M19 12h2M4.2 17.8l1.4-1.4M18.4 7.6l1.4-1.4"/>'),
+  admin: navIconSvg('<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/>'),
+  more: navIconSvg('<circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/>')
+};
+function navIconFor(path){ return NAV_ICONS[path] || ''; }
+function computeNavRouteList(active){
   maybeCheckHasAnyAssessment();
   let routeList = ROUTES.filter(r=>r.path!=="assessments" || active==="assessments" || _hasAnyAssessment===true);
   if(state && state.profile && state.profile.isCloudAdmin) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
-  routeList = getOrderedRouteList(routeList);
-  const items = routeList.map(r=>'<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
-  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
-         '<nav class="bottombar">'+items+'</nav>';
+  return getOrderedRouteList(routeList);
+}
+const BOTTOM_NAV_PRIMARY_COUNT = 4;
+function navHtml(active){
+  const routeList = computeNavRouteList(active);
+  const sidebarItems = routeList.map(r=>'<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
+  const primaryRoutes = routeList.slice(0, BOTTOM_NAV_PRIMARY_COUNT);
+  const overflowRoutes = routeList.slice(BOTTOM_NAV_PRIMARY_COUNT);
+  let bottomItems = primaryRoutes.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
+  if(overflowRoutes.length){
+    const moreActive = overflowRoutes.some(r=>r.path===active);
+    bottomItems += '<a href="javascript:void(0)" data-action="openMoreNav" class="'+(moreActive?"active":"")+'"><span class="ic">'+NAV_ICONS.more+'</span><span>More</span></a>';
+  }
+  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+sidebarItems+'</nav>'+
+         '<nav class="bottombar">'+bottomItems+'</nav>';
+}
+function moreNavModalHtml(){
+  const active = currentRoute();
+  const routeList = computeNavRouteList(active);
+  const overflowRoutes = routeList.slice(BOTTOM_NAV_PRIMARY_COUNT);
+  return '<h2>More</h2><div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">'+
+    overflowRoutes.map(r=>'<div data-action="navigateAndCloseModal" data-v="'+r.path+'" style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer;'+(r.path===active?"background:var(--surface-2);color:var(--accent);font-weight:700;":"")+'"><span style="display:inline-flex;">'+navIconFor(r.path)+'</span><span style="font-weight:700;">'+r.label+'</span></div>').join("")+
+    '</div>';
 }
 function topbarHtml(title, subtitle){
   return '<div class="topbar"><div><h1>'+title+'</h1>'+(subtitle?'<p class="subtitle" style="margin:2px 0 0">'+subtitle+'</p>':'')+'</div>'+
@@ -2368,15 +2426,18 @@ function levelRingSvg(pct, levelNum){
     '<div class="hero-level">'+levelNum+'</div></div>';
 }
 function heroCardV2Html(lvl, xp, streakDays, doneCount, dueCount){
-  return '<div class="hero-card-v2">'+
-    '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy">🏆</div></div>'+
-    '<div class="hero-v2-xp">⚡ '+xp+' XP</div>'+
-    '<div class="hero-v2-progress-label"><span>'+lvl.into+' / '+lvl.needed+' XP to next level</span><span>'+lvl.pct+'%</span></div>'+
-    '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
-    '<div class="hero-v2-pills">'+
-    '<div class="hero-v2-pill"><div class="hero-v2-pill-label">'+themeEmoji("streak")+' Streak</div><div class="hero-v2-pill-value">'+streakDays+' days</div></div>'+
-    '<div class="hero-v2-pill"><div class="hero-v2-pill-label">⭐ Today</div><div class="hero-v2-pill-value">'+doneCount+'/'+dueCount+'</div></div>'+
-    '</div></div>';
+  return '<div class="hero-stat-grid">'+
+    '<div class="hero-level-box">'+
+      '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy" style="width:34px;height:34px;font-size:16px;">🏆</div></div>'+
+      '<div>'+
+        '<div class="hero-v2-xp" style="font-size:22px;margin-top:0;">⚡ '+xp+'</div>'+
+        '<div class="hero-v2-progress-label" style="margin-top:8px;margin-bottom:5px;"><span>'+lvl.into+'/'+lvl.needed+'</span><span>'+lvl.pct+'%</span></div>'+
+        '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="hero-stat-box"><div class="hsb-icon">'+themeEmoji("streak")+'</div><div><div class="hsb-val">'+streakDays+'d</div><div class="hsb-lbl">Streak</div></div></div>'+
+    '<div class="hero-stat-box"><div class="hsb-icon">⭐</div><div><div class="hsb-val">'+doneCount+'/'+dueCount+'</div><div class="hsb-lbl">Today</div></div></div>'+
+    '</div>';
 }
 function statIconCard(icon, iconBg, num, lbl){
   return '<div class="stat-icon-card"><div class="sic-icon" style="background:'+iconBg+';">'+icon+'</div><div class="sic-num">'+num+'</div><div class="sic-lbl">'+lbl+'</div></div>';
@@ -2481,7 +2542,7 @@ function dashboardQuickLinksHtml(paths){
   if(!items.length) return "";
   return '<div class="card" style="margin-top:14px;"><div style="display:flex;gap:8px;flex-wrap:wrap;">'+
     items.map(r=>'<a href="#/'+r.path+'" style="text-decoration:none;color:inherit;flex:1;min-width:68px;text-align:center;padding:10px 4px;border-radius:12px;background:var(--surface-2);">'+
-      '<div style="font-size:20px;">'+r.icon+'</div><div style="font-size:11px;font-weight:700;margin-top:3px;">'+r.label+'</div></a>').join("")+
+      '<div style="display:flex;align-items:center;justify-content:center;">'+navIconFor(r.path)+'</div><div style="font-size:11px;font-weight:700;margin-top:3px;">'+r.label+'</div></a>').join("")+
     '</div></div>';
 }
 
@@ -3711,9 +3772,9 @@ function startTasksCountdownTicker(){
 }
 function bedtimeWidgetHtml(){
   return '<div class="card" style="margin-bottom:14px;"><h2>⏳ Time Check</h2>'+
-    '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'+
-    stat(fmtMinutesDuration(pendingTasksTotalMinutes()), "Pending task time")+
-    '<div class="stat"><div class="num" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
+    '<div class="grid cols-2" style="margin-top:10px;">'+
+    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" style="font-size:20px;">'+fmtMinutesDuration(pendingTasksTotalMinutes())+'</div><div class="hsb-lbl">Pending task time</div></div>'+
+    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="hsb-lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
     '</div>'+
     '<div id="bedtimeFitNote" style="font-size:12.5px;font-weight:700;margin-top:8px;"></div>'+
     '<button class="btn ghost sm" style="margin-top:8px;" data-action="openBedtimeForm">✏️ Change bedtime</button>'+
@@ -5103,6 +5164,8 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
+    case "openMoreNav": openModal(moreNavModalHtml()); break;
+    case "navigateAndCloseModal": { closeModal(); location.hash = "#/"+v; break; }
     case "toggleDashWidgetHidden": {
       state.profile.dashboardHidden = state.profile.dashboardHidden || [];
       const idx = state.profile.dashboardHidden.indexOf(id);

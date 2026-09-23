@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ImpowerUp</title>
+<meta name="description" content="ImpowerUp — build habits, hit goals, plan your day, and track your progress, all in one place.">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ImpowerUp">
+<meta property="og:description" content="Build habits, hit goals, plan your day, and track your progress, all in one place.">
+<meta property="og:image" content="https://impowerupresources.github.io/impowerup/icon-512.png">
+<meta property="og:url" content="https://impowerupresources.github.io/impowerup/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="ImpowerUp">
+<meta name="twitter:description" content="Build habits, hit goals, plan your day, and track your progress, all in one place.">
+<meta name="twitter:image" content="https://impowerupresources.github.io/impowerup/icon-512.png">
 <style>
   :root{
     --accent:#2563EB;
@@ -65,6 +78,12 @@
   }
   nav.sidebar a.active, nav.bottombar a.active{background:var(--surface-2);color:var(--accent);}
   nav.sidebar a:hover{background:var(--surface-2);}
+  nav.sidebar a{cursor:grab;}
+  nav.sidebar a.nav-dragging{opacity:.35;}
+  nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
+  .dash-order-row{cursor:grab;}
+  .dash-order-row.dash-dragging{opacity:.35;}
+  .dash-order-row.dash-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
 
   nav.bottombar{
     position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;
@@ -73,6 +92,8 @@
   }
   nav.bottombar a{flex-direction:column;gap:1px;font-size:9.5px;padding:6px 3px;flex:1;text-align:center;border-radius:10px;min-width:40px;}
   nav.bottombar a .ic{font-size:19px;}
+  nav.sidebar a .ic, nav.bottombar a .ic{display:inline-flex;align-items:center;justify-content:center;}
+  nav.sidebar a .ic svg, nav.bottombar a .ic svg{display:block;}
   @media(min-width:900px){nav.bottombar{display:none;}}
 
   h1{font-size:25px;margin:0 0 4px;font-weight:800;}
@@ -197,6 +218,13 @@
   .hero-v2-pill{flex:1;background:rgba(255,255,255,.18);border-radius:16px;padding:12px 14px;min-width:0;}
   .hero-v2-pill-label{font-size:12px;opacity:.9;display:flex;align-items:center;gap:5px;font-weight:700;}
   .hero-v2-pill-value{font-size:19px;font-weight:900;margin-top:3px;}
+  .hero-stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+  .hero-level-box{background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;padding:16px;color:#fff;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;justify-content:space-between;min-height:132px;}
+  .hero-stat-box{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;justify-content:space-between;min-height:132px;}
+  .hero-stat-box .hsb-icon{font-size:20px;}
+  .hero-stat-box .hsb-val{font-size:22px;font-weight:900;}
+  .hero-stat-box .hsb-lbl{font-size:12px;color:var(--text-muted);font-weight:700;margin-top:2px;}
+  @media(max-width:600px){.hero-stat-grid{gap:8px;}.hero-level-box,.hero-stat-box{padding:12px;min-height:112px;border-radius:16px;}}
   .stat-icon-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:16px 14px;box-shadow:var(--shadow);}
   .stat-icon-card .sic-icon{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:12px;}
   .stat-icon-card .sic-num{font-size:21px;font-weight:900;}
@@ -484,11 +512,16 @@ function defaultState(){
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
-      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"classic", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
-      checkInFrequency:"daily", checkInCustomDays:[] },
+      checkInFrequency:"daily", checkInCustomDays:[],
+      notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
+      resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
+      dashboardOrder:[], dashboardHidden:[], defaultSnoozeMinutes:5,
+      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
+      navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
   };
@@ -730,6 +763,191 @@ function computeNextFireAt(time, days){
   return null;
 }
 let _lastPushSync = 0;
+/* One-off (non-recurring) alarms — dated tasks and non-repeating custom events — fire at an
+   exact date+time rather than a weekday pattern, so they get a direct next_fire_at instead of
+   going through computeNextFireAt's weekly-recurrence logic. Already-past ones are left out
+   entirely so they never get (re)pushed to the background scheduler. */
+function computeOneOffFireAt(dateStr, time){
+  if(!dateStr || !time) return null;
+  const [hh,mm] = time.split(":").map(Number);
+  const [yy,mo,dd] = dateStr.split("-").map(Number);
+  const dt = new Date(yy,mo-1,dd,hh,mm,0,0);
+  return dt.getTime() > Date.now() ? dt.toISOString() : null;
+}
+function getOneOffPushItems(){
+  const items = [];
+  (state.customEvents||[]).filter(e=>e.alarm_enabled && e.time && e.date && (!e.repeat || e.repeat==="none")).forEach(e=>{
+    const fireAt = computeOneOffFireAt(e.date, e.time);
+    if(fireAt) items.push({id:"cevt_"+e.id, title:e.label||"Event", body:e.description||"", fireAt});
+  });
+  (state.tasks||[]).filter(t=>t.alarm_enabled && t.alarm_time && t.date && t.status!=="done").forEach(t=>{
+    const fireAt = computeOneOffFireAt(t.date, t.alarm_time);
+    if(fireAt) items.push({id:"tsk_"+t.id, title:"Task: "+t.title, body:"", fireAt});
+  });
+  return items;
+}
+/* ============ Google Calendar two-way sync ============ */
+const GOOGLE_CONNECT_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co/functions/v1/google-calendar-connect";
+const GOOGLE_SYNC_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co/functions/v1/google-calendar-sync";
+function ensureGoogleSyncKey(){
+  if(!state.profile.googleSyncKey){ state.profile.googleSyncKey = uid()+uid(); saveState(); }
+  return state.profile.googleSyncKey;
+}
+async function googleCalendarApi(action, extra){
+  const body = Object.assign({syncKey: state.profile.googleSyncKey, action}, extra||{});
+  const res = await fetch(GOOGLE_SYNC_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  return res.json().catch(()=>({}));
+}
+async function pullGoogleEvents(){
+  const data = await googleCalendarApi("pull");
+  if(!data || !data.events || !data.events.length) return 0;
+  const existingGoogleIds = new Set((state.customEvents||[]).map(e=>e.google_event_id).filter(Boolean));
+  let added = 0;
+  data.events.forEach(ev=>{
+    if(!ev.googleEventId || existingGoogleIds.has(ev.googleEventId)) return;
+    let dateStr = "", timeStr = "";
+    if(ev.allDay && ev.start){
+      dateStr = String(ev.start).slice(0,10);
+    } else if(ev.start){
+      const dt = new Date(ev.start);
+      if(isNaN(dt.getTime())) return;
+      dateStr = todayStr(dt);
+      timeStr = String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0");
+    }
+    if(!dateStr) return;
+    state.customEvents = state.customEvents||[];
+    state.customEvents.push({
+      id: uid(), date: dateStr, time: timeStr, emoji:"📅", label: ev.title||"Google Event", description: ev.description||"",
+      duration_minutes: 30, alarm_enabled:false, alarm_level:"moderate", notify_email:false, notify_sms:false,
+      repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week",
+      color: COLORS[4], google_event_id: ev.googleEventId, source:"google"
+    });
+    added++;
+  });
+  if(added) saveState();
+  return added;
+}
+async function pushGoogleItems(){
+  const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+  const items = [];
+  (state.customEvents||[]).filter(e=>!e.google_event_id && e.source!=="google" && e.date).forEach(e=>{
+    if(e.time){
+      const [hh,mm] = e.time.split(":").map(Number);
+      const [yy,mo,dd] = e.date.split("-").map(Number);
+      const start = new Date(yy,mo-1,dd,hh,mm);
+      const end = new Date(start.getTime() + (e.duration_minutes||30)*60000);
+      items.push({localId:"cevt:"+e.id, title:e.label||"Event", description:e.description||"", allDay:false, startDateTime:start.toISOString(), endDateTime:end.toISOString(), timeZone:tz});
+    } else {
+      items.push({localId:"cevt:"+e.id, title:e.label||"Event", description:e.description||"", allDay:true, date:e.date, endDate:addDays(e.date,1)});
+    }
+  });
+  (state.tasks||[]).filter(t=>!t.google_event_id && t.date && t.status!=="done").forEach(t=>{
+    if(t.alarm_time){
+      const [hh,mm] = t.alarm_time.split(":").map(Number);
+      const [yy,mo,dd] = t.date.split("-").map(Number);
+      const start = new Date(yy,mo-1,dd,hh,mm);
+      const end = new Date(start.getTime() + 30*60000);
+      items.push({localId:"tsk:"+t.id, title:"Task: "+t.title, description:"", allDay:false, startDateTime:start.toISOString(), endDateTime:end.toISOString(), timeZone:tz});
+    } else {
+      items.push({localId:"tsk:"+t.id, title:"Task: "+t.title, description:"", allDay:true, date:t.date, endDate:addDays(t.date,1)});
+    }
+  });
+  if(!items.length) return 0;
+  const data = await googleCalendarApi("push", {items});
+  let pushed = 0;
+  (data.results||[]).forEach(r=>{
+    if(!r || !r.ok || !r.localId) return;
+    const sep = r.localId.indexOf(":");
+    const kind = r.localId.slice(0,sep), localId = r.localId.slice(sep+1);
+    if(kind==="cevt"){ const e=(state.customEvents||[]).find(x=>x.id===localId); if(e){ e.google_event_id=r.googleEventId; pushed++; } }
+    else if(kind==="tsk"){ const t=(state.tasks||[]).find(x=>x.id===localId); if(t){ t.google_event_id=r.googleEventId; pushed++; } }
+  });
+  if(pushed) saveState();
+  return pushed;
+}
+let _googleSyncing = false;
+async function syncGoogleCalendarNow(silent){
+  if(!state.profile.googleCalendarConnected || !state.profile.googleSyncKey) return;
+  if(_googleSyncing) return;
+  _googleSyncing = true;
+  try{
+    let importedCount = 0, exportedCount = 0;
+    if(state.profile.googleImportEnabled) importedCount = await pullGoogleEvents();
+    if(state.profile.googleExportEnabled) exportedCount = await pushGoogleItems();
+    state.profile.lastGoogleSync = new Date().toISOString();
+    saveState();
+    if(!silent) toast((importedCount || exportedCount) ? ("Synced — "+importedCount+" imported, "+exportedCount+" exported") : "Already up to date");
+    if(typeof render==="function") render();
+  }catch(e){
+    if(!silent) toast("Google sync failed — try again");
+  }finally{
+    _googleSyncing = false;
+  }
+}
+let _lastGoogleAutoSync = 0;
+function maybeAutoSyncGoogle(){
+  if(!state.profile.googleCalendarConnected) return;
+  if(!state.profile.googleImportEnabled && !state.profile.googleExportEnabled) return;
+  const now = Date.now();
+  if(now - _lastGoogleAutoSync < 300000) return;
+  _lastGoogleAutoSync = now;
+  syncGoogleCalendarNow(true);
+}
+function checkGoogleOAuthReturn(){
+  const hash = location.hash || "";
+  if(hash.indexOf("google=connected") >= 0){
+    state.profile.googleCalendarConnected = true;
+    saveState();
+    toast("Google Calendar connected!");
+    history.replaceState(null, "", location.pathname+"#/settings");
+    syncGoogleCalendarNow(true);
+  } else if(hash.indexOf("google=error") >= 0){
+    toast("Couldn't connect to Google Calendar — please try again");
+    history.replaceState(null, "", location.pathname+"#/settings");
+  }
+}
+function calendarSyncCardHtml(){
+  const connected = !!state.profile.googleCalendarConnected;
+  const lastSync = state.profile.lastGoogleSync ? (fmtDatePretty(state.profile.lastGoogleSync.slice(0,10))+" "+fmtTime12(new Date(state.profile.lastGoogleSync).toTimeString().slice(0,5))) : "Never";
+  let html = '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>';
+
+  html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Google Calendar — live two-way sync</p>';
+  if(!connected){
+    html += '<p class="hc-meta">Import your Google Calendar events into Planner, and/or send your ImpowerUp tasks &amp; events to Google Calendar.</p>'+
+      '<button class="btn secondary sm" style="margin-top:8px;" data-action="connectGoogleCalendar">🔗 Continue with Google</button>';
+  } else {
+    html += '<p class="hc-meta">✅ Connected — last synced '+escapeHtml(lastSync)+'</p>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
+      '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
+      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
+      '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
+      '<button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button>'+
+      '</div>';
+  }
+
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">Outlook / Apple Calendar / other — .ics import &amp; export</p>'+
+    '<p class="hc-meta">Google Calendar above syncs live. For Outlook, Apple Calendar, or any other calendar app, use a standard .ics file to move events in either direction — these links aren\'t live, so re-export/re-import any time you want them to catch up.</p>'+
+    '<p class="hc-meta" style="font-weight:700;margin-top:12px;">Send ImpowerUp alerts to Outlook/Apple/other</p>'+
+    '<button class="btn secondary block" data-action="exportICS">Export Alerts (.ics)</button>'+
+    '<div class="hc-meta" style="margin-top:10px;line-height:1.6;">'+
+    '<b>Outlook:</b> File → Open &amp; Export → Import/Export → Import an iCalendar (.ics) file.<br>'+
+    '<b>Apple Calendar:</b> double-click the downloaded file, or File → Import.'+
+    '</div>'+
+    '<p class="hc-meta" style="font-weight:700;margin-top:16px;">Bring Outlook/Apple/other events into ImpowerUp</p>'+
+    '<p class="hc-meta">Export your calendar as .ics from that app first, then import it here:</p>'+
+    '<div class="hc-meta" style="margin-bottom:8px;line-height:1.6;">'+
+    '<b>Outlook:</b> File → Open &amp; Export → Import/Export → Export to a file → iCalendar (.ics).<br>'+
+    '<b>Apple Calendar:</b> select a calendar in the sidebar → File → Export → Export.'+
+    '</div>'+
+    '<button class="btn secondary block" data-action="importICSFile">Import Calendar (.ics)</button>'+
+    '<input type="file" id="importIcsFile" accept=".ics,text/calendar" style="display:none;">';
+
+  html += '</div>';
+  return html;
+}
 async function syncAllAlertsToServer(force){
   if(!pushBackendConfigured() || !state.profile.pushEnabled) return;
   const nowMs = Date.now();
@@ -749,11 +967,19 @@ async function syncAllAlertsToServer(force){
         body: JSON.stringify({ id:r.id, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString() })
       });
     }
+    const oneOffItems = getOneOffPushItems();
+    for(const item of oneOffItems){
+      await sbRest("scheduled_alerts?on_conflict=id", {
+        method:"POST",
+        headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
+        body: JSON.stringify({ id:item.id, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString() })
+      });
+    }
     // Reconcile deletions: remove any server-side alerts that no longer exist locally.
     const listRes = await sbRest("scheduled_alerts?subscription_endpoint=eq."+encodeURIComponent(endpoint)+"&select=id");
     if(listRes.ok){
       const serverIds = (await listRes.json()).map(r=>r.id);
-      const localIds = new Set(active.map(r=>r.id));
+      const localIds = new Set(active.map(r=>r.id).concat(oneOffItems.map(i=>i.id)));
       const stale = serverIds.filter(sid=>!localIds.has(sid));
       for(const sid of stale){
         await sbRest("scheduled_alerts?id=eq."+encodeURIComponent(sid), {method:"DELETE"});
@@ -1433,12 +1659,69 @@ function bootApp(){
   const profiles = loadProfiles();
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
-    activateProfile(curId); render();
+    activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else if(profiles.length===1 && !profiles[0].pin && profiles[0].id!==DEMO_PROFILE_ID){
-    activateProfile(profiles[0].id); render();
+    activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else {
     renderProfilePicker();
   }
+}
+/* ============ Missed alarms (shown once on app open if any fired while closed) ============ */
+let missedAlarmsCache = [];
+function computeMissedAlarms(){
+  const now = new Date();
+  const missed = [];
+  for(let back=1; back>=0; back--){
+    const dateStr = addDays(todayStr(), -back);
+    const dow = dayOfWeekName(dateStr);
+    const queueForDay = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, dateStr)}))
+      .concat(getVirtualEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
+      .concat(getCustomEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
+      .concat(getTaskAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})));
+    queueForDay.forEach(r=>{
+      if(!(r.days||[]).includes(dow) || !r._effTime) return;
+      const [hh,mm] = r._effTime.split(":").map(Number);
+      const [yy,mo,dd] = dateStr.split("-").map(Number);
+      const schedDate = new Date(yy,mo-1,dd,hh,mm,0,0);
+      if(schedDate.getTime() >= now.getTime()) return;
+      const firedKey = r.id+"_"+dateStr;
+      if((state.profile.firedReminders||{})[firedKey]) return;
+      missed.push(Object.assign({}, r, {_date:dateStr, _schedTime:r._effTime}));
+    });
+  }
+  missed.sort((a,b)=>(a._date+a._schedTime).localeCompare(b._date+b._schedTime));
+  return missed;
+}
+function missedAlarmRowHtml(r){
+  return '<div class="card" style="margin-bottom:8px;padding:12px;">'+
+    '<div style="font-weight:800;">'+escapeHtml(r.title)+'</div>'+
+    '<div class="hc-meta">'+fmtDatePretty(r._date)+' at '+fmtTime12(r._schedTime)+'</div>'+
+    (r.message?'<div class="hc-meta" style="margin-top:4px;font-style:italic;">"'+escapeHtml(r.message)+'"</div>':'')+
+    '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'+
+    '<button class="btn secondary sm" data-action="dismissMissedAlarm" data-id="'+r.id+'" data-v="'+r._date+'">Dismiss</button>'+
+    '<button class="btn ghost sm" data-action="snoozeMissedAlarm" data-id="'+r.id+'" data-v="'+r._date+'">Snooze '+(state.profile.defaultSnoozeMinutes||5)+'m</button>'+
+    '</div></div>';
+}
+function refreshMissedAlarmsList(){
+  if(!missedAlarmsCache.length){ closeModal(); return; }
+  const el = document.getElementById("missedAlarmsList");
+  if(el) el.innerHTML = missedAlarmsCache.map(r=>missedAlarmRowHtml(r)).join("");
+  else closeModal();
+}
+function missedAlarmsModalHtml(){
+  return '<h2>⏰ Missed Alarms</h2><p class="hc-meta">These didn\'t fire while the app was closed — nothing was silently skipped.</p>'+
+    '<div id="missedAlarmsList" style="max-height:50vh;overflow-y:auto;">'+missedAlarmsCache.map(r=>missedAlarmRowHtml(r)).join("")+'</div>'+
+    '<div class="modal-actions"><button class="btn block" data-action="dismissAllMissedAlarms">Dismiss All</button></div>';
+}
+function checkForMissedAlarms(){
+  if(!state || !state.profile.onboarded) return;
+  const missed = computeMissedAlarms();
+  if(!missed.length) return;
+  missedAlarmsCache = missed;
+  state.profile.firedReminders = state.profile.firedReminders || {};
+  missed.forEach(r=>{ state.profile.firedReminders[r.id+"_"+r._date] = true; });
+  saveState();
+  openModal(missedAlarmsModalHtml());
 }
 function samplePreviewHtml(){
   const habits = [
@@ -1694,7 +1977,15 @@ function getVirtualEventAlarms(dateStr){
 function getCustomEventAlarms(dateStr){
   return (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr) && e.alarm_enabled && e.time).map(e=>({
     id:"cevt_"+e.id, title:e.label||"Event", time:e.time,
-    alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true
+    alarm_level:e.alarm_level||"moderate", message:e.description||"", days:[dayOfWeekName(dateStr)], is_active:true,
+    notify_email:!!e.notify_email, notify_sms:!!e.notify_sms
+  }));
+}
+function getTaskAlarms(dateStr){
+  return (state.tasks||[]).filter(tk=>tk.date===dateStr && tk.alarm_enabled && tk.alarm_time && tk.status!=="done").map(tk=>({
+    id:"tsk_"+tk.id, title:"Task: "+tk.title, time:tk.alarm_time,
+    alarm_level:tk.alarm_level||"moderate", message:"", days:[dayOfWeekName(dateStr)], is_active:true,
+    notify_email:!!tk.notify_email, notify_sms:!!tk.notify_sms
   }));
 }
 /* Epoch day number for a Y-M-D date string — used for interval math in custom recurrence. */
@@ -2011,13 +2302,57 @@ if(window.matchMedia){
 }
 
 /* ============ Render dispatcher ============ */
-function navHtml(active){
+function getOrderedRouteList(routeList){
+  const ids = routeList.map(r=>r.path);
+  const saved = (state && state.profile && state.profile.navOrder) || [];
+  const filtered = saved.filter(id=>ids.includes(id));
+  const missing = ids.filter(id=>!filtered.includes(id));
+  return filtered.concat(missing).map(id=>routeList.find(r=>r.path===id));
+}
+function navIconSvg(inner){ return '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>'; }
+const NAV_ICONS = {
+  home: navIconSvg('<path d="M4 11l8-7 8 7"/><path d="M6 10v9h5v-5h2v5h5v-9"/>'),
+  habits: navIconSvg('<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>'),
+  goals: navIconSvg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>'),
+  tasks: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="14" x2="15" y2="14"/>'),
+  planner: navIconSvg('<rect x="4" y="5" width="16" height="15" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/><line x1="8" y1="3" x2="8" y2="6"/><line x1="16" y1="3" x2="16" y2="6"/>'),
+  assessments: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><path d="M9 13l2 2 4-4"/>'),
+  reminders: navIconSvg('<path d="M6 10a6 6 0 0112 0c0 4 1.5 5.5 1.5 5.5H4.5S6 14 6 10z"/><path d="M10 18a2 2 0 004 0"/>'),
+  progress: navIconSvg('<line x1="5" y1="19" x2="5" y2="13"/><line x1="12" y1="19" x2="12" y2="9"/><line x1="19" y1="19" x2="19" y2="5"/>'),
+  focus: navIconSvg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
+  sharing: navIconSvg('<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><line x1="8.2" y1="10.8" x2="15.8" y2="7.2"/><line x1="8.2" y1="13.2" x2="15.8" y2="16.8"/>'),
+  settings: navIconSvg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.2 6.2l1.4 1.4M18.4 16.4l1.4 1.4M3 12h2M19 12h2M4.2 17.8l1.4-1.4M18.4 7.6l1.4-1.4"/>'),
+  admin: navIconSvg('<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/>'),
+  more: navIconSvg('<circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/>')
+};
+function navIconFor(path){ return NAV_ICONS[path] || ''; }
+function computeNavRouteList(active){
   maybeCheckHasAnyAssessment();
   let routeList = ROUTES.filter(r=>r.path!=="assessments" || active==="assessments" || _hasAnyAssessment===true);
   if(state && state.profile && state.profile.isCloudAdmin) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
-  const items = routeList.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
-  return '<nav class="sidebar"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
-         '<nav class="bottombar">'+items+'</nav>';
+  return getOrderedRouteList(routeList);
+}
+const BOTTOM_NAV_PRIMARY_COUNT = 4;
+function navHtml(active){
+  const routeList = computeNavRouteList(active);
+  const sidebarItems = routeList.map(r=>'<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
+  const primaryRoutes = routeList.slice(0, BOTTOM_NAV_PRIMARY_COUNT);
+  const overflowRoutes = routeList.slice(BOTTOM_NAV_PRIMARY_COUNT);
+  let bottomItems = primaryRoutes.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
+  if(overflowRoutes.length){
+    const moreActive = overflowRoutes.some(r=>r.path===active);
+    bottomItems += '<a href="javascript:void(0)" data-action="openMoreNav" class="'+(moreActive?"active":"")+'"><span class="ic">'+NAV_ICONS.more+'</span><span>More</span></a>';
+  }
+  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+sidebarItems+'</nav>'+
+         '<nav class="bottombar">'+bottomItems+'</nav>';
+}
+function moreNavModalHtml(){
+  const active = currentRoute();
+  const routeList = computeNavRouteList(active);
+  const overflowRoutes = routeList.slice(BOTTOM_NAV_PRIMARY_COUNT);
+  return '<h2>More</h2><div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">'+
+    overflowRoutes.map(r=>'<div data-action="navigateAndCloseModal" data-v="'+r.path+'" style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer;'+(r.path===active?"background:var(--surface-2);color:var(--accent);font-weight:700;":"")+'"><span style="display:inline-flex;">'+navIconFor(r.path)+'</span><span style="font-weight:700;">'+r.label+'</span></div>').join("")+
+    '</div>';
 }
 function topbarHtml(title, subtitle){
   return '<div class="topbar"><div><h1>'+title+'</h1>'+(subtitle?'<p class="subtitle" style="margin:2px 0 0">'+subtitle+'</p>':'')+'</div>'+
@@ -2026,6 +2361,7 @@ function topbarHtml(title, subtitle){
 function stat(num,lbl){ return '<div class="stat"><div class="num">'+num+'</div><div class="lbl">'+lbl+'</div></div>'; }
 function emptyState(icon,title,sub){ return '<div class="empty card"><div class="big">'+icon+'</div><div style="font-weight:800;color:var(--text)">'+title+'</div><div style="font-size:13px;margin-top:4px;">'+sub+'</div></div>'; }
 
+let _lastRenderedRoute = null;
 function render(){
   const hash = location.hash;
   if(hash.indexOf("#share=")===0){ renderMentorView(decodeURIComponent(hash.slice(7))); return; }
@@ -2054,7 +2390,8 @@ function render(){
     '<div style="display:flex;gap:8px;"><button class="btn sm secondary" data-action="discardExitClientView">Discard &amp; Exit</button>'+
     '<button class="btn sm" style="background:#fff;color:var(--danger);" data-action="saveExitClientView">Save &amp; Exit</button></div></div>' : "";
   app.innerHTML = adminBanner + navHtml(route) + '<div class="page">' + body + '</div>';
-  window.scrollTo(0,0);
+  if(route !== _lastRenderedRoute) window.scrollTo(0,0);
+  _lastRenderedRoute = route;
   if(route==="focus" && !focusTimer){
     const activeF = state.focusSessions.find(s=>s.status==="active");
     if(activeF) startFocusTicker(activeF);
@@ -2089,18 +2426,62 @@ function levelRingSvg(pct, levelNum){
     '<div class="hero-level">'+levelNum+'</div></div>';
 }
 function heroCardV2Html(lvl, xp, streakDays, doneCount, dueCount){
-  return '<div class="hero-card-v2">'+
-    '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy">🏆</div></div>'+
-    '<div class="hero-v2-xp">⚡ '+xp+' XP</div>'+
-    '<div class="hero-v2-progress-label"><span>'+lvl.into+' / '+lvl.needed+' XP to next level</span><span>'+lvl.pct+'%</span></div>'+
-    '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
-    '<div class="hero-v2-pills">'+
-    '<div class="hero-v2-pill"><div class="hero-v2-pill-label">'+themeEmoji("streak")+' Streak</div><div class="hero-v2-pill-value">'+streakDays+' days</div></div>'+
-    '<div class="hero-v2-pill"><div class="hero-v2-pill-label">⭐ Today</div><div class="hero-v2-pill-value">'+doneCount+'/'+dueCount+'</div></div>'+
-    '</div></div>';
+  return '<div class="hero-stat-grid">'+
+    '<div class="hero-level-box">'+
+      '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy" style="width:34px;height:34px;font-size:16px;">🏆</div></div>'+
+      '<div>'+
+        '<div class="hero-v2-xp" style="font-size:22px;margin-top:0;">⚡ '+xp+'</div>'+
+        '<div class="hero-v2-progress-label" style="margin-top:8px;margin-bottom:5px;"><span>'+lvl.into+'/'+lvl.needed+'</span><span>'+lvl.pct+'%</span></div>'+
+        '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="hero-stat-box"><div class="hsb-icon">'+themeEmoji("streak")+'</div><div><div class="hsb-val">'+streakDays+'d</div><div class="hsb-lbl">Streak</div></div></div>'+
+    '<div class="hero-stat-box"><div class="hsb-icon">⭐</div><div><div class="hsb-val">'+doneCount+'/'+dueCount+'</div><div class="hsb-lbl">Today</div></div></div>'+
+    '</div>';
 }
 function statIconCard(icon, iconBg, num, lbl){
   return '<div class="stat-icon-card"><div class="sic-icon" style="background:'+iconBg+';">'+icon+'</div><div class="sic-num">'+num+'</div><div class="sic-lbl">'+lbl+'</div></div>';
+}
+const DASHBOARD_WIDGETS = [
+  {id:"hero", label:"Level & Streak Card", icon:"🏆"},
+  {id:"quickLinks", label:"Quick Links", icon:"🧭"},
+  {id:"stats", label:"Stats Grid", icon:"📊"},
+  {id:"badges", label:"Badges", icon:"🏅"},
+  {id:"bedtime", label:"Time Check", icon:"⏳"},
+  {id:"checkin", label:"Sleep & Mood Check-In", icon:"🌙"},
+  {id:"tasks", label:"Today's Tasks", icon:"📝"},
+  {id:"habits", label:"Today's Habits", icon:"✅"},
+  {id:"alerts", label:"Today's Alerts", icon:"⏰"},
+  {id:"goals", label:"Goals in Progress", icon:"🎯"}
+];
+function getDashboardOrder(){
+  const allIds = DASHBOARD_WIDGETS.map(w=>w.id);
+  const saved = state.profile.dashboardOrder;
+  if(!saved || !saved.length) return allIds.slice();
+  const filtered = saved.filter(id=>allIds.includes(id));
+  const missing = allIds.filter(id=>!filtered.includes(id));
+  return filtered.concat(missing);
+}
+function dashboardOrderRowHtml(id, i, total){
+  const w = DASHBOARD_WIDGETS.find(x=>x.id===id);
+  const hidden = (state.profile.dashboardHidden||[]).includes(id);
+  return '<div class="row-inline dash-order-row" draggable="true" data-widget-id="'+id+'" style="align-items:center;padding:7px 0;border-bottom:1px solid var(--border);margin:0;">'+
+    '<div style="color:var(--text-muted);flex-shrink:0;margin-right:2px;font-size:16px;">⠿</div>'+
+    '<div style="flex:1;font-weight:700;'+(hidden?"opacity:.4;":"")+'">'+w.icon+' '+w.label+'</div>'+
+    '<div style="display:flex;gap:4px;flex-shrink:0;">'+
+    '<button class="icon-btn" data-action="toggleDashWidgetHidden" data-id="'+id+'" title="'+(hidden?"Show on dashboard":"Hide from dashboard")+'">'+(hidden?"🚫":"👁️")+'</button>'+
+    '</div></div>';
+}
+function dashboardEditModalHtml(){
+  const order = getDashboardOrder();
+  return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Drag ⠿ to reorder sections, or tap 👁️ to hide one from your Home screen.</p>'+
+    '<div id="dashOrderList">'+order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("")+'</div>'+
+    '<div class="modal-actions"><button class="btn block" data-action="closeModal">Done</button></div>';
+}
+function refreshDashOrderList(){
+  const order = getDashboardOrder();
+  const el = document.getElementById("dashOrderList");
+  if(el) el.innerHTML = order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("");
 }
 function renderHome(){
   const due = habitsDueToday();
@@ -2110,51 +2491,48 @@ function renderHome(){
     .map(r=>Object.assign({}, r, {time:getEffectiveReminderTime(r, todayStr())})).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
   const lvl = levelFromXp(totalPoints());
   const earnedBadges = computeEarnedBadges();
+  const todaysEventCount = getDayTimelineItems(todayStr()).length;
+  const completionPct = due.length ? Math.round((doneCount/due.length)*100) : 0;
+  const todaysTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).slice().sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
+
+  const widgetHtml = {
+    hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
+    quickLinks: dashboardQuickLinksHtml(["planner","reminders","progress","focus"]),
+    stats: '<div class="grid cols-4">'+
+      statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
+      statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
+      statIconCard("🏅","#FEF3C7", bestActiveStreak()+"d", "Best Streak")+
+      statIconCard("📈","#FCE7F3", completionPct+"%", "Completion")+
+      '</div>',
+    badges: earnedBadges.length ? '<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
+      earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>' : "",
+    bedtime: bedtimeWidgetHtml(),
+    checkin: checkInWidgetHtml(),
+    tasks: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>'+
+      (todaysTasks.length===0 ? emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.") : todaysTasks.map(t=>taskRow(t)).join(""))+'</div>',
+    habits: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>'+
+      (due.length===0 ? emptyState("✨","No habits scheduled today","Add a habit to get started.") : due.slice().sort((a,b)=>Number(isHabitCompletedOn(a,todayStr()))-Number(isHabitCompletedOn(b,todayStr()))).map(h=>habitRow(h)).join(""))+'</div>',
+    alerts: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Alerts</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>'+
+      (upcomingReminders.length===0 ? emptyState("⏰","Nothing scheduled today","Set an alert from a habit, goal, or the planner.") : upcomingReminders.map(r=>reminderRow(r)).join(""))+'</div>',
+    goals: activeGoals.length ? '<div><div class="section-head" style="margin-top:0;"><h2>Goals in Progress</h2><a class="btn ghost sm" href="#/goals">View all</a></div>'+
+      activeGoals.slice(0,3).map(g=>goalRow(g)).join("")+'</div>' : ""
+  };
 
   let html = '<div class="topbar"><div><h1>Hey there, '+escapeHtml(displayName())+'! '+themeEmoji("greet")+'</h1><p class="subtitle" style="margin:2px 0 0">'+todayLongDate()+'</p></div>'+
     '<div style="display:flex;align-items:center;gap:8px;"><div class="points-pill">⭐ '+totalPoints()+' XP</div>'+
+    '<button class="icon-btn" data-action="openDashboardEditor" title="Customize dashboard">🧩</button>'+
     '<a href="#/settings" class="icon-btn" style="text-decoration:none;" title="Settings">⚙️</a></div></div>';
 
   html += '<div class="card" style="margin-bottom:16px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
 
-  html += heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length);
+  const hidden = state.profile.dashboardHidden || [];
+  getDashboardOrder().forEach(id=>{
+    if(hidden.includes(id)) return;
+    const chunk = widgetHtml[id];
+    if(!chunk) return;
+    html += '<div style="margin-top:14px;">'+chunk+'</div>';
+  });
 
-  html += dashboardQuickLinksHtml(["planner","reminders","progress","focus"]);
-
-  const todaysEventCount = getDayTimelineItems(todayStr()).length;
-  const completionPct = due.length ? Math.round((doneCount/due.length)*100) : 0;
-  html += '<div class="grid cols-4">'+
-    statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
-    statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
-    statIconCard("🏅","#FEF3C7", bestActiveStreak()+"d", "Best Streak")+
-    statIconCard("📈","#FCE7F3", completionPct+"%", "Completion")+
-    '</div>';
-
-  if(earnedBadges.length){
-    html += '<div class="card" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
-      earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>';
-  }
-
-  html += '<div style="margin-top:14px;">'+bedtimeWidgetHtml()+'</div>';
-  html += checkInWidgetHtml();
-
-  const todaysTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).slice().sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
-  html += '<div class="section-head"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>';
-  if(todaysTasks.length===0) html += emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.");
-  else html += todaysTasks.map(t=>taskRow(t)).join("");
-
-  html += '<div class="section-head"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>';
-  if(due.length===0) html += emptyState("✨","No habits scheduled today","Add a habit to get started.");
-  else html += due.slice().sort((a,b)=>Number(isHabitCompletedOn(a,todayStr()))-Number(isHabitCompletedOn(b,todayStr()))).map(h=>habitRow(h)).join("");
-
-  html += '<div class="section-head"><h2>Today\'s Alerts</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>';
-  if(upcomingReminders.length===0) html += emptyState("⏰","Nothing scheduled today","Set an alert from a habit, goal, or the planner.");
-  else html += upcomingReminders.map(r=>reminderRow(r)).join("");
-
-  if(activeGoals.length){
-    html += '<div class="section-head"><h2>Goals in Progress</h2><a class="btn ghost sm" href="#/goals">View all</a></div>';
-    html += activeGoals.slice(0,3).map(g=>goalRow(g)).join("");
-  }
   return html;
 }
 function todayLongDate(){ return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}); }
@@ -2164,7 +2542,7 @@ function dashboardQuickLinksHtml(paths){
   if(!items.length) return "";
   return '<div class="card" style="margin-top:14px;"><div style="display:flex;gap:8px;flex-wrap:wrap;">'+
     items.map(r=>'<a href="#/'+r.path+'" style="text-decoration:none;color:inherit;flex:1;min-width:68px;text-align:center;padding:10px 4px;border-radius:12px;background:var(--surface-2);">'+
-      '<div style="font-size:20px;">'+r.icon+'</div><div style="font-size:11px;font-weight:700;margin-top:3px;">'+r.label+'</div></a>').join("")+
+      '<div style="display:flex;align-items:center;justify-content:center;">'+navIconFor(r.path)+'</div><div style="font-size:11px;font-weight:700;margin-top:3px;">'+r.label+'</div></a>').join("")+
     '</div></div>';
 }
 
@@ -2214,6 +2592,18 @@ function taskRow(t){
 /* ============ Alarm settings sub-block (shared by Habit + Goal forms) ============ */
 let habitAlarmOn=false, habitAlarmDays=[];
 let goalAlarmOn=false, goalAlarmDays=[];
+let notifyEmailOn=false, notifySmsOn=false;
+/* Shared "also notify me by email/text" chip pair, reused across every alarm/alert form.
+   Sending itself is wired up once a provider is connected in Settings -> Notifications;
+   the choice is saved either way so nothing needs to be re-entered later. */
+function notifyChannelChipsHtml(){
+  const emailReady = !!(state.profile.notifyEmail && state.profile.emailNotifyEnabled);
+  const smsReady = !!(state.profile.notifyPhone && state.profile.smsNotifyEnabled);
+  return '<div class="field"><label>Also notify me by</label><div class="chip-group">'+
+    '<div class="chip '+(notifyEmailOn?"selected":"")+'" data-action="toggleNotifyChannel" data-v="email">✉️ Email'+(emailReady?"":" (set up in Settings)")+'</div>'+
+    '<div class="chip '+(notifySmsOn?"selected":"")+'" data-action="toggleNotifyChannel" data-v="sms">📱 Text'+(smsReady?"":" (set up in Settings)")+'</div>'+
+    '</div></div>';
+}
 function alarmSettingsBlockHtml(prefix, existingReminder, defaultDays){
   const on = prefix==="habit" ? habitAlarmOn : goalAlarmOn;
   const days = prefix==="habit" ? habitAlarmDays : goalAlarmDays;
@@ -2227,6 +2617,7 @@ function alarmSettingsBlockHtml(prefix, existingReminder, defaultDays){
     '<p class="hc-meta" id="'+prefix+'_alarmHelp">'+(ALARM_HELP[r.alarm_level]||ALARM_HELP.moderate)+'</p>'+
     '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(days.includes(d)?"selected":"")+'" data-action="pickAlarmDay" data-prefix="'+prefix+'" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '<div class="field"><label>Message (optional)</label><input id="'+prefix+'_alarmMsg" type="text" value="'+escapeHtml(r.message||"")+'" placeholder="A little motivational nudge"></div>'+
+    notifyChannelChipsHtml()+
     '</div>';
 }
 
@@ -2283,6 +2674,8 @@ function openHabitForm(id, prefill){
   formColor = h ? h.color : COLORS[0];
   const linkedReminder = h && h.alarm_reminder_id ? state.reminders.find(r=>r.id===h.alarm_reminder_id) : null;
   habitAlarmOn = !!linkedReminder;
+  notifyEmailOn = !!(linkedReminder && linkedReminder.notify_email);
+  notifySmsOn = !!(linkedReminder && linkedReminder.notify_sms);
   habitAlarmDays = linkedReminder ? (linkedReminder.days||[]).slice() : defaultDaysForFrequency(formFreq, formDays);
   openModal(habitFormHtml(h));
 }
@@ -2294,7 +2687,8 @@ function syncHabitAlarm(habit){
       title: habit.title, time: timeEl.value, days: habitAlarmDays.slice(),
       alarm_level: document.getElementById("habit_alarmLevel").value,
       message: document.getElementById("habit_alarmMsg").value.trim(),
-      habit_id: habit.id, is_active:true
+      habit_id: habit.id, is_active:true,
+      notify_email: notifyEmailOn, notify_sms: notifySmsOn
     };
     if(habit.alarm_reminder_id && state.reminders.find(x=>x.id===habit.alarm_reminder_id)){
       Object.assign(state.reminders.find(x=>x.id===habit.alarm_reminder_id), payload);
@@ -2366,6 +2760,8 @@ function openGoalForm(id){
   goalFormMilestones = g ? (g.milestones||[]).slice() : [];
   const linkedReminder = g && g.alarm_reminder_id ? state.reminders.find(r=>r.id===g.alarm_reminder_id) : null;
   goalAlarmOn = !!linkedReminder;
+  notifyEmailOn = !!(linkedReminder && linkedReminder.notify_email);
+  notifySmsOn = !!(linkedReminder && linkedReminder.notify_sms);
   goalAlarmDays = linkedReminder ? (linkedReminder.days||[]).slice() : ["Mon","Wed","Fri"];
   openModal(goalFormHtml(g));
 }
@@ -2377,7 +2773,8 @@ function syncGoalAlarm(goal){
       title: "Goal check-in: "+goal.title, time: timeEl.value, days: goalAlarmDays.slice(),
       alarm_level: document.getElementById("goal_alarmLevel").value,
       message: document.getElementById("goal_alarmMsg").value.trim(),
-      goal_id: goal.id, is_active:true
+      goal_id: goal.id, is_active:true,
+      notify_email: notifyEmailOn, notify_sms: notifySmsOn
     };
     if(goal.alarm_reminder_id && state.reminders.find(x=>x.id===goal.alarm_reminder_id)){
       Object.assign(state.reminders.find(x=>x.id===goal.alarm_reminder_id), payload);
@@ -2592,6 +2989,8 @@ const WEEKDAY_OPTS = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"
 function customEventFormHtml(dateStr, ev){
   ev = ev || {date:dateStr, time:"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate", repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week"};
   customEventAlarmOn = !!ev.alarm_enabled;
+  notifyEmailOn = !!ev.notify_email;
+  notifySmsOn = !!ev.notify_sms;
   ceFormColor = ev.color || COLORS[(state.customEvents||[]).length % COLORS.length];
   ceRepeatDays = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days.slice() : [weekdayIndexOf(ev.date||dateStr)];
   const repeat = ev.repeat || "none";
@@ -2621,7 +3020,7 @@ function customEventFormHtml(dateStr, ev){
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(ceFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickCEColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="ce_colorWheel" value="'+ceFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
-    '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+notifyChannelChipsHtml()+'</div>'+
     '<div class="modal-actions">'+(ev.id?'<button class="btn danger" data-action="deleteCustomEvent" data-id="'+ev.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveCustomEvent" data-id="'+(ev.id||"")+'" style="flex:1">Save</button></div>';
@@ -3003,6 +3402,9 @@ function alertSoundCardHtml(){
     '<div class="field" style="margin-top:10px;"><label>Volume — <span id="alertVolVal">'+curVol+'</span>%</label>'+
     '<input type="range" id="alertVolumeSlider" min="0" max="100" value="'+curVol+'" style="width:100%" oninput="document.getElementById(\'alertVolVal\').textContent=this.value">'+
     '</div>'+
+    '<div class="field" style="margin-top:10px;"><label>Default snooze length</label><div class="chip-group">'+
+    [5,10,15,30].map(m=>'<div class="chip '+((state.profile.defaultSnoozeMinutes||5)===m?"selected":"")+'" data-action="pickDefaultSnooze" data-v="'+m+'">'+m+' min</div>').join("")+
+    '</div><p class="hc-meta" style="margin-top:4px;">Highlighted first on the alarm screen — you can still tap any of the 4 options when an alert fires.</p></div>'+
     '<div class="grid cols-3" style="margin-top:12px;gap:10px;">'+
     Object.keys(ALERT_SOUNDS).map(k=>{
       const s = ALERT_SOUNDS[k];
@@ -3062,6 +3464,7 @@ function reminderFormHtml(r){
     '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+((r.days||[]).includes(d)?"selected":"")+'" data-action="pickRDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(reminderFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickRColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="r_colorWheel" value="'+reminderFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Motivational message</label><input id="r_msg" type="text" value="'+escapeHtml(r.message||"")+'"></div>'+
+    notifyChannelChipsHtml()+
     '<div class="modal-actions">'+(r.id?'<button class="btn danger" data-action="deleteReminder" data-id="'+r.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveReminder" data-id="'+(r.id||"")+'" style="flex:1">Save</button></div>';
@@ -3071,6 +3474,8 @@ function openReminderForm(id){
   const r = id ? state.reminders.find(x=>x.id===id) : null;
   reminderFormDays = r ? (r.days||[]).slice() : ["Mon","Tue","Wed","Thu","Fri"];
   reminderFormColor = r ? (r.color||COLORS[0]) : COLORS[state.reminders.length % COLORS.length];
+  notifyEmailOn = !!(r && r.notify_email);
+  notifySmsOn = !!(r && r.notify_sms);
   openModal(reminderFormHtml(r));
 }
 
@@ -3367,9 +3772,9 @@ function startTasksCountdownTicker(){
 }
 function bedtimeWidgetHtml(){
   return '<div class="card" style="margin-bottom:14px;"><h2>⏳ Time Check</h2>'+
-    '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'+
-    stat(fmtMinutesDuration(pendingTasksTotalMinutes()), "Pending task time")+
-    '<div class="stat"><div class="num" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
+    '<div class="grid cols-2" style="margin-top:10px;">'+
+    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" style="font-size:20px;">'+fmtMinutesDuration(pendingTasksTotalMinutes())+'</div><div class="hsb-lbl">Pending task time</div></div>'+
+    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="hsb-lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
     '</div>'+
     '<div id="bedtimeFitNote" style="font-size:12.5px;font-weight:700;margin-top:8px;"></div>'+
     '<button class="btn ghost sm" style="margin-top:8px;" data-action="openBedtimeForm">✏️ Change bedtime</button>'+
@@ -3434,6 +3839,10 @@ function taskFormHtml(t){
     '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
+    '<div id="tsk_alarmBlock" style="'+(taskAlarmOn?"":"display:none;")+'"><div class="row-inline"><div class="field"><label>Time</label><input id="tsk_alarmTime" type="time" value="'+(t.alarm_time||"09:00")+'"></div>'+
+    '<div class="field"><label>Alert level</label><select id="tsk_alarmLevel">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+((t.alarm_level||"moderate")===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    notifyChannelChipsHtml()+'</div>'+
     '<div class="field"><label>Category (optional)</label><div class="chip-group" id="taskCatChips">'+
       '<div class="chip '+(taskFormCat===""?"selected":"")+'" data-action="pickTaskCat" data-v="">None</div>'+
       allCategories().map(c=>'<div class="chip '+(taskFormCat===c.v?"selected":"")+'" data-action="pickTaskCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+
@@ -3444,10 +3853,14 @@ function taskFormHtml(t){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
 }
+let taskAlarmOn = false;
 function openTaskForm(id, prefillDate){
   const t = id ? (state.tasks||[]).find(x=>x.id===id) : (prefillDate ? {title:"", planned_minutes:30, category:"", date:prefillDate} : null);
   taskFormColor = t ? (t.color||COLORS[0]) : COLORS[(state.tasks||[]).length % COLORS.length];
   taskFormCat = t ? (t.category||"") : "";
+  taskAlarmOn = !!(t && t.alarm_enabled);
+  notifyEmailOn = !!(t && t.notify_email);
+  notifySmsOn = !!(t && t.notify_sms);
   openModal(taskFormHtml(t));
 }
 let taskCompleteFollowUp = false;
@@ -3814,6 +4227,87 @@ function accountCardHtml(){
 }
 
 /* ============ Settings ============ */
+window._deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault();
+  window._deferredInstallPrompt = e;
+  if(typeof render==="function" && currentRoute()==="settings") render();
+});
+window.addEventListener("appinstalled", function(){
+  window._deferredInstallPrompt = null;
+  if(typeof render==="function" && currentRoute()==="settings") render();
+});
+function installAppCardHtml(){
+  const isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone===true;
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  if(isStandalone){
+    return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2><p class="hc-meta">✅ Already installed — you\'re using the home-screen app, with offline access and background alerts.</p></div>';
+  }
+  if(isIOS){
+    return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2>'+
+      '<p class="hc-meta">iPhone/iPad don\'t let any app trigger its own install prompt — add it manually, it takes a few seconds:</p>'+
+      '<ol style="margin:8px 0 0 18px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.8;">'+
+      '<li>Tap the <b>Share</b> button in Safari (square with an arrow pointing up)</li>'+
+      '<li>Scroll down and tap <b>Add to Home Screen</b></li>'+
+      '<li>Tap <b>Add</b> — ImpowerUp now opens full-screen like a real app, with offline access and background alerts</li>'+
+      '</ol></div>';
+  }
+  return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2><p class="hc-meta">Install as an app on this device for a faster, full-screen, offline-capable experience.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="triggerInstallPrompt" '+(window._deferredInstallPrompt?"":"disabled")+'>⬇️ Install ImpowerUp</button>'+
+    (window._deferredInstallPrompt?'':'<p class="hc-meta" style="margin-top:6px;">Your browser hasn\'t offered an install prompt yet — try reloading this page, or use your browser\'s menu → "Install app" / "Add to Home screen".</p>')+
+    '</div>';
+}
+let notifyAdvancedOpen = false;
+function notificationsCardHtml(){
+  const p = state.profile;
+  const emailOn = !!p.emailNotifyEnabled;
+  const smsOn = !!p.smsNotifyEnabled;
+  const emailConnected = !!p.resendApiKey;
+  const smsConnected = !!(p.twilioAccountSid && p.twilioAuthToken && p.twilioFromNumber);
+  let html = '<div class="card" style="margin-top:14px;"><h2>🔔 Notifications</h2>';
+
+  html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Email &amp; Text</p>'+
+    '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device.</p>'+
+    '<div class="row-inline" style="margin-top:10px;"><div class="field"><label>Notification email</label><input id="set_notifyEmail" type="email" placeholder="you@example.com" value="'+escapeHtml(p.notifyEmail||"")+'"></div>'+
+    '<div class="field"><label>Notification phone</label><input id="set_notifyPhone" type="tel" placeholder="+1 555 123 4567" value="'+escapeHtml(p.notifyPhone||"")+'"></div></div>'+
+    '<button class="btn secondary sm" data-action="saveNotifyContact" style="margin-top:4px;">Save contact info</button>'+
+    '<div class="toggle-row" style="padding:10px 0 4px;"><div><div style="font-weight:700;font-size:13px;">✉️ Email notifications</div><div class="hc-meta" style="margin-top:2px;">'+(emailConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(emailOn?"on":"")+'" data-action="toggleEmailNotify"></div></div>'+
+    '<div class="toggle-row" style="padding:4px 0 4px;"><div><div style="font-weight:700;font-size:13px;">📱 Text notifications</div><div class="hc-meta" style="margin-top:2px;">'+(smsConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(smsOn?"on":"")+'" data-action="toggleSmsNotify"></div></div>'+
+    '<button class="btn ghost sm" style="margin-top:8px;" data-action="toggleNotifyAdvanced">'+(notifyAdvancedOpen?"▲ Hide provider setup":"▼ Provider setup (advanced)")+'</button>'+
+    '<div id="notifyAdvancedBlock" style="'+(notifyAdvancedOpen?"":"display:none;")+'margin-top:10px;">'+
+      '<div class="hc-meta" style="margin-bottom:8px;">These keys stay on this device (and your optional cloud sync) — never shared elsewhere. Paste them in once you\'ve signed up with a provider and sending becomes fully automatic, no rebuild needed.</div>'+
+      '<p class="hc-meta" style="font-weight:700;">Email — Resend (resend.com)</p>'+
+      '<div class="field"><label>API key</label><input id="set_resendKey" type="password" placeholder="re_xxxxxxxx" value="'+escapeHtml(p.resendApiKey||"")+'"></div>'+
+      '<div class="field"><label>From address</label><input id="set_resendFrom" type="email" placeholder="alerts@yourdomain.com" value="'+escapeHtml(p.resendFromEmail||"")+'"></div>'+
+      '<p class="hc-meta" style="font-weight:700;margin-top:10px;">Text — Twilio (twilio.com)</p>'+
+      '<div class="field"><label>Account SID</label><input id="set_twilioSid" type="password" placeholder="ACxxxxxxxx" value="'+escapeHtml(p.twilioAccountSid||"")+'"></div>'+
+      '<div class="field"><label>Auth token</label><input id="set_twilioToken" type="password" value="'+escapeHtml(p.twilioAuthToken||"")+'"></div>'+
+      '<div class="field"><label>From number</label><input id="set_twilioFrom" type="tel" placeholder="+15551234567" value="'+escapeHtml(p.twilioFromNumber||"")+'"></div>'+
+      '<button class="btn secondary sm" data-action="saveNotifyProviders">Save provider keys</button>'+
+    '</div>';
+
+  const notifSupported = ("Notification" in window);
+  const notifPerm = notifSupported ? Notification.permission : "unsupported";
+  const isSecure = location.protocol==="https:" || location.hostname==="localhost";
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">📱 Phone Notifications</p>'+
+    '<p class="hc-meta">For real lock-screen banners/badges on iPhone, this file needs to be hosted at a real HTTPS address and added to your Home Screen — a local file can\'t send phone notifications at all.</p>'+
+    (!isSecure ? '<p class="hc-meta" style="color:var(--danger, #ef4444);">⚠️ Not currently on HTTPS — host this file first (see About below), then come back here.</p>' :
+      '<p class="hc-meta">Status: <b>'+(notifPerm==="granted"?"Enabled ✅":notifPerm==="denied"?"Blocked — re-enable in phone Settings":"Not enabled yet")+'</b></p>'+
+      (notifPerm!=="granted" ? '<button class="btn secondary block" data-action="requestNotificationPermission">Enable Phone Notifications</button>' : ''));
+
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">🔁 Background Push (optional)</p>'+
+    '<p class="hc-meta">Deliver alerts even when the app is fully closed. Needs a small free Supabase backend — see supabase-schema.sql and send-scheduled-alerts.ts. Paste your project\'s URL and anon key here once it\'s deployed.</p>'+
+    '<div class="field"><label>Supabase Project URL</label><input id="set_sbUrl" type="text" placeholder="https://xxxx.supabase.co" value="'+escapeHtml(state.profile.supabaseUrl||"")+'"></div>'+
+    '<div class="field"><label>Supabase anon key</label><input id="set_sbKey" type="text" placeholder="eyJhbGciOi..." value="'+escapeHtml(state.profile.supabaseAnonKey||"")+'"></div>'+
+    '<button class="btn secondary sm" data-action="saveSupabaseConfig">Save</button> '+
+    (state.profile.pushEnabled ? '<span class="tag" style="margin-left:8px;">Background push connected ✅</span>' :
+      '<button class="btn sm" style="margin-left:8px;" data-action="requestNotificationPermission">Connect</button>');
+
+  html += '</div>';
+  return html;
+}
 function renderSettings(){
   let html = topbarHtml("Settings","Personalize ImpowerUp.");
   html += '<div class="card"><div class="row-inline"><div class="field"><label>First name</label><input id="set_first" type="text" value="'+escapeHtml(state.profile.firstName||"")+'"></div>'+
@@ -3853,24 +4347,11 @@ function renderSettings(){
     '<div class="field" id="ciCustomDaysField" style="'+(ciFreq==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(ciCustomDays.includes(d)?"selected":"")+'" data-action="pickCheckInCustomDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '</div>';
 
-  const notifSupported = ("Notification" in window);
-  const notifPerm = notifSupported ? Notification.permission : "unsupported";
-  const isSecure = location.protocol==="https:" || location.hostname==="localhost";
-  html += '<div class="card" style="margin-top:14px;"><h2>📱 Phone Notifications</h2>'+
-    '<p class="hc-meta">For real lock-screen banners/badges on iPhone, this file needs to be hosted at a real HTTPS address and added to your Home Screen — a local file can\'t send phone notifications at all.</p>'+
-    (!isSecure ? '<p class="hc-meta" style="color:var(--danger, #ef4444);">⚠️ Not currently on HTTPS — host this file first (see About below), then come back here.</p>' :
-      '<p class="hc-meta">Status: <b>'+(notifPerm==="granted"?"Enabled ✅":notifPerm==="denied"?"Blocked — re-enable in phone Settings":"Not enabled yet")+'</b></p>'+
-      (notifPerm!=="granted" ? '<button class="btn secondary block" data-action="requestNotificationPermission">Enable Phone Notifications</button>' : ''))+
-    '</div>';
+  html += notificationsCardHtml();
 
-  html += '<div class="card" style="margin-top:14px;"><h2>🔁 Background Push (optional)</h2>'+
-    '<p class="hc-meta">Deliver alerts even when the app is fully closed. Needs a small free Supabase backend — see supabase-schema.sql and send-scheduled-alerts.ts. Paste your project\'s URL and anon key here once it\'s deployed.</p>'+
-    '<div class="field"><label>Supabase Project URL</label><input id="set_sbUrl" type="text" placeholder="https://xxxx.supabase.co" value="'+escapeHtml(state.profile.supabaseUrl||"")+'"></div>'+
-    '<div class="field"><label>Supabase anon key</label><input id="set_sbKey" type="text" placeholder="eyJhbGciOi..." value="'+escapeHtml(state.profile.supabaseAnonKey||"")+'"></div>'+
-    '<button class="btn secondary sm" data-action="saveSupabaseConfig">Save</button> '+
-    (state.profile.pushEnabled ? '<span class="tag" style="margin-left:8px;">Background push connected ✅</span>' :
-      '<button class="btn sm" style="margin-left:8px;" data-action="requestNotificationPermission">Connect</button>')+
-    '</div>';
+  html += calendarSyncCardHtml();
+
+  html += installAppCardHtml();
 
   if((state.customCategories||[]).length){
     html += '<div class="card" style="margin-top:14px;"><h2>🏷️ Custom Categories</h2><p class="hc-meta">Categories you\'ve added from Habits or Goals forms. Tap a color to recolor a category.</p>'+
@@ -3885,15 +4366,6 @@ function renderSettings(){
     '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
 
   html += renderAllProfilesSection();
-
-  html += '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>'+
-    '<p class="hc-meta">Live two-way sync with Google/Outlook/Apple isn\'t possible here — that needs a registered API app and a hosted backend, which this offline single-file app doesn\'t have. The reliable offline equivalent: export your alerts as a standard .ics file and import it into whichever calendar you use.</p>'+
-    '<button class="btn secondary block" data-action="exportICS">Export Alerts (.ics)</button>'+
-    '<div class="hc-meta" style="margin-top:10px;line-height:1.6;">'+
-    '<b>Google Calendar:</b> Settings ⚙️ → Import & export → Import → choose the file.<br>'+
-    '<b>Apple Calendar:</b> double-click the downloaded file, or File → Import.<br>'+
-    '<b>Outlook:</b> File → Open & Export → Import/Export → Import an iCalendar (.ics) file.'+
-    '</div></div>';
 
   html += '<div class="card" style="margin-top:14px;"><h2>Your Data</h2><p class="hc-meta">Everything is stored locally in this browser. Nothing is sent to a server.</p>'+
     '<div class="modal-actions" style="margin-top:10px;">'+
@@ -3935,6 +4407,79 @@ function exportICS(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href=url; a.download="impowerup-reminders.ics"; a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ============ ICS import (Outlook / Apple Calendar / other) ============ */
+function icsUnescape(s){ return String(s).replace(/\\n/gi,"\n").replace(/\\,/g,",").replace(/\\;/g,";").replace(/\\\\/g,"\\"); }
+function unfoldICSLines(text){
+  return String(text).replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n").reduce((lines, line)=>{
+    if(/^[ \t]/.test(line) && lines.length){ lines[lines.length-1] += line.slice(1); }
+    else lines.push(line);
+    return lines;
+  }, []);
+}
+function parseICSDateTimeValue(v){
+  if(!v) return null;
+  const m = String(v).match(/^(\d{4})(\d{2})(\d{2})(T(\d{2})(\d{2})(\d{2})?Z?)?$/);
+  if(!m) return null;
+  const date = m[1]+"-"+m[2]+"-"+m[3];
+  if(!m[4]) return {date:date, time:"", allDay:true};
+  return {date:date, time:m[5]+":"+m[6], allDay:false};
+}
+function parseICSEvents(text){
+  const lines = unfoldICSLines(text);
+  const events = [];
+  let cur = null;
+  lines.forEach(function(line){
+    const trimmed = line.trim();
+    if(trimmed==="BEGIN:VEVENT"){ cur = {}; return; }
+    if(trimmed==="END:VEVENT"){ if(cur) events.push(cur); cur = null; return; }
+    if(!cur) return;
+    const idx = line.indexOf(":");
+    if(idx<0) return;
+    const left = line.slice(0,idx);
+    const value = line.slice(idx+1);
+    const prop = left.split(";")[0].toUpperCase();
+    if(prop==="SUMMARY") cur.summary = icsUnescape(value);
+    else if(prop==="DESCRIPTION") cur.description = icsUnescape(value);
+    else if(prop==="UID") cur.uid = value;
+    else if(prop==="DTSTART") cur.dtstart = value;
+  });
+  return events;
+}
+function importICSEvents(text){
+  const parsed = parseICSEvents(text);
+  const existingUids = new Set((state.customEvents||[]).map(e=>e.ics_uid).filter(Boolean));
+  let added = 0;
+  parsed.forEach(function(ev){
+    if(!ev.dtstart) return;
+    const dt = parseICSDateTimeValue(ev.dtstart);
+    if(!dt) return;
+    const uidKey = ev.uid || (ev.summary+"|"+dt.date+"|"+dt.time);
+    if(existingUids.has(uidKey)) return;
+    state.customEvents = state.customEvents||[];
+    state.customEvents.push({
+      id: uid(), date: dt.date, time: dt.time, emoji:"📥", label: ev.summary||"Imported Event", description: ev.description||"",
+      duration_minutes: 30, alarm_enabled:false, alarm_level:"moderate", notify_email:false, notify_sms:false,
+      repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week",
+      color: COLORS[5], ics_uid: uidKey, source:"ics"
+    });
+    existingUids.add(uidKey);
+    added++;
+  });
+  if(added) saveState();
+  return added;
+}
+function importICSFile(file){
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try{
+      const added = importICSEvents(ev.target.result);
+      render();
+      toast(added ? ("Imported "+added+" event"+(added===1?"":"s")) : "No new events found in that file");
+    }catch(err){ toast("Couldn't read that calendar file"); }
+  };
+  reader.readAsText(file);
 }
 
 /* ============ Photo proof capture ============ */
@@ -3997,10 +4542,27 @@ function tone(freq, type, startAt, dur, peakGain){
   osc.type = type||"sine"; osc.frequency.value = freq;
   const now = ctx.currentTime + (startAt||0);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.linearRampToValueAtTime(Math.max(0.0002,peakGain), now+0.015);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0002,peakGain), now+0.006);
   gain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
   osc.connect(gain); gain.connect(ctx.destination);
   osc.start(now); osc.stop(now+dur+0.02);
+}
+/* Rising-then-falling pitch sweep — classic siren wail. */
+function siren(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||0.5;
+  const osc = ctx.createOscillator(); const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(500, now);
+  osc.frequency.linearRampToValueAtTime(1100, now+0.5);
+  osc.frequency.linearRampToValueAtTime(500, now+1.0);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(g, now+0.05);
+  gain.gain.linearRampToValueAtTime(g, now+0.95);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+1.02);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(now); osc.stop(now+1.05);
 }
 /* Deep double blast — like a ship's foghorn. */
 function foghorn(gainVal){
@@ -4064,6 +4626,109 @@ function distortionCurve(amount){
   for(let i=0;i<n;i++){ const x = i*2/n-1; curve[i] = (3+k)*x*20*deg / (Math.PI+k*Math.abs(x)); }
   return curve;
 }
+/* Full WWII-style air raid siren — two closely-detuned sawtooth oscillators sweeping
+   low-to-high-to-low over ~2.2s produce a harsh oscillating wail that's hard to tune out. */
+function airRaidSirenSound(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||1;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(g, now+0.04);
+  gain.gain.linearRampToValueAtTime(g, now+2.1);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+2.25);
+  gain.connect(ctx.destination);
+  [0,3].forEach(function(detune){
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(300+detune, now);
+    osc.frequency.linearRampToValueAtTime(1500+detune, now+1.1);
+    osc.frequency.linearRampToValueAtTime(300+detune, now+2.2);
+    osc.connect(gain);
+    osc.start(now); osc.stop(now+2.3);
+  });
+}
+/* Emergency-alert-style dual attention tone — the same 853Hz + 960Hz square-wave pair
+   broadcast alert systems use because the beat frequency is intentionally grating. */
+function emergencyAlertTone(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||1;
+  [853,960].forEach(function(f){
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "square"; osc.frequency.value = f;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(g*0.9, now+0.01);
+    gain.gain.linearRampToValueAtTime(g*0.9, now+0.9);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+1.0);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now+1.02);
+  });
+}
+/* Rapid-fire staccato digital beeps — sharp high-pitched square-wave bursts. */
+function harshBeepsBurst(gainVal){
+  const g = gainVal||1;
+  for(let i=0;i<10;i++){ tone(2900,"square", i*0.09, 0.05, g); }
+}
+/* Erratic high-pitched "circuit alarm" chaos — jittering random-ish frequencies, jarring on purpose. */
+function circuitChaos(gainVal){
+  const g = gainVal||1;
+  [3200,2600,3700,2100,4200,2900,3500].forEach(function(f,i){ tone(f,"square", i*0.06+Math.random()*0.02, 0.045, g); });
+}
+/* Erratic mechanical jackhammer — low square thumps layered with filtered noise bursts. */
+function jackhammerSound(gainVal){
+  const g = gainVal||1;
+  for(let i=0;i<9;i++){
+    const t = i*0.11;
+    tone(90,"square", t, 0.06, g);
+    noiseBurst(t, 0.07, g*0.8, 2500);
+  }
+}
+/* Brassy reveille-style bugle call, sawtooth stabs for a harsh brass edge. */
+function bugleCall(gainVal){
+  const g = gainVal||1;
+  [392,523,659,523,392,523,659,784].forEach(function(f,i){ tone(f,"sawtooth", i*0.15, 0.16, g*0.95); });
+}
+/* Classic klaxon "dive alarm" — repeated rising sawtooth blasts. */
+function klaxonBlast(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||1;
+  [0,0.45,0.9].forEach(function(t){
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(220, now+t);
+    osc.frequency.linearRampToValueAtTime(440, now+t+0.35);
+    gain.gain.setValueAtTime(0.0001, now+t);
+    gain.gain.linearRampToValueAtTime(g, now+t+0.03);
+    gain.gain.linearRampToValueAtTime(g, now+t+0.3);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+t+0.4);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now+t); osc.stop(now+t+0.42);
+  });
+}
+/* Piercing triple-chirp, the same register as a household smoke/CO detector low-battery/alarm beep. */
+function smokeDetectorChirp(gainVal){
+  const g = gainVal||1;
+  [0,0.16,0.32].forEach(function(t){ tone(3100,"square", t, 0.13, g); });
+}
+/* Layered sawtooth harmonics for a loud, sustained stadium air-horn blast. */
+function airHornBlast(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||1;
+  [349.23,415.30,523.25].forEach(function(f,i){
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "sawtooth"; osc.frequency.value = f;
+    const peak = g*(i===0?1:0.6);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(peak, now+0.02);
+    gain.gain.linearRampToValueAtTime(peak, now+0.75);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+0.85);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now+0.87);
+  });
+}
 function metalChord(gainVal){
   const ctx = window._audioCtx; if(!ctx) return;
   const now = ctx.currentTime;
@@ -4086,20 +4751,15 @@ function metalChord(gainVal){
   });
 }
 const ALERT_SOUNDS = {
-  classic: {label:"Classic", desc:"Simple beep", play:function(g){ beep(880, 260, g*0.9); }},
-  chime:   {label:"Chime", desc:"Gentle bell", play:function(g){ tone(1318,"sine",0,0.9,g*0.6); tone(1976,"sine",0.05,0.8,g*0.4); }},
-  alert:   {label:"Alert", desc:"Urgent ringing", play:function(g){ [0,0.18,0.36,0.54].forEach(function(t){ tone(1200,"square",t,0.14,g*0.55); }); }},
-  digital: {label:"Digital", desc:"Digital watch", play:function(g){ [0,0.09,0.18].forEach(function(t){ tone(2100,"square",t,0.07,g*0.5); }); }},
-  melody:  {label:"Melody", desc:"Short tune", play:function(g){ [523,659,784,1047].forEach(function(f,i){ tone(f,"triangle",i*0.13,0.22,g*0.55); }); }},
-  pulse:   {label:"Pulse", desc:"Soft pulse", play:function(g){ [0,0.22,0.44,0.66].forEach(function(t,i){ tone(440,"sine",t,0.3,g*(0.5-i*0.06)); }); }},
-  hype:    {label:"Hype", desc:"Rap-style beat drop", play:function(g){
-      tone(120,"sine",0,0.35,g*0.9); tone(55,"sine",0.02,0.4,g*0.9);
-      tone(1600,"square",0.1,0.05,g*0.35); tone(1600,"square",0.16,0.05,g*0.35);
-      tone(90,"sine",0.3,0.3,g*0.8);
-    }},
-  foghorn: {label:"Foghorn", desc:"Deep blaring double horn", play:function(g){ foghorn(g*1.1); }},
-  scream:  {label:"Scream", desc:"Blood-curdling shriek", play:function(g){ scream(g*1.1); }},
-  metal:   {label:"Heavy Metal", desc:"Distorted power-chord riff", play:function(g){ metalChord(g*0.9); }}
+  airRaidSiren:   {label:"Air Raid Siren", desc:"Oscillating rising-and-falling wail — hard to tune out", play:function(g){ airRaidSirenSound(g*1.0); }},
+  emergencyAlert: {label:"Emergency Alert", desc:"Harsh dual-tone attention signal, like a broadcast alert", play:function(g){ emergencyAlertTone(g*1.0); }},
+  harshBeeps:     {label:"Harsh Beeps", desc:"Rapid staccato high-pitched digital beeps", play:function(g){ harshBeepsBurst(g*1.0); }},
+  circuitAlarm:   {label:"Circuit Alarm", desc:"Erratic high-pitched jittering electronic tone", play:function(g){ circuitChaos(g*1.0); }},
+  jackhammer:     {label:"Jackhammer", desc:"Aggressive erratic mechanical pounding", play:function(g){ jackhammerSound(g*1.0); }},
+  bugle:          {label:"Bugle Call", desc:"Sharp brassy reveille-style blast", play:function(g){ bugleCall(g*1.0); }},
+  klaxon:         {label:"Klaxon", desc:"Classic rising dive-alarm blast, repeated", play:function(g){ klaxonBlast(g*1.0); }},
+  smokeDetector:  {label:"Smoke Detector", desc:"Piercing triple-chirp, like a household smoke/CO alarm", play:function(g){ smokeDetectorChirp(g*1.0); }},
+  airHorn:        {label:"Air Horn", desc:"Loud sustained stadium air-horn blast", play:function(g){ airHornBlast(g*1.0); }}
 };
 function unlockedGain(gainVal){ return Math.max(0.001, Math.min(1, gainVal==null?0.5:gainVal)); }
 /* Play the admin-uploaded custom alarm clip once (fire-and-forget), returns the Audio element. */
@@ -4128,7 +4788,7 @@ function startAlarmSound(level){
   const soundKey = (state && state.profile && state.profile.alertSound) || "classic";
   const volPct = (state && state.profile && state.profile.alertVolume!=null) ? state.profile.alertVolume : 80;
   const vol = Math.max(0, Math.min(1, volPct/100));
-  const levelScale = {gentle:0.55, moderate:0.8, loud:1, persistent:1.15}[level] || 0.8;
+  const levelScale = {gentle:0.7, moderate:0.95, loud:1.1, persistent:1.25}[level] || 0.95;
   const gainVal = vol * levelScale;
   // A custom uploaded clip loops continuously for the repeating levels instead of restarting
   // every second or two (which would just chop it up) — it plays through naturally on a loop.
@@ -4180,7 +4840,9 @@ function fireAlarm(reminder){
       (holdMs>0 ?
         '<button class="hold-btn" id="alarmDismissBtn"><div class="hold-fill" id="alarmHoldFill"></div><span>Hold to Stop</span></button>' :
         '<button class="btn block" data-action="dismissAlarm">Got it, done ✓</button>')+
-      (canSnooze ? '<button class="btn ghost sm" data-action="snoozeAlarm" data-id="'+reminder.id+'" style="margin-top:8px;">Snooze 5 min</button>' :
+      (canSnooze ? '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px;">'+
+        [5,10,15,30].map(m=>'<button class="btn ghost sm" data-action="snoozeAlarm" data-id="'+reminder.id+'" data-v="'+m+'">Snooze '+m+'m</button>').join("")+
+        '</div>' :
         '<div class="alarm-nosnooze">No snoozing on '+level+' alerts — you\'ve got this 💪</div>')+
     '</div>';
   document.body.appendChild(overlay);
@@ -4213,6 +4875,7 @@ function dismissAlarm(){
 function checkReminders(){
   if(!state || !state.profile.onboarded) return;
   syncAllAlertsToServer(false);
+  maybeAutoSyncGoogle();
   if(document.getElementById("alarmOverlay")) return;
   const now = new Date();
   const nowHM = String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
@@ -4220,7 +4883,8 @@ function checkReminders(){
   const dow = dayOfWeekName(today);
   const queue = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, today)}))
     .concat(getVirtualEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
-    .concat(getCustomEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})));
+    .concat(getCustomEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
+    .concat(getTaskAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})));
   for(const r of queue){
     if(!(r.days||[]).includes(dow)) continue;
     const firedKey = r.id+"_"+today;
@@ -4243,6 +4907,64 @@ function checkReminders(){
     }
   }
 }
+
+/* ============ Drag-and-drop reordering (sidebar nav + dashboard widgets) ============ */
+let _draggingNavRoute = null, _draggingWidgetId = null;
+document.addEventListener("dragstart", function(e){
+  const navA = e.target.closest && e.target.closest(".sidebar a[data-route]");
+  if(navA){
+    _draggingNavRoute = navA.getAttribute("data-route");
+    navA.classList.add("nav-dragging");
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingNavRoute); }catch(err){} }
+    return;
+  }
+  const row = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  if(row){
+    _draggingWidgetId = row.getAttribute("data-widget-id");
+    row.classList.add("dash-dragging");
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingWidgetId); }catch(err){} }
+  }
+});
+document.addEventListener("dragover", function(e){
+  if(_draggingNavRoute && e.target.closest && e.target.closest(".sidebar a[data-route]")){ e.preventDefault(); return; }
+  if(_draggingWidgetId && e.target.closest && e.target.closest(".dash-order-row[data-widget-id]")){ e.preventDefault(); }
+});
+document.addEventListener("drop", function(e){
+  const navTarget = e.target.closest && e.target.closest(".sidebar a[data-route]");
+  if(_draggingNavRoute && navTarget){
+    e.preventDefault();
+    const targetRoute = navTarget.getAttribute("data-route");
+    if(targetRoute !== _draggingNavRoute){
+      const order = Array.from(document.querySelectorAll(".sidebar a[data-route]")).map(a=>a.getAttribute("data-route"));
+      const from = order.indexOf(_draggingNavRoute), to = order.indexOf(targetRoute);
+      if(from>=0 && to>=0){
+        order.splice(from,1); order.splice(to,0,_draggingNavRoute);
+        state.profile.navOrder = order;
+        saveState(); render();
+      }
+    }
+    return;
+  }
+  const widgetTarget = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  if(_draggingWidgetId && widgetTarget){
+    e.preventDefault();
+    const targetId = widgetTarget.getAttribute("data-widget-id");
+    if(targetId !== _draggingWidgetId){
+      const order = getDashboardOrder();
+      const from = order.indexOf(_draggingWidgetId), to = order.indexOf(targetId);
+      if(from>=0 && to>=0){
+        order.splice(from,1); order.splice(to,0,_draggingWidgetId);
+        state.profile.dashboardOrder = order;
+        saveState(); refreshDashOrderList();
+      }
+    }
+  }
+});
+document.addEventListener("dragend", function(){
+  document.querySelectorAll(".nav-dragging").forEach(el=>el.classList.remove("nav-dragging"));
+  document.querySelectorAll(".dash-dragging").forEach(el=>el.classList.remove("dash-dragging"));
+  _draggingNavRoute = null; _draggingWidgetId = null;
+});
 
 /* ============ Event delegation ============ */
 document.addEventListener("click", async function(e){
@@ -4441,6 +5163,81 @@ document.addEventListener("click", async function(e){
       toast("Bedtime updated");
       break;
     }
+    case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
+    case "openMoreNav": openModal(moreNavModalHtml()); break;
+    case "navigateAndCloseModal": { closeModal(); location.hash = "#/"+v; break; }
+    case "toggleDashWidgetHidden": {
+      state.profile.dashboardHidden = state.profile.dashboardHidden || [];
+      const idx = state.profile.dashboardHidden.indexOf(id);
+      if(idx>=0) state.profile.dashboardHidden.splice(idx,1); else state.profile.dashboardHidden.push(id);
+      saveState();
+      refreshDashOrderList();
+      break;
+    }
+    case "triggerInstallPrompt": {
+      if(!window._deferredInstallPrompt){ toast("No install prompt available right now"); return; }
+      window._deferredInstallPrompt.prompt();
+      window._deferredInstallPrompt.userChoice.then(function(){ window._deferredInstallPrompt = null; render(); });
+      break;
+    }
+    case "saveNotifyContact": {
+      state.profile.notifyEmail = document.getElementById("set_notifyEmail").value.trim();
+      state.profile.notifyPhone = document.getElementById("set_notifyPhone").value.trim();
+      saveState(); render();
+      toast("Contact info saved");
+      break;
+    }
+    case "toggleEmailNotify": { state.profile.emailNotifyEnabled = !state.profile.emailNotifyEnabled; saveState(); render(); break; }
+    case "toggleSmsNotify": { state.profile.smsNotifyEnabled = !state.profile.smsNotifyEnabled; saveState(); render(); break; }
+    case "toggleNotifyAdvanced": { notifyAdvancedOpen = !notifyAdvancedOpen; render(); break; }
+    case "saveNotifyProviders": {
+      state.profile.resendApiKey = document.getElementById("set_resendKey").value.trim();
+      state.profile.resendFromEmail = document.getElementById("set_resendFrom").value.trim();
+      state.profile.twilioAccountSid = document.getElementById("set_twilioSid").value.trim();
+      state.profile.twilioAuthToken = document.getElementById("set_twilioToken").value.trim();
+      state.profile.twilioFromNumber = document.getElementById("set_twilioFrom").value.trim();
+      saveState(); render();
+      toast("Provider keys saved");
+      break;
+    }
+    case "connectGoogleCalendar": {
+      const key = ensureGoogleSyncKey();
+      location.href = GOOGLE_CONNECT_URL + "?key=" + encodeURIComponent(key);
+      break;
+    }
+    case "toggleGoogleImport": {
+      state.profile.googleImportEnabled = !state.profile.googleImportEnabled;
+      if(!state.profile.googleImportEnabled || !state.profile.googleExportEnabled) state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      break;
+    }
+    case "toggleGoogleExport": {
+      state.profile.googleExportEnabled = !state.profile.googleExportEnabled;
+      if(!state.profile.googleImportEnabled || !state.profile.googleExportEnabled) state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      break;
+    }
+    case "toggleGoogleTwoWay": {
+      const on = !state.profile.googleTwoWaySync;
+      state.profile.googleTwoWaySync = on;
+      state.profile.googleImportEnabled = on;
+      state.profile.googleExportEnabled = on;
+      saveState(); render();
+      break;
+    }
+    case "syncGoogleNow": { syncGoogleCalendarNow(false); break; }
+    case "importICSFile": { document.getElementById("importIcsFile").click(); break; }
+    case "disconnectGoogleCalendar": {
+      if(!confirm("Disconnect Google Calendar? Already-imported events stay in your Planner, but syncing stops.")) break;
+      googleCalendarApi("disconnect").catch(()=>{});
+      state.profile.googleCalendarConnected = false;
+      state.profile.googleImportEnabled = false;
+      state.profile.googleExportEnabled = false;
+      state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      toast("Disconnected");
+      break;
+    }
     case "pickCheckInFrequency": {
       state.profile.checkInFrequency = v;
       const cdf = document.getElementById("ciCustomDaysField"); if(cdf) cdf.style.display = v==="custom"?"":"none";
@@ -4456,13 +5253,26 @@ document.addEventListener("click", async function(e){
     case "openTaskForm": openTaskForm(id||null, v||null); break;
     case "pickTaskColor": { taskFormColor = v; document.querySelectorAll('[data-action="pickTaskColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "pickTaskCat": { taskFormCat = v; document.querySelectorAll('[data-action="pickTaskCat"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
+    case "toggleTaskAlarm": {
+      const isOn = t.classList.toggle("on");
+      taskAlarmOn = isOn;
+      const block = document.getElementById("tsk_alarmBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
     case "saveTask": {
       const title = document.getElementById("tsk_title").value.trim();
       if(!title){ toast("Please enter a task"); return; }
       const planned = Math.max(1, Number(document.getElementById("tsk_planned").value)||30);
       const linkVal = document.getElementById("tsk_link") ? document.getElementById("tsk_link").value : "";
       const linkParts = linkVal ? linkVal.split(":") : ["",""];
-      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: document.getElementById("tsk_date").value||"", linked_type: linkParts[0]||"", linked_id: linkParts[1]||"" };
+      const taskDate = document.getElementById("tsk_date").value||"";
+      if(taskAlarmOn && !taskDate){ toast("Add a date above to set a reminder"); return; }
+      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: taskDate, linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
+        alarm_enabled: taskAlarmOn,
+        alarm_time: taskAlarmOn ? document.getElementById("tsk_alarmTime").value : "",
+        alarm_level: taskAlarmOn ? document.getElementById("tsk_alarmLevel").value : "moderate",
+        notify_email: notifyEmailOn, notify_sms: notifySmsOn };
       state.tasks = state.tasks || [];
       if(id){ Object.assign(state.tasks.find(x=>x.id===id), payload); }
       else {
@@ -4803,7 +5613,8 @@ document.addEventListener("click", async function(e){
         repeat_days: (repeat==="weekly" || (repeat==="custom" && repeatUnit==="week")) ? ceRepeatDays.slice() : [],
         repeat_unit: repeat==="custom" ? repeatUnit : "",
         repeat_interval: repeat==="custom" ? repeatInterval : 1,
-        repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : ""
+        repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : "",
+        notify_email: notifyEmailOn, notify_sms: notifySmsOn
       };
       state.customEvents = state.customEvents || [];
       if(id){ Object.assign(state.customEvents.find(x=>x.id===id), payload); } else { payload.id = uid(); state.customEvents.push(payload); }
@@ -5001,10 +5812,15 @@ document.addEventListener("click", async function(e){
     }
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
     case "pickRColor": { reminderFormColor = v; document.querySelectorAll('[data-action="pickRColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
+    case "toggleNotifyChannel": {
+      if(v==="email") notifyEmailOn = !notifyEmailOn; else notifySmsOn = !notifySmsOn;
+      t.classList.toggle("selected");
+      break;
+    }
     case "saveReminder": {
       const title = document.getElementById("r_title").value.trim();
       if(!title){ toast("Please enter a title"); return; }
-      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true };
+      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true, notify_email: notifyEmailOn, notify_sms: notifySmsOn };
       if(id){ Object.assign(state.reminders.find(x=>x.id===id), payload); } else { payload.id = uid(); state.reminders.push(payload); }
       saveState(); closeModal(); render();
       toast("Reminder saved");
@@ -5335,6 +6151,7 @@ document.addEventListener("click", async function(e){
     case "setTheme": state.profile.theme=v; saveState(); render(); break;
     case "pickAccent": state.profile.accent=v; saveState(); render(); break;
     case "pickAlertSound": { state.profile.alertSound = v; saveState(); render(); previewAlertSound(v); break; }
+    case "pickDefaultSnooze": { state.profile.defaultSnoozeMinutes = Number(v)||5; saveState(); render(); break; }
     case "requestNotificationPermission": requestNotificationPermission(); break;
     case "saveSupabaseConfig": {
       state.profile.supabaseUrl = document.getElementById("set_sbUrl").value.trim();
@@ -5383,23 +6200,47 @@ document.addEventListener("click", async function(e){
       break;
     }
 
+    case "dismissMissedAlarm": {
+      missedAlarmsCache = missedAlarmsCache.filter(r=>!(r.id===id && r._date===v));
+      refreshMissedAlarmsList();
+      break;
+    }
+    case "snoozeMissedAlarm": {
+      const item = missedAlarmsCache.find(r=>r.id===id && r._date===v);
+      missedAlarmsCache = missedAlarmsCache.filter(r=>!(r.id===id && r._date===v));
+      refreshMissedAlarmsList();
+      if(item){
+        const mins = state.profile.defaultSnoozeMinutes||5;
+        toast("Will remind you again in "+mins+" minutes");
+        setTimeout(()=>{ if(!document.getElementById("alarmOverlay")) fireAlarm(item); }, mins*60000);
+      }
+      break;
+    }
+    case "dismissAllMissedAlarms": { missedAlarmsCache=[]; closeModal(); break; }
     case "dismissAlarm": dismissAlarm(); break;
     case "snoozeAlarm": {
       const rid = id;
+      const mins = Math.max(1, Number(v)||state.profile.defaultSnoozeMinutes||5);
       const key = rid+"_"+todayStr();
       state.profile.snoozeCounts = state.profile.snoozeCounts || {};
       state.profile.snoozeCounts[key] = (state.profile.snoozeCounts[key]||0)+1;
       state.profile.snoozedReminders = state.profile.snoozedReminders || {};
-      state.profile.snoozedReminders[rid] = new Date(Date.now()+5*60000).toISOString();
+      state.profile.snoozedReminders[rid] = new Date(Date.now()+mins*60000).toISOString();
       saveState();
       dismissAlarm();
-      toast("Snoozed for 5 minutes");
+      toast("Snoozed for "+mins+" minutes");
       break;
     }
   }
 });
 
 document.addEventListener("change", function(e){
+  if(e.target.id === "importIcsFile"){
+    const file = e.target.files[0];
+    if(file) importICSFile(file);
+    e.target.value = "";
+    return;
+  }
   if(e.target.id === "importFile"){
     const file = e.target.files[0];
     if(!file) return;
