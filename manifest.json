@@ -1,11 +1,15 @@
 {
   "name": "ImpowerUp",
   "short_name": "ImpowerUp",
+  "description": "Habits, goals, tasks, planner, and focus tools — gamified and built to work with how your brain actually works.",
+  "id": "./ImpowerUp.html",
   "start_url": "./ImpowerUp.html",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#f7f4ef",
   "theme_color": "#2563EB",
+  "categories": ["productivity", "lifestyle", "health"],
   "icons": [
     { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" }
