@@ -65,6 +65,12 @@
   }
   nav.sidebar a.active, nav.bottombar a.active{background:var(--surface-2);color:var(--accent);}
   nav.sidebar a:hover{background:var(--surface-2);}
+  nav.sidebar a{cursor:grab;}
+  nav.sidebar a.nav-dragging{opacity:.35;}
+  nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
+  .dash-order-row{cursor:grab;}
+  .dash-order-row.dash-dragging{opacity:.35;}
+  .dash-order-row.dash-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
 
   nav.bottombar{
     position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;
@@ -492,7 +498,8 @@ function defaultState(){
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
       resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
       dashboardOrder:[], dashboardHidden:[], defaultSnoozeMinutes:5,
-      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null },
+      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
+      navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
   };
@@ -2273,12 +2280,20 @@ if(window.matchMedia){
 }
 
 /* ============ Render dispatcher ============ */
+function getOrderedRouteList(routeList){
+  const ids = routeList.map(r=>r.path);
+  const saved = (state && state.profile && state.profile.navOrder) || [];
+  const filtered = saved.filter(id=>ids.includes(id));
+  const missing = ids.filter(id=>!filtered.includes(id));
+  return filtered.concat(missing).map(id=>routeList.find(r=>r.path===id));
+}
 function navHtml(active){
   maybeCheckHasAnyAssessment();
   let routeList = ROUTES.filter(r=>r.path!=="assessments" || active==="assessments" || _hasAnyAssessment===true);
   if(state && state.profile && state.profile.isCloudAdmin) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
-  const items = routeList.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
-  return '<nav class="sidebar"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
+  routeList = getOrderedRouteList(routeList);
+  const items = routeList.map(r=>'<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+r.icon+'</span><span>'+r.label+'</span></a>').join("");
+  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+items+'</nav>'+
          '<nav class="bottombar">'+items+'</nav>';
 }
 function topbarHtml(title, subtitle){
@@ -2389,17 +2404,16 @@ function getDashboardOrder(){
 function dashboardOrderRowHtml(id, i, total){
   const w = DASHBOARD_WIDGETS.find(x=>x.id===id);
   const hidden = (state.profile.dashboardHidden||[]).includes(id);
-  return '<div class="row-inline" style="align-items:center;padding:7px 0;border-bottom:1px solid var(--border);margin:0;">'+
+  return '<div class="row-inline dash-order-row" draggable="true" data-widget-id="'+id+'" style="align-items:center;padding:7px 0;border-bottom:1px solid var(--border);margin:0;">'+
+    '<div style="color:var(--text-muted);flex-shrink:0;margin-right:2px;font-size:16px;">⠿</div>'+
     '<div style="flex:1;font-weight:700;'+(hidden?"opacity:.4;":"")+'">'+w.icon+' '+w.label+'</div>'+
     '<div style="display:flex;gap:4px;flex-shrink:0;">'+
-    '<button class="icon-btn" data-action="moveDashWidget" data-v="up" data-id="'+id+'" '+(i===0?"disabled style=\"opacity:.3;\"":"")+'>⬆️</button>'+
-    '<button class="icon-btn" data-action="moveDashWidget" data-v="down" data-id="'+id+'" '+(i===total-1?"disabled style=\"opacity:.3;\"":"")+'>⬇️</button>'+
     '<button class="icon-btn" data-action="toggleDashWidgetHidden" data-id="'+id+'" title="'+(hidden?"Show on dashboard":"Hide from dashboard")+'">'+(hidden?"🚫":"👁️")+'</button>'+
     '</div></div>';
 }
 function dashboardEditModalHtml(){
   const order = getDashboardOrder();
-  return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Reorder or hide sections on your Home screen.</p>'+
+  return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Drag ⠿ to reorder sections, or tap 👁️ to hide one from your Home screen.</p>'+
     '<div id="dashOrderList">'+order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("")+'</div>'+
     '<div class="modal-actions"><button class="btn block" data-action="closeModal">Done</button></div>';
 }
@@ -4632,6 +4646,28 @@ function klaxonBlast(gainVal){
     osc.start(now+t); osc.stop(now+t+0.42);
   });
 }
+/* Piercing triple-chirp, the same register as a household smoke/CO detector low-battery/alarm beep. */
+function smokeDetectorChirp(gainVal){
+  const g = gainVal||1;
+  [0,0.16,0.32].forEach(function(t){ tone(3100,"square", t, 0.13, g); });
+}
+/* Layered sawtooth harmonics for a loud, sustained stadium air-horn blast. */
+function airHornBlast(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||1;
+  [349.23,415.30,523.25].forEach(function(f,i){
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "sawtooth"; osc.frequency.value = f;
+    const peak = g*(i===0?1:0.6);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(peak, now+0.02);
+    gain.gain.linearRampToValueAtTime(peak, now+0.75);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+0.85);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now+0.87);
+  });
+}
 function metalChord(gainVal){
   const ctx = window._audioCtx; if(!ctx) return;
   const now = ctx.currentTime;
@@ -4660,7 +4696,9 @@ const ALERT_SOUNDS = {
   circuitAlarm:   {label:"Circuit Alarm", desc:"Erratic high-pitched jittering electronic tone", play:function(g){ circuitChaos(g*1.0); }},
   jackhammer:     {label:"Jackhammer", desc:"Aggressive erratic mechanical pounding", play:function(g){ jackhammerSound(g*1.0); }},
   bugle:          {label:"Bugle Call", desc:"Sharp brassy reveille-style blast", play:function(g){ bugleCall(g*1.0); }},
-  klaxon:         {label:"Klaxon", desc:"Classic rising dive-alarm blast, repeated", play:function(g){ klaxonBlast(g*1.0); }}
+  klaxon:         {label:"Klaxon", desc:"Classic rising dive-alarm blast, repeated", play:function(g){ klaxonBlast(g*1.0); }},
+  smokeDetector:  {label:"Smoke Detector", desc:"Piercing triple-chirp, like a household smoke/CO alarm", play:function(g){ smokeDetectorChirp(g*1.0); }},
+  airHorn:        {label:"Air Horn", desc:"Loud sustained stadium air-horn blast", play:function(g){ airHornBlast(g*1.0); }}
 };
 function unlockedGain(gainVal){ return Math.max(0.001, Math.min(1, gainVal==null?0.5:gainVal)); }
 /* Play the admin-uploaded custom alarm clip once (fire-and-forget), returns the Audio element. */
@@ -4808,6 +4846,64 @@ function checkReminders(){
     }
   }
 }
+
+/* ============ Drag-and-drop reordering (sidebar nav + dashboard widgets) ============ */
+let _draggingNavRoute = null, _draggingWidgetId = null;
+document.addEventListener("dragstart", function(e){
+  const navA = e.target.closest && e.target.closest(".sidebar a[data-route]");
+  if(navA){
+    _draggingNavRoute = navA.getAttribute("data-route");
+    navA.classList.add("nav-dragging");
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingNavRoute); }catch(err){} }
+    return;
+  }
+  const row = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  if(row){
+    _draggingWidgetId = row.getAttribute("data-widget-id");
+    row.classList.add("dash-dragging");
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingWidgetId); }catch(err){} }
+  }
+});
+document.addEventListener("dragover", function(e){
+  if(_draggingNavRoute && e.target.closest && e.target.closest(".sidebar a[data-route]")){ e.preventDefault(); return; }
+  if(_draggingWidgetId && e.target.closest && e.target.closest(".dash-order-row[data-widget-id]")){ e.preventDefault(); }
+});
+document.addEventListener("drop", function(e){
+  const navTarget = e.target.closest && e.target.closest(".sidebar a[data-route]");
+  if(_draggingNavRoute && navTarget){
+    e.preventDefault();
+    const targetRoute = navTarget.getAttribute("data-route");
+    if(targetRoute !== _draggingNavRoute){
+      const order = Array.from(document.querySelectorAll(".sidebar a[data-route]")).map(a=>a.getAttribute("data-route"));
+      const from = order.indexOf(_draggingNavRoute), to = order.indexOf(targetRoute);
+      if(from>=0 && to>=0){
+        order.splice(from,1); order.splice(to,0,_draggingNavRoute);
+        state.profile.navOrder = order;
+        saveState(); render();
+      }
+    }
+    return;
+  }
+  const widgetTarget = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  if(_draggingWidgetId && widgetTarget){
+    e.preventDefault();
+    const targetId = widgetTarget.getAttribute("data-widget-id");
+    if(targetId !== _draggingWidgetId){
+      const order = getDashboardOrder();
+      const from = order.indexOf(_draggingWidgetId), to = order.indexOf(targetId);
+      if(from>=0 && to>=0){
+        order.splice(from,1); order.splice(to,0,_draggingWidgetId);
+        state.profile.dashboardOrder = order;
+        saveState(); refreshDashOrderList();
+      }
+    }
+  }
+});
+document.addEventListener("dragend", function(){
+  document.querySelectorAll(".nav-dragging").forEach(el=>el.classList.remove("nav-dragging"));
+  document.querySelectorAll(".dash-dragging").forEach(el=>el.classList.remove("dash-dragging"));
+  _draggingNavRoute = null; _draggingWidgetId = null;
+});
 
 /* ============ Event delegation ============ */
 document.addEventListener("click", async function(e){
@@ -5007,17 +5103,6 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
-    case "moveDashWidget": {
-      const order = getDashboardOrder();
-      const idx = order.indexOf(id);
-      const swapWith = v==="up" ? idx-1 : idx+1;
-      if(idx<0 || swapWith<0 || swapWith>=order.length) return;
-      const tmp = order[idx]; order[idx] = order[swapWith]; order[swapWith] = tmp;
-      state.profile.dashboardOrder = order;
-      saveState();
-      refreshDashOrderList();
-      break;
-    }
     case "toggleDashWidgetHidden": {
       state.profile.dashboardHidden = state.profile.dashboardHidden || [];
       const idx = state.profile.dashboardHidden.indexOf(id);
