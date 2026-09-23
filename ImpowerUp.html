@@ -484,7 +484,7 @@ function defaultState(){
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
-      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"classic", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"alarmClock", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
@@ -4183,13 +4183,15 @@ function installAppCardHtml(){
     '</div>';
 }
 let notifyAdvancedOpen = false;
-function emailSmsNotificationsCardHtml(){
+function notificationsCardHtml(){
   const p = state.profile;
   const emailOn = !!p.emailNotifyEnabled;
   const smsOn = !!p.smsNotifyEnabled;
   const emailConnected = !!p.resendApiKey;
   const smsConnected = !!(p.twilioAccountSid && p.twilioAuthToken && p.twilioFromNumber);
-  return '<div class="card" style="margin-top:14px;"><h2>✉️ Email &amp; Text Notifications</h2>'+
+  let html = '<div class="card" style="margin-top:14px;"><h2>🔔 Notifications</h2>';
+
+  html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Email &amp; Text</p>'+
     '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device.</p>'+
     '<div class="row-inline" style="margin-top:10px;"><div class="field"><label>Notification email</label><input id="set_notifyEmail" type="email" placeholder="you@example.com" value="'+escapeHtml(p.notifyEmail||"")+'"></div>'+
     '<div class="field"><label>Notification phone</label><input id="set_notifyPhone" type="tel" placeholder="+1 555 123 4567" value="'+escapeHtml(p.notifyPhone||"")+'"></div></div>'+
@@ -4207,7 +4209,29 @@ function emailSmsNotificationsCardHtml(){
       '<div class="field"><label>Auth token</label><input id="set_twilioToken" type="password" value="'+escapeHtml(p.twilioAuthToken||"")+'"></div>'+
       '<div class="field"><label>From number</label><input id="set_twilioFrom" type="tel" placeholder="+15551234567" value="'+escapeHtml(p.twilioFromNumber||"")+'"></div>'+
       '<button class="btn secondary sm" data-action="saveNotifyProviders">Save provider keys</button>'+
-    '</div></div>';
+    '</div>';
+
+  const notifSupported = ("Notification" in window);
+  const notifPerm = notifSupported ? Notification.permission : "unsupported";
+  const isSecure = location.protocol==="https:" || location.hostname==="localhost";
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">📱 Phone Notifications</p>'+
+    '<p class="hc-meta">For real lock-screen banners/badges on iPhone, this file needs to be hosted at a real HTTPS address and added to your Home Screen — a local file can\'t send phone notifications at all.</p>'+
+    (!isSecure ? '<p class="hc-meta" style="color:var(--danger, #ef4444);">⚠️ Not currently on HTTPS — host this file first (see About below), then come back here.</p>' :
+      '<p class="hc-meta">Status: <b>'+(notifPerm==="granted"?"Enabled ✅":notifPerm==="denied"?"Blocked — re-enable in phone Settings":"Not enabled yet")+'</b></p>'+
+      (notifPerm!=="granted" ? '<button class="btn secondary block" data-action="requestNotificationPermission">Enable Phone Notifications</button>' : ''));
+
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">🔁 Background Push (optional)</p>'+
+    '<p class="hc-meta">Deliver alerts even when the app is fully closed. Needs a small free Supabase backend — see supabase-schema.sql and send-scheduled-alerts.ts. Paste your project\'s URL and anon key here once it\'s deployed.</p>'+
+    '<div class="field"><label>Supabase Project URL</label><input id="set_sbUrl" type="text" placeholder="https://xxxx.supabase.co" value="'+escapeHtml(state.profile.supabaseUrl||"")+'"></div>'+
+    '<div class="field"><label>Supabase anon key</label><input id="set_sbKey" type="text" placeholder="eyJhbGciOi..." value="'+escapeHtml(state.profile.supabaseAnonKey||"")+'"></div>'+
+    '<button class="btn secondary sm" data-action="saveSupabaseConfig">Save</button> '+
+    (state.profile.pushEnabled ? '<span class="tag" style="margin-left:8px;">Background push connected ✅</span>' :
+      '<button class="btn sm" style="margin-left:8px;" data-action="requestNotificationPermission">Connect</button>');
+
+  html += '</div>';
+  return html;
 }
 function renderSettings(){
   let html = topbarHtml("Settings","Personalize ImpowerUp.");
@@ -4248,30 +4272,11 @@ function renderSettings(){
     '<div class="field" id="ciCustomDaysField" style="'+(ciFreq==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(ciCustomDays.includes(d)?"selected":"")+'" data-action="pickCheckInCustomDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '</div>';
 
-  html += emailSmsNotificationsCardHtml();
+  html += notificationsCardHtml();
 
   html += calendarSyncCardHtml();
 
   html += installAppCardHtml();
-
-  const notifSupported = ("Notification" in window);
-  const notifPerm = notifSupported ? Notification.permission : "unsupported";
-  const isSecure = location.protocol==="https:" || location.hostname==="localhost";
-  html += '<div class="card" style="margin-top:14px;"><h2>📱 Phone Notifications</h2>'+
-    '<p class="hc-meta">For real lock-screen banners/badges on iPhone, this file needs to be hosted at a real HTTPS address and added to your Home Screen — a local file can\'t send phone notifications at all.</p>'+
-    (!isSecure ? '<p class="hc-meta" style="color:var(--danger, #ef4444);">⚠️ Not currently on HTTPS — host this file first (see About below), then come back here.</p>' :
-      '<p class="hc-meta">Status: <b>'+(notifPerm==="granted"?"Enabled ✅":notifPerm==="denied"?"Blocked — re-enable in phone Settings":"Not enabled yet")+'</b></p>'+
-      (notifPerm!=="granted" ? '<button class="btn secondary block" data-action="requestNotificationPermission">Enable Phone Notifications</button>' : ''))+
-    '</div>';
-
-  html += '<div class="card" style="margin-top:14px;"><h2>🔁 Background Push (optional)</h2>'+
-    '<p class="hc-meta">Deliver alerts even when the app is fully closed. Needs a small free Supabase backend — see supabase-schema.sql and send-scheduled-alerts.ts. Paste your project\'s URL and anon key here once it\'s deployed.</p>'+
-    '<div class="field"><label>Supabase Project URL</label><input id="set_sbUrl" type="text" placeholder="https://xxxx.supabase.co" value="'+escapeHtml(state.profile.supabaseUrl||"")+'"></div>'+
-    '<div class="field"><label>Supabase anon key</label><input id="set_sbKey" type="text" placeholder="eyJhbGciOi..." value="'+escapeHtml(state.profile.supabaseAnonKey||"")+'"></div>'+
-    '<button class="btn secondary sm" data-action="saveSupabaseConfig">Save</button> '+
-    (state.profile.pushEnabled ? '<span class="tag" style="margin-left:8px;">Background push connected ✅</span>' :
-      '<button class="btn sm" style="margin-left:8px;" data-action="requestNotificationPermission">Connect</button>')+
-    '</div>';
 
   if((state.customCategories||[]).length){
     html += '<div class="card" style="margin-top:14px;"><h2>🏷️ Custom Categories</h2><p class="hc-meta">Categories you\'ve added from Habits or Goals forms. Tap a color to recolor a category.</p>'+
@@ -4462,7 +4467,7 @@ function tone(freq, type, startAt, dur, peakGain){
   osc.type = type||"sine"; osc.frequency.value = freq;
   const now = ctx.currentTime + (startAt||0);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.linearRampToValueAtTime(Math.max(0.0002,peakGain), now+0.015);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0002,peakGain), now+0.006);
   gain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
   osc.connect(gain); gain.connect(ctx.destination);
   osc.start(now); osc.stop(now+dur+0.02);
@@ -4546,6 +4551,26 @@ function distortionCurve(amount){
   for(let i=0;i<n;i++){ const x = i*2/n-1; curve[i] = (3+k)*x*20*deg / (Math.PI+k*Math.abs(x)); }
   return curve;
 }
+/* Sharp triple-beep, like a classic bedside digital alarm clock. */
+function alarmClockBeep(gainVal){
+  const g = gainVal||0.9;
+  [0,0.14,0.28].forEach(function(t){ tone(2000,"square",t,0.12,g); });
+}
+/* Alternating two-tone urgent beep-beep, close to a stock phone alarm default. */
+function beepBeepAlarm(gainVal){
+  const g = gainVal||0.9;
+  [[0,2100],[0.16,1700],[0.34,2100],[0.5,1700]].forEach(function(pair){ tone(pair[1],"square",pair[0],0.14,g); });
+}
+/* Sharp mallet-like pulses that speed up over ~1.1s, like iPhone's "Radar". */
+function radarPulse(gainVal){
+  const g = gainVal||0.9;
+  [0,0.28,0.52,0.72,0.88,1.0,1.1].forEach(function(t){ tone(1046,"triangle",t,0.1,g); tone(2093,"sine",t,0.05,g*0.55); });
+}
+/* Harsh low buzzer made of rapid square pulses, like an old wind-up alarm clock bell. */
+function buzzerAlarm(gainVal){
+  const g = gainVal||0.9;
+  for(let i=0;i<8;i++){ tone(160,"square",i*0.09,0.08,g); }
+}
 function metalChord(gainVal){
   const ctx = window._audioCtx; if(!ctx) return;
   const now = ctx.currentTime;
@@ -4568,10 +4593,14 @@ function metalChord(gainVal){
   });
 }
 const ALERT_SOUNDS = {
-  classic: {label:"Classic", desc:"Simple beep", play:function(g){ beep(880, 260, g*0.9); }},
+  alarmClock: {label:"Alarm Clock", desc:"Sharp triple beep — classic bedside alarm", play:function(g){ alarmClockBeep(g*1.0); }},
+  beepBeep:   {label:"Beep Beep", desc:"Two-tone urgent beep, like a phone's default alarm", play:function(g){ beepBeepAlarm(g*1.0); }},
+  radar:      {label:"Radar", desc:"Fast mallet pulses that speed up, iPhone-style", play:function(g){ radarPulse(g*1.0); }},
+  buzzer:     {label:"Buzzer", desc:"Harsh buzzing bell, like an old wind-up alarm clock", play:function(g){ buzzerAlarm(g*1.0); }},
+  classic: {label:"Classic", desc:"Simple beep", play:function(g){ beep(880, 260, g*0.95); }},
   chime:   {label:"Chime", desc:"Gentle bell", play:function(g){ tone(1318,"sine",0,0.9,g*0.6); tone(1976,"sine",0.05,0.8,g*0.4); }},
-  alert:   {label:"Alert", desc:"Urgent ringing", play:function(g){ [0,0.18,0.36,0.54].forEach(function(t){ tone(1200,"square",t,0.14,g*0.55); }); }},
-  digital: {label:"Digital", desc:"Digital watch", play:function(g){ [0,0.09,0.18].forEach(function(t){ tone(2100,"square",t,0.07,g*0.5); }); }},
+  alert:   {label:"Alert", desc:"Urgent ringing", play:function(g){ [0,0.14,0.28,0.42].forEach(function(t){ tone(1200,"square",t,0.13,g*0.95); }); }},
+  digital: {label:"Digital", desc:"Digital watch", play:function(g){ [0,0.09,0.18].forEach(function(t){ tone(2100,"square",t,0.07,g*0.9); }); }},
   melody:  {label:"Melody", desc:"Short tune", play:function(g){ [523,659,784,1047].forEach(function(f,i){ tone(f,"triangle",i*0.13,0.22,g*0.55); }); }},
   pulse:   {label:"Pulse", desc:"Soft pulse", play:function(g){ [0,0.22,0.44,0.66].forEach(function(t,i){ tone(440,"sine",t,0.3,g*(0.5-i*0.06)); }); }},
   hype:    {label:"Hype", desc:"Rap-style beat drop", play:function(g){
@@ -4582,7 +4611,7 @@ const ALERT_SOUNDS = {
   foghorn: {label:"Foghorn", desc:"Deep blaring double horn", play:function(g){ foghorn(g*1.1); }},
   scream:  {label:"Scream", desc:"Blood-curdling shriek", play:function(g){ scream(g*1.1); }},
   metal:   {label:"Heavy Metal", desc:"Distorted power-chord riff", play:function(g){ metalChord(g*0.9); }},
-  siren:   {label:"Siren", desc:"Rising & falling alarm wail", play:function(g){ siren(g*0.9); }},
+  siren:   {label:"Siren", desc:"Rising & falling alarm wail", play:function(g){ siren(g*0.95); }},
   marimba: {label:"Marimba", desc:"Soft wooden xylophone", play:function(g){ [392,494,587,784].forEach(function(f,i){ tone(f,"triangle",i*0.11,0.5,g*0.5); }); }}
 };
 function unlockedGain(gainVal){ return Math.max(0.001, Math.min(1, gainVal==null?0.5:gainVal)); }
@@ -4612,7 +4641,7 @@ function startAlarmSound(level){
   const soundKey = (state && state.profile && state.profile.alertSound) || "classic";
   const volPct = (state && state.profile && state.profile.alertVolume!=null) ? state.profile.alertVolume : 80;
   const vol = Math.max(0, Math.min(1, volPct/100));
-  const levelScale = {gentle:0.55, moderate:0.8, loud:1, persistent:1.15}[level] || 0.8;
+  const levelScale = {gentle:0.7, moderate:0.95, loud:1.1, persistent:1.25}[level] || 0.95;
   const gainVal = vol * levelScale;
   // A custom uploaded clip loops continuously for the repeating levels instead of restarting
   // every second or two (which would just chop it up) — it plays through naturally on a loop.
