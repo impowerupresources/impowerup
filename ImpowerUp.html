@@ -2266,6 +2266,7 @@ function topbarHtml(title, subtitle){
 function stat(num,lbl){ return '<div class="stat"><div class="num">'+num+'</div><div class="lbl">'+lbl+'</div></div>'; }
 function emptyState(icon,title,sub){ return '<div class="empty card"><div class="big">'+icon+'</div><div style="font-weight:800;color:var(--text)">'+title+'</div><div style="font-size:13px;margin-top:4px;">'+sub+'</div></div>'; }
 
+let _lastRenderedRoute = null;
 function render(){
   const hash = location.hash;
   if(hash.indexOf("#share=")===0){ renderMentorView(decodeURIComponent(hash.slice(7))); return; }
@@ -2294,7 +2295,8 @@ function render(){
     '<div style="display:flex;gap:8px;"><button class="btn sm secondary" data-action="discardExitClientView">Discard &amp; Exit</button>'+
     '<button class="btn sm" style="background:#fff;color:var(--danger);" data-action="saveExitClientView">Save &amp; Exit</button></div></div>' : "";
   app.innerHTML = adminBanner + navHtml(route) + '<div class="page">' + body + '</div>';
-  window.scrollTo(0,0);
+  if(route !== _lastRenderedRoute) window.scrollTo(0,0);
+  _lastRenderedRoute = route;
   if(route==="focus" && !focusTimer){
     const activeF = state.focusSessions.find(s=>s.status==="active");
     if(activeF) startFocusTicker(activeF);
