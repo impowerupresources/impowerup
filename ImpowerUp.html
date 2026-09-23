@@ -491,7 +491,8 @@ function defaultState(){
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
       resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
-      dashboardOrder:[], dashboardHidden:[] },
+      dashboardOrder:[], dashboardHidden:[], defaultSnoozeMinutes:5,
+      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
   };
@@ -733,6 +734,169 @@ function computeNextFireAt(time, days){
   return null;
 }
 let _lastPushSync = 0;
+/* One-off (non-recurring) alarms — dated tasks and non-repeating custom events — fire at an
+   exact date+time rather than a weekday pattern, so they get a direct next_fire_at instead of
+   going through computeNextFireAt's weekly-recurrence logic. Already-past ones are left out
+   entirely so they never get (re)pushed to the background scheduler. */
+function computeOneOffFireAt(dateStr, time){
+  if(!dateStr || !time) return null;
+  const [hh,mm] = time.split(":").map(Number);
+  const [yy,mo,dd] = dateStr.split("-").map(Number);
+  const dt = new Date(yy,mo-1,dd,hh,mm,0,0);
+  return dt.getTime() > Date.now() ? dt.toISOString() : null;
+}
+function getOneOffPushItems(){
+  const items = [];
+  (state.customEvents||[]).filter(e=>e.alarm_enabled && e.time && e.date && (!e.repeat || e.repeat==="none")).forEach(e=>{
+    const fireAt = computeOneOffFireAt(e.date, e.time);
+    if(fireAt) items.push({id:"cevt_"+e.id, title:e.label||"Event", body:e.description||"", fireAt});
+  });
+  (state.tasks||[]).filter(t=>t.alarm_enabled && t.alarm_time && t.date && t.status!=="done").forEach(t=>{
+    const fireAt = computeOneOffFireAt(t.date, t.alarm_time);
+    if(fireAt) items.push({id:"tsk_"+t.id, title:"Task: "+t.title, body:"", fireAt});
+  });
+  return items;
+}
+/* ============ Google Calendar two-way sync ============ */
+const GOOGLE_CONNECT_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co/functions/v1/google-calendar-connect";
+const GOOGLE_SYNC_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co/functions/v1/google-calendar-sync";
+function ensureGoogleSyncKey(){
+  if(!state.profile.googleSyncKey){ state.profile.googleSyncKey = uid()+uid(); saveState(); }
+  return state.profile.googleSyncKey;
+}
+async function googleCalendarApi(action, extra){
+  const body = Object.assign({syncKey: state.profile.googleSyncKey, action}, extra||{});
+  const res = await fetch(GOOGLE_SYNC_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  return res.json().catch(()=>({}));
+}
+async function pullGoogleEvents(){
+  const data = await googleCalendarApi("pull");
+  if(!data || !data.events || !data.events.length) return 0;
+  const existingGoogleIds = new Set((state.customEvents||[]).map(e=>e.google_event_id).filter(Boolean));
+  let added = 0;
+  data.events.forEach(ev=>{
+    if(!ev.googleEventId || existingGoogleIds.has(ev.googleEventId)) return;
+    let dateStr = "", timeStr = "";
+    if(ev.allDay && ev.start){
+      dateStr = String(ev.start).slice(0,10);
+    } else if(ev.start){
+      const dt = new Date(ev.start);
+      if(isNaN(dt.getTime())) return;
+      dateStr = todayStr(dt);
+      timeStr = String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0");
+    }
+    if(!dateStr) return;
+    state.customEvents = state.customEvents||[];
+    state.customEvents.push({
+      id: uid(), date: dateStr, time: timeStr, emoji:"📅", label: ev.title||"Google Event", description: ev.description||"",
+      duration_minutes: 30, alarm_enabled:false, alarm_level:"moderate", notify_email:false, notify_sms:false,
+      repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week",
+      color: COLORS[4], google_event_id: ev.googleEventId, source:"google"
+    });
+    added++;
+  });
+  if(added) saveState();
+  return added;
+}
+async function pushGoogleItems(){
+  const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+  const items = [];
+  (state.customEvents||[]).filter(e=>!e.google_event_id && e.source!=="google" && e.date).forEach(e=>{
+    if(e.time){
+      const [hh,mm] = e.time.split(":").map(Number);
+      const [yy,mo,dd] = e.date.split("-").map(Number);
+      const start = new Date(yy,mo-1,dd,hh,mm);
+      const end = new Date(start.getTime() + (e.duration_minutes||30)*60000);
+      items.push({localId:"cevt:"+e.id, title:e.label||"Event", description:e.description||"", allDay:false, startDateTime:start.toISOString(), endDateTime:end.toISOString(), timeZone:tz});
+    } else {
+      items.push({localId:"cevt:"+e.id, title:e.label||"Event", description:e.description||"", allDay:true, date:e.date, endDate:addDays(e.date,1)});
+    }
+  });
+  (state.tasks||[]).filter(t=>!t.google_event_id && t.date && t.status!=="done").forEach(t=>{
+    if(t.alarm_time){
+      const [hh,mm] = t.alarm_time.split(":").map(Number);
+      const [yy,mo,dd] = t.date.split("-").map(Number);
+      const start = new Date(yy,mo-1,dd,hh,mm);
+      const end = new Date(start.getTime() + 30*60000);
+      items.push({localId:"tsk:"+t.id, title:"Task: "+t.title, description:"", allDay:false, startDateTime:start.toISOString(), endDateTime:end.toISOString(), timeZone:tz});
+    } else {
+      items.push({localId:"tsk:"+t.id, title:"Task: "+t.title, description:"", allDay:true, date:t.date, endDate:addDays(t.date,1)});
+    }
+  });
+  if(!items.length) return 0;
+  const data = await googleCalendarApi("push", {items});
+  let pushed = 0;
+  (data.results||[]).forEach(r=>{
+    if(!r || !r.ok || !r.localId) return;
+    const sep = r.localId.indexOf(":");
+    const kind = r.localId.slice(0,sep), localId = r.localId.slice(sep+1);
+    if(kind==="cevt"){ const e=(state.customEvents||[]).find(x=>x.id===localId); if(e){ e.google_event_id=r.googleEventId; pushed++; } }
+    else if(kind==="tsk"){ const t=(state.tasks||[]).find(x=>x.id===localId); if(t){ t.google_event_id=r.googleEventId; pushed++; } }
+  });
+  if(pushed) saveState();
+  return pushed;
+}
+let _googleSyncing = false;
+async function syncGoogleCalendarNow(silent){
+  if(!state.profile.googleCalendarConnected || !state.profile.googleSyncKey) return;
+  if(_googleSyncing) return;
+  _googleSyncing = true;
+  try{
+    let importedCount = 0, exportedCount = 0;
+    if(state.profile.googleImportEnabled) importedCount = await pullGoogleEvents();
+    if(state.profile.googleExportEnabled) exportedCount = await pushGoogleItems();
+    state.profile.lastGoogleSync = new Date().toISOString();
+    saveState();
+    if(!silent) toast((importedCount || exportedCount) ? ("Synced — "+importedCount+" imported, "+exportedCount+" exported") : "Already up to date");
+    if(typeof render==="function") render();
+  }catch(e){
+    if(!silent) toast("Google sync failed — try again");
+  }finally{
+    _googleSyncing = false;
+  }
+}
+let _lastGoogleAutoSync = 0;
+function maybeAutoSyncGoogle(){
+  if(!state.profile.googleCalendarConnected) return;
+  if(!state.profile.googleImportEnabled && !state.profile.googleExportEnabled) return;
+  const now = Date.now();
+  if(now - _lastGoogleAutoSync < 300000) return;
+  _lastGoogleAutoSync = now;
+  syncGoogleCalendarNow(true);
+}
+function checkGoogleOAuthReturn(){
+  const hash = location.hash || "";
+  if(hash.indexOf("google=connected") >= 0){
+    state.profile.googleCalendarConnected = true;
+    saveState();
+    toast("Google Calendar connected!");
+    history.replaceState(null, "", location.pathname+"#/settings");
+    syncGoogleCalendarNow(true);
+  } else if(hash.indexOf("google=error") >= 0){
+    toast("Couldn't connect to Google Calendar — please try again");
+    history.replaceState(null, "", location.pathname+"#/settings");
+  }
+}
+function googleCalendarCardHtml(){
+  const connected = !!state.profile.googleCalendarConnected;
+  const lastSync = state.profile.lastGoogleSync ? (fmtDatePretty(state.profile.lastGoogleSync.slice(0,10))+" "+fmtTime12(new Date(state.profile.lastGoogleSync).toTimeString().slice(0,5))) : "Never";
+  if(!connected){
+    return '<div class="card" style="margin-top:14px;"><h2>📅 Google Calendar</h2>'+
+      '<p class="hc-meta">Import your Google Calendar events into Planner, and/or send your ImpowerUp tasks &amp; events to Google Calendar.</p>'+
+      '<button class="btn secondary sm" style="margin-top:8px;" data-action="connectGoogleCalendar">🔗 Continue with Google</button>'+
+      '</div>';
+  }
+  return '<div class="card" style="margin-top:14px;"><h2>📅 Google Calendar</h2>'+
+    '<p class="hc-meta">✅ Connected — last synced '+escapeHtml(lastSync)+'</p>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
+    '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
+    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
+    '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
+    '<button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button>'+
+    '</div></div>';
+}
 async function syncAllAlertsToServer(force){
   if(!pushBackendConfigured() || !state.profile.pushEnabled) return;
   const nowMs = Date.now();
@@ -752,11 +916,19 @@ async function syncAllAlertsToServer(force){
         body: JSON.stringify({ id:r.id, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString() })
       });
     }
+    const oneOffItems = getOneOffPushItems();
+    for(const item of oneOffItems){
+      await sbRest("scheduled_alerts?on_conflict=id", {
+        method:"POST",
+        headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
+        body: JSON.stringify({ id:item.id, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString() })
+      });
+    }
     // Reconcile deletions: remove any server-side alerts that no longer exist locally.
     const listRes = await sbRest("scheduled_alerts?subscription_endpoint=eq."+encodeURIComponent(endpoint)+"&select=id");
     if(listRes.ok){
       const serverIds = (await listRes.json()).map(r=>r.id);
-      const localIds = new Set(active.map(r=>r.id));
+      const localIds = new Set(active.map(r=>r.id).concat(oneOffItems.map(i=>i.id)));
       const stale = serverIds.filter(sid=>!localIds.has(sid));
       for(const sid of stale){
         await sbRest("scheduled_alerts?id=eq."+encodeURIComponent(sid), {method:"DELETE"});
@@ -1436,12 +1608,69 @@ function bootApp(){
   const profiles = loadProfiles();
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
-    activateProfile(curId); render();
+    activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else if(profiles.length===1 && !profiles[0].pin && profiles[0].id!==DEMO_PROFILE_ID){
-    activateProfile(profiles[0].id); render();
+    activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else {
     renderProfilePicker();
   }
+}
+/* ============ Missed alarms (shown once on app open if any fired while closed) ============ */
+let missedAlarmsCache = [];
+function computeMissedAlarms(){
+  const now = new Date();
+  const missed = [];
+  for(let back=1; back>=0; back--){
+    const dateStr = addDays(todayStr(), -back);
+    const dow = dayOfWeekName(dateStr);
+    const queueForDay = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, dateStr)}))
+      .concat(getVirtualEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
+      .concat(getCustomEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
+      .concat(getTaskAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})));
+    queueForDay.forEach(r=>{
+      if(!(r.days||[]).includes(dow) || !r._effTime) return;
+      const [hh,mm] = r._effTime.split(":").map(Number);
+      const [yy,mo,dd] = dateStr.split("-").map(Number);
+      const schedDate = new Date(yy,mo-1,dd,hh,mm,0,0);
+      if(schedDate.getTime() >= now.getTime()) return;
+      const firedKey = r.id+"_"+dateStr;
+      if((state.profile.firedReminders||{})[firedKey]) return;
+      missed.push(Object.assign({}, r, {_date:dateStr, _schedTime:r._effTime}));
+    });
+  }
+  missed.sort((a,b)=>(a._date+a._schedTime).localeCompare(b._date+b._schedTime));
+  return missed;
+}
+function missedAlarmRowHtml(r){
+  return '<div class="card" style="margin-bottom:8px;padding:12px;">'+
+    '<div style="font-weight:800;">'+escapeHtml(r.title)+'</div>'+
+    '<div class="hc-meta">'+fmtDatePretty(r._date)+' at '+fmtTime12(r._schedTime)+'</div>'+
+    (r.message?'<div class="hc-meta" style="margin-top:4px;font-style:italic;">"'+escapeHtml(r.message)+'"</div>':'')+
+    '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'+
+    '<button class="btn secondary sm" data-action="dismissMissedAlarm" data-id="'+r.id+'" data-v="'+r._date+'">Dismiss</button>'+
+    '<button class="btn ghost sm" data-action="snoozeMissedAlarm" data-id="'+r.id+'" data-v="'+r._date+'">Snooze '+(state.profile.defaultSnoozeMinutes||5)+'m</button>'+
+    '</div></div>';
+}
+function refreshMissedAlarmsList(){
+  if(!missedAlarmsCache.length){ closeModal(); return; }
+  const el = document.getElementById("missedAlarmsList");
+  if(el) el.innerHTML = missedAlarmsCache.map(r=>missedAlarmRowHtml(r)).join("");
+  else closeModal();
+}
+function missedAlarmsModalHtml(){
+  return '<h2>⏰ Missed Alarms</h2><p class="hc-meta">These didn\'t fire while the app was closed — nothing was silently skipped.</p>'+
+    '<div id="missedAlarmsList" style="max-height:50vh;overflow-y:auto;">'+missedAlarmsCache.map(r=>missedAlarmRowHtml(r)).join("")+'</div>'+
+    '<div class="modal-actions"><button class="btn block" data-action="dismissAllMissedAlarms">Dismiss All</button></div>';
+}
+function checkForMissedAlarms(){
+  if(!state || !state.profile.onboarded) return;
+  const missed = computeMissedAlarms();
+  if(!missed.length) return;
+  missedAlarmsCache = missed;
+  state.profile.firedReminders = state.profile.firedReminders || {};
+  missed.forEach(r=>{ state.profile.firedReminders[r.id+"_"+r._date] = true; });
+  saveState();
+  openModal(missedAlarmsModalHtml());
 }
 function samplePreviewHtml(){
   const habits = [
@@ -3074,6 +3303,9 @@ function alertSoundCardHtml(){
     '<div class="field" style="margin-top:10px;"><label>Volume — <span id="alertVolVal">'+curVol+'</span>%</label>'+
     '<input type="range" id="alertVolumeSlider" min="0" max="100" value="'+curVol+'" style="width:100%" oninput="document.getElementById(\'alertVolVal\').textContent=this.value">'+
     '</div>'+
+    '<div class="field" style="margin-top:10px;"><label>Default snooze length</label><div class="chip-group">'+
+    [5,10,15,30].map(m=>'<div class="chip '+((state.profile.defaultSnoozeMinutes||5)===m?"selected":"")+'" data-action="pickDefaultSnooze" data-v="'+m+'">'+m+' min</div>').join("")+
+    '</div><p class="hc-meta" style="margin-top:4px;">Highlighted first on the alarm screen — you can still tap any of the 4 options when an alert fires.</p></div>'+
     '<div class="grid cols-3" style="margin-top:12px;gap:10px;">'+
     Object.keys(ALERT_SOUNDS).map(k=>{
       const s = ALERT_SOUNDS[k];
@@ -3896,6 +4128,36 @@ function accountCardHtml(){
 }
 
 /* ============ Settings ============ */
+window._deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault();
+  window._deferredInstallPrompt = e;
+  if(typeof render==="function" && currentRoute()==="settings") render();
+});
+window.addEventListener("appinstalled", function(){
+  window._deferredInstallPrompt = null;
+  if(typeof render==="function" && currentRoute()==="settings") render();
+});
+function installAppCardHtml(){
+  const isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone===true;
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  if(isStandalone){
+    return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2><p class="hc-meta">✅ Already installed — you\'re using the home-screen app, with offline access and background alerts.</p></div>';
+  }
+  if(isIOS){
+    return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2>'+
+      '<p class="hc-meta">iPhone/iPad don\'t let any app trigger its own install prompt — add it manually, it takes a few seconds:</p>'+
+      '<ol style="margin:8px 0 0 18px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.8;">'+
+      '<li>Tap the <b>Share</b> button in Safari (square with an arrow pointing up)</li>'+
+      '<li>Scroll down and tap <b>Add to Home Screen</b></li>'+
+      '<li>Tap <b>Add</b> — ImpowerUp now opens full-screen like a real app, with offline access and background alerts</li>'+
+      '</ol></div>';
+  }
+  return '<div class="card" style="margin-top:14px;"><h2>📲 Install ImpowerUp</h2><p class="hc-meta">Install as an app on this device for a faster, full-screen, offline-capable experience.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="triggerInstallPrompt" '+(window._deferredInstallPrompt?"":"disabled")+'>⬇️ Install ImpowerUp</button>'+
+    (window._deferredInstallPrompt?'':'<p class="hc-meta" style="margin-top:6px;">Your browser hasn\'t offered an install prompt yet — try reloading this page, or use your browser\'s menu → "Install app" / "Add to Home screen".</p>')+
+    '</div>';
+}
 let notifyAdvancedOpen = false;
 function emailSmsNotificationsCardHtml(){
   const p = state.profile;
@@ -3963,6 +4225,10 @@ function renderSettings(){
     '</div>';
 
   html += emailSmsNotificationsCardHtml();
+
+  html += googleCalendarCardHtml();
+
+  html += installAppCardHtml();
 
   const notifSupported = ("Notification" in window);
   const notifPerm = notifSupported ? Notification.permission : "unsupported";
@@ -4113,6 +4379,23 @@ function tone(freq, type, startAt, dur, peakGain){
   osc.connect(gain); gain.connect(ctx.destination);
   osc.start(now); osc.stop(now+dur+0.02);
 }
+/* Rising-then-falling pitch sweep — classic siren wail. */
+function siren(gainVal){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime;
+  const g = gainVal||0.5;
+  const osc = ctx.createOscillator(); const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(500, now);
+  osc.frequency.linearRampToValueAtTime(1100, now+0.5);
+  osc.frequency.linearRampToValueAtTime(500, now+1.0);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(g, now+0.05);
+  gain.gain.linearRampToValueAtTime(g, now+0.95);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+1.02);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(now); osc.stop(now+1.05);
+}
 /* Deep double blast — like a ship's foghorn. */
 function foghorn(gainVal){
   const ctx = window._audioCtx; if(!ctx) return;
@@ -4210,7 +4493,9 @@ const ALERT_SOUNDS = {
     }},
   foghorn: {label:"Foghorn", desc:"Deep blaring double horn", play:function(g){ foghorn(g*1.1); }},
   scream:  {label:"Scream", desc:"Blood-curdling shriek", play:function(g){ scream(g*1.1); }},
-  metal:   {label:"Heavy Metal", desc:"Distorted power-chord riff", play:function(g){ metalChord(g*0.9); }}
+  metal:   {label:"Heavy Metal", desc:"Distorted power-chord riff", play:function(g){ metalChord(g*0.9); }},
+  siren:   {label:"Siren", desc:"Rising & falling alarm wail", play:function(g){ siren(g*0.9); }},
+  marimba: {label:"Marimba", desc:"Soft wooden xylophone", play:function(g){ [392,494,587,784].forEach(function(f,i){ tone(f,"triangle",i*0.11,0.5,g*0.5); }); }}
 };
 function unlockedGain(gainVal){ return Math.max(0.001, Math.min(1, gainVal==null?0.5:gainVal)); }
 /* Play the admin-uploaded custom alarm clip once (fire-and-forget), returns the Audio element. */
@@ -4291,7 +4576,9 @@ function fireAlarm(reminder){
       (holdMs>0 ?
         '<button class="hold-btn" id="alarmDismissBtn"><div class="hold-fill" id="alarmHoldFill"></div><span>Hold to Stop</span></button>' :
         '<button class="btn block" data-action="dismissAlarm">Got it, done ✓</button>')+
-      (canSnooze ? '<button class="btn ghost sm" data-action="snoozeAlarm" data-id="'+reminder.id+'" style="margin-top:8px;">Snooze 5 min</button>' :
+      (canSnooze ? '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px;">'+
+        [5,10,15,30].map(m=>'<button class="btn ghost sm" data-action="snoozeAlarm" data-id="'+reminder.id+'" data-v="'+m+'">Snooze '+m+'m</button>').join("")+
+        '</div>' :
         '<div class="alarm-nosnooze">No snoozing on '+level+' alerts — you\'ve got this 💪</div>')+
     '</div>';
   document.body.appendChild(overlay);
@@ -4324,6 +4611,7 @@ function dismissAlarm(){
 function checkReminders(){
   if(!state || !state.profile.onboarded) return;
   syncAllAlertsToServer(false);
+  maybeAutoSyncGoogle();
   if(document.getElementById("alarmOverlay")) return;
   const now = new Date();
   const nowHM = String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
@@ -4573,6 +4861,12 @@ document.addEventListener("click", async function(e){
       refreshDashOrderList();
       break;
     }
+    case "triggerInstallPrompt": {
+      if(!window._deferredInstallPrompt){ toast("No install prompt available right now"); return; }
+      window._deferredInstallPrompt.prompt();
+      window._deferredInstallPrompt.userChoice.then(function(){ window._deferredInstallPrompt = null; render(); });
+      break;
+    }
     case "saveNotifyContact": {
       state.profile.notifyEmail = document.getElementById("set_notifyEmail").value.trim();
       state.profile.notifyPhone = document.getElementById("set_notifyPhone").value.trim();
@@ -4591,6 +4885,43 @@ document.addEventListener("click", async function(e){
       state.profile.twilioFromNumber = document.getElementById("set_twilioFrom").value.trim();
       saveState(); render();
       toast("Provider keys saved");
+      break;
+    }
+    case "connectGoogleCalendar": {
+      const key = ensureGoogleSyncKey();
+      location.href = GOOGLE_CONNECT_URL + "?key=" + encodeURIComponent(key);
+      break;
+    }
+    case "toggleGoogleImport": {
+      state.profile.googleImportEnabled = !state.profile.googleImportEnabled;
+      if(!state.profile.googleImportEnabled || !state.profile.googleExportEnabled) state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      break;
+    }
+    case "toggleGoogleExport": {
+      state.profile.googleExportEnabled = !state.profile.googleExportEnabled;
+      if(!state.profile.googleImportEnabled || !state.profile.googleExportEnabled) state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      break;
+    }
+    case "toggleGoogleTwoWay": {
+      const on = !state.profile.googleTwoWaySync;
+      state.profile.googleTwoWaySync = on;
+      state.profile.googleImportEnabled = on;
+      state.profile.googleExportEnabled = on;
+      saveState(); render();
+      break;
+    }
+    case "syncGoogleNow": { syncGoogleCalendarNow(false); break; }
+    case "disconnectGoogleCalendar": {
+      if(!confirm("Disconnect Google Calendar? Already-imported events stay in your Planner, but syncing stops.")) break;
+      googleCalendarApi("disconnect").catch(()=>{});
+      state.profile.googleCalendarConnected = false;
+      state.profile.googleImportEnabled = false;
+      state.profile.googleExportEnabled = false;
+      state.profile.googleTwoWaySync = false;
+      saveState(); render();
+      toast("Disconnected");
       break;
     }
     case "pickCheckInFrequency": {
@@ -5506,6 +5837,7 @@ document.addEventListener("click", async function(e){
     case "setTheme": state.profile.theme=v; saveState(); render(); break;
     case "pickAccent": state.profile.accent=v; saveState(); render(); break;
     case "pickAlertSound": { state.profile.alertSound = v; saveState(); render(); previewAlertSound(v); break; }
+    case "pickDefaultSnooze": { state.profile.defaultSnoozeMinutes = Number(v)||5; saveState(); render(); break; }
     case "requestNotificationPermission": requestNotificationPermission(); break;
     case "saveSupabaseConfig": {
       state.profile.supabaseUrl = document.getElementById("set_sbUrl").value.trim();
@@ -5554,17 +5886,35 @@ document.addEventListener("click", async function(e){
       break;
     }
 
+    case "dismissMissedAlarm": {
+      missedAlarmsCache = missedAlarmsCache.filter(r=>!(r.id===id && r._date===v));
+      refreshMissedAlarmsList();
+      break;
+    }
+    case "snoozeMissedAlarm": {
+      const item = missedAlarmsCache.find(r=>r.id===id && r._date===v);
+      missedAlarmsCache = missedAlarmsCache.filter(r=>!(r.id===id && r._date===v));
+      refreshMissedAlarmsList();
+      if(item){
+        const mins = state.profile.defaultSnoozeMinutes||5;
+        toast("Will remind you again in "+mins+" minutes");
+        setTimeout(()=>{ if(!document.getElementById("alarmOverlay")) fireAlarm(item); }, mins*60000);
+      }
+      break;
+    }
+    case "dismissAllMissedAlarms": { missedAlarmsCache=[]; closeModal(); break; }
     case "dismissAlarm": dismissAlarm(); break;
     case "snoozeAlarm": {
       const rid = id;
+      const mins = Math.max(1, Number(v)||state.profile.defaultSnoozeMinutes||5);
       const key = rid+"_"+todayStr();
       state.profile.snoozeCounts = state.profile.snoozeCounts || {};
       state.profile.snoozeCounts[key] = (state.profile.snoozeCounts[key]||0)+1;
       state.profile.snoozedReminders = state.profile.snoozedReminders || {};
-      state.profile.snoozedReminders[rid] = new Date(Date.now()+5*60000).toISOString();
+      state.profile.snoozedReminders[rid] = new Date(Date.now()+mins*60000).toISOString();
       saveState();
       dismissAlarm();
-      toast("Snoozed for 5 minutes");
+      toast("Snoozed for "+mins+" minutes");
       break;
     }
   }
