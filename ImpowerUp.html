@@ -877,25 +877,47 @@ function checkGoogleOAuthReturn(){
     history.replaceState(null, "", location.pathname+"#/settings");
   }
 }
-function googleCalendarCardHtml(){
+function calendarSyncCardHtml(){
   const connected = !!state.profile.googleCalendarConnected;
   const lastSync = state.profile.lastGoogleSync ? (fmtDatePretty(state.profile.lastGoogleSync.slice(0,10))+" "+fmtTime12(new Date(state.profile.lastGoogleSync).toTimeString().slice(0,5))) : "Never";
+  let html = '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>';
+
+  html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Google Calendar — live two-way sync</p>';
   if(!connected){
-    return '<div class="card" style="margin-top:14px;"><h2>📅 Google Calendar</h2>'+
-      '<p class="hc-meta">Import your Google Calendar events into Planner, and/or send your ImpowerUp tasks &amp; events to Google Calendar.</p>'+
-      '<button class="btn secondary sm" style="margin-top:8px;" data-action="connectGoogleCalendar">🔗 Continue with Google</button>'+
+    html += '<p class="hc-meta">Import your Google Calendar events into Planner, and/or send your ImpowerUp tasks &amp; events to Google Calendar.</p>'+
+      '<button class="btn secondary sm" style="margin-top:8px;" data-action="connectGoogleCalendar">🔗 Continue with Google</button>';
+  } else {
+    html += '<p class="hc-meta">✅ Connected — last synced '+escapeHtml(lastSync)+'</p>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
+      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
+      '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
+      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
+      '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
+      '<button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button>'+
       '</div>';
   }
-  return '<div class="card" style="margin-top:14px;"><h2>📅 Google Calendar</h2>'+
-    '<p class="hc-meta">✅ Connected — last synced '+escapeHtml(lastSync)+'</p>'+
-    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
-    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
-    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
-    '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
-    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
-    '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
-    '<button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button>'+
-    '</div></div>';
+
+  html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  html += '<p class="hc-meta" style="font-weight:700;">Outlook / Apple Calendar / other — .ics import &amp; export</p>'+
+    '<p class="hc-meta">Google Calendar above syncs live. For Outlook, Apple Calendar, or any other calendar app, use a standard .ics file to move events in either direction — these links aren\'t live, so re-export/re-import any time you want them to catch up.</p>'+
+    '<p class="hc-meta" style="font-weight:700;margin-top:12px;">Send ImpowerUp alerts to Outlook/Apple/other</p>'+
+    '<button class="btn secondary block" data-action="exportICS">Export Alerts (.ics)</button>'+
+    '<div class="hc-meta" style="margin-top:10px;line-height:1.6;">'+
+    '<b>Outlook:</b> File → Open &amp; Export → Import/Export → Import an iCalendar (.ics) file.<br>'+
+    '<b>Apple Calendar:</b> double-click the downloaded file, or File → Import.'+
+    '</div>'+
+    '<p class="hc-meta" style="font-weight:700;margin-top:16px;">Bring Outlook/Apple/other events into ImpowerUp</p>'+
+    '<p class="hc-meta">Export your calendar as .ics from that app first, then import it here:</p>'+
+    '<div class="hc-meta" style="margin-bottom:8px;line-height:1.6;">'+
+    '<b>Outlook:</b> File → Open &amp; Export → Import/Export → Export to a file → iCalendar (.ics).<br>'+
+    '<b>Apple Calendar:</b> select a calendar in the sidebar → File → Export → Export.'+
+    '</div>'+
+    '<button class="btn secondary block" data-action="importICSFile">Import Calendar (.ics)</button>'+
+    '<input type="file" id="importIcsFile" accept=".ics,text/calendar" style="display:none;">';
+
+  html += '</div>';
+  return html;
 }
 async function syncAllAlertsToServer(force){
   if(!pushBackendConfigured() || !state.profile.pushEnabled) return;
@@ -4228,7 +4250,7 @@ function renderSettings(){
 
   html += emailSmsNotificationsCardHtml();
 
-  html += googleCalendarCardHtml();
+  html += calendarSyncCardHtml();
 
   html += installAppCardHtml();
 
@@ -4264,15 +4286,6 @@ function renderSettings(){
     '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
 
   html += renderAllProfilesSection();
-
-  html += '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>'+
-    '<p class="hc-meta">Live two-way sync with Google/Outlook/Apple isn\'t possible here — that needs a registered API app and a hosted backend, which this offline single-file app doesn\'t have. The reliable offline equivalent: export your alerts as a standard .ics file and import it into whichever calendar you use.</p>'+
-    '<button class="btn secondary block" data-action="exportICS">Export Alerts (.ics)</button>'+
-    '<div class="hc-meta" style="margin-top:10px;line-height:1.6;">'+
-    '<b>Google Calendar:</b> Settings ⚙️ → Import & export → Import → choose the file.<br>'+
-    '<b>Apple Calendar:</b> double-click the downloaded file, or File → Import.<br>'+
-    '<b>Outlook:</b> File → Open & Export → Import/Export → Import an iCalendar (.ics) file.'+
-    '</div></div>';
 
   html += '<div class="card" style="margin-top:14px;"><h2>Your Data</h2><p class="hc-meta">Everything is stored locally in this browser. Nothing is sent to a server.</p>'+
     '<div class="modal-actions" style="margin-top:10px;">'+
@@ -4314,6 +4327,79 @@ function exportICS(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href=url; a.download="impowerup-reminders.ics"; a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ============ ICS import (Outlook / Apple Calendar / other) ============ */
+function icsUnescape(s){ return String(s).replace(/\\n/gi,"\n").replace(/\\,/g,",").replace(/\\;/g,";").replace(/\\\\/g,"\\"); }
+function unfoldICSLines(text){
+  return String(text).replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n").reduce((lines, line)=>{
+    if(/^[ \t]/.test(line) && lines.length){ lines[lines.length-1] += line.slice(1); }
+    else lines.push(line);
+    return lines;
+  }, []);
+}
+function parseICSDateTimeValue(v){
+  if(!v) return null;
+  const m = String(v).match(/^(\d{4})(\d{2})(\d{2})(T(\d{2})(\d{2})(\d{2})?Z?)?$/);
+  if(!m) return null;
+  const date = m[1]+"-"+m[2]+"-"+m[3];
+  if(!m[4]) return {date:date, time:"", allDay:true};
+  return {date:date, time:m[5]+":"+m[6], allDay:false};
+}
+function parseICSEvents(text){
+  const lines = unfoldICSLines(text);
+  const events = [];
+  let cur = null;
+  lines.forEach(function(line){
+    const trimmed = line.trim();
+    if(trimmed==="BEGIN:VEVENT"){ cur = {}; return; }
+    if(trimmed==="END:VEVENT"){ if(cur) events.push(cur); cur = null; return; }
+    if(!cur) return;
+    const idx = line.indexOf(":");
+    if(idx<0) return;
+    const left = line.slice(0,idx);
+    const value = line.slice(idx+1);
+    const prop = left.split(";")[0].toUpperCase();
+    if(prop==="SUMMARY") cur.summary = icsUnescape(value);
+    else if(prop==="DESCRIPTION") cur.description = icsUnescape(value);
+    else if(prop==="UID") cur.uid = value;
+    else if(prop==="DTSTART") cur.dtstart = value;
+  });
+  return events;
+}
+function importICSEvents(text){
+  const parsed = parseICSEvents(text);
+  const existingUids = new Set((state.customEvents||[]).map(e=>e.ics_uid).filter(Boolean));
+  let added = 0;
+  parsed.forEach(function(ev){
+    if(!ev.dtstart) return;
+    const dt = parseICSDateTimeValue(ev.dtstart);
+    if(!dt) return;
+    const uidKey = ev.uid || (ev.summary+"|"+dt.date+"|"+dt.time);
+    if(existingUids.has(uidKey)) return;
+    state.customEvents = state.customEvents||[];
+    state.customEvents.push({
+      id: uid(), date: dt.date, time: dt.time, emoji:"📥", label: ev.summary||"Imported Event", description: ev.description||"",
+      duration_minutes: 30, alarm_enabled:false, alarm_level:"moderate", notify_email:false, notify_sms:false,
+      repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week",
+      color: COLORS[5], ics_uid: uidKey, source:"ics"
+    });
+    existingUids.add(uidKey);
+    added++;
+  });
+  if(added) saveState();
+  return added;
+}
+function importICSFile(file){
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try{
+      const added = importICSEvents(ev.target.result);
+      render();
+      toast(added ? ("Imported "+added+" event"+(added===1?"":"s")) : "No new events found in that file");
+    }catch(err){ toast("Couldn't read that calendar file"); }
+  };
+  reader.readAsText(file);
 }
 
 /* ============ Photo proof capture ============ */
@@ -4915,6 +5001,7 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "syncGoogleNow": { syncGoogleCalendarNow(false); break; }
+    case "importICSFile": { document.getElementById("importIcsFile").click(); break; }
     case "disconnectGoogleCalendar": {
       if(!confirm("Disconnect Google Calendar? Already-imported events stay in your Planner, but syncing stops.")) break;
       googleCalendarApi("disconnect").catch(()=>{});
@@ -5923,6 +6010,12 @@ document.addEventListener("click", async function(e){
 });
 
 document.addEventListener("change", function(e){
+  if(e.target.id === "importIcsFile"){
+    const file = e.target.files[0];
+    if(file) importICSFile(file);
+    e.target.value = "";
+    return;
+  }
   if(e.target.id === "importFile"){
     const file = e.target.files[0];
     if(!file) return;
