@@ -1348,7 +1348,7 @@ function renderAdmin(){
     '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
     (c.is_admin?'':'<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>'+
     '<button class="btn ghost sm" data-action="openAiClientInsights" data-id="'+c.id+'">✨ Insights</button>'+
-    (c.username?'<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username)+'">🔑 Reset Password</button>':'')+
+    '<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username?("@"+c.username):(c.display_name||""))+'">🔑 Reset Password</button>'+
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
     '</div>')+'</div>').join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
@@ -1391,10 +1391,10 @@ function generateSimplePassword(){
   const n = Math.floor(1000+Math.random()*9000);
   return w.charAt(0).toUpperCase()+w.slice(1)+n;
 }
-function resetPasswordFormHtml(clientId, username){
+function resetPasswordFormHtml(clientId, label){
   newClientPw = newClientPw || generateSimplePassword();
   return '<h2>🔑 Reset Password</h2>'+
-    '<p class="hc-meta">Set a new password for <b>@'+escapeHtml(username)+'</b>. Their old password will stop working immediately.</p>'+
+    '<p class="hc-meta">Set a new password for <b>'+escapeHtml(label||"this client")+'</b>. Their old password will stop working immediately.</p>'+
     '<div class="field"><label>New password</label><div style="position:relative;">'+
     '<input id="rp_pw" type="text" value="'+escapeHtml(newClientPw)+'" style="padding-right:42px;">'+
     '<span data-action="regenNewClientPw" title="Generate a new password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">🎲</span>'+
@@ -1402,7 +1402,7 @@ function resetPasswordFormHtml(clientId, username){
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveResetPassword" data-id="'+clientId+'" style="flex:1">Save New Password</button></div>';
 }
-function openResetPasswordForm(clientId, username){ newClientPw = generateSimplePassword(); openModal(resetPasswordFormHtml(clientId, username)); }
+function openResetPasswordForm(clientId, label){ newClientPw = generateSimplePassword(); openModal(resetPasswordFormHtml(clientId, label)); }
 function convertToEmailFormHtml(clientId, displayName){
   newClientPw = newClientPw || generateSimplePassword();
   return '<h2>✉️ Give Real Email Login</h2>'+
