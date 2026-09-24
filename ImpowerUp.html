@@ -1166,7 +1166,8 @@ function renderAdmin(){
     return topbarHtml("🛡️ Admin","View or edit any client's data.")+'<div class="empty"><div class="big">⏳</div>Loading client list…</div>';
   }
   let html = topbarHtml("🛡️ Admin","View or edit any client's data.");
-  html += '<button class="btn block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client</button>';
+  html += '<button class="btn block" style="margin-bottom:10px;" data-action="adminOpenInviteForm">✉️ Invite New Client by Email</button>';
+  html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
   if(!adminClientList.length){ html += emptyState("👥","No clients yet","Use + New Client above to set one up with a username and password."); return html; }
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
@@ -1662,8 +1663,10 @@ function bootApp(){
     activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else if(profiles.length===1 && !profiles[0].pin && profiles[0].id!==DEMO_PROFILE_ID){
     activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
-  } else {
+  } else if(profiles.length>0){
     renderProfilePicker();
+  } else {
+    renderLoginGate();
   }
 }
 /* ============ Missed alarms (shown once on app open if any fired while closed) ============ */
@@ -1765,10 +1768,127 @@ function renderProfilePicker(){
     '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Who\'s using ImpowerUp?</h1><p class="subtitle">Everyone gets their own private space on this device.</p>'+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">'+
     profiles.map(p=>'<button class="btn secondary block" style="justify-content:flex-start;font-size:15px;padding:14px;" data-action="selectProfile" data-id="'+p.id+'">'+(p.emoji||"🙂")+' '+escapeHtml(p.nickname||p.firstName||"Profile")+(p.pin?' 🔒':'')+'</button>').join("")+
-    '</div><button class="btn block" style="margin-top:14px;" data-action="openNewProfileForm">+ Add Profile</button>'+
+    '</div><button class="btn block" style="margin-top:14px;" data-action="goToLoginGate">+ Log In / Create Profile</button>'+
     '<button class="btn ghost block" style="margin-top:6px;" data-action="viewDemoProfile">🎬 View a Demo Profile</button>'+
     '</div></div></div>';
   document.getElementById("app").innerHTML = html;
+}
+function renderLoginGate(){
+  document.body.setAttribute("data-theme", effectivePickerTheme());
+  let html = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;position:relative;">'+
+    '<button class="icon-btn" style="position:absolute;top:20px;right:20px;" data-action="openPickerSettings" title="Display settings">⚙️</button>'+
+    '<div class="picker-grid" style="max-width:880px;width:100%;">'+
+    '<div class="card">'+samplePreviewHtml()+'</div>'+
+    '<div class="card" style="text-align:center;">'+
+    '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Welcome to ImpowerUp</h1><p class="subtitle">Log in to your account, or use an invite code from your coach to get started.</p>'+
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-top:16px;">'+
+    '<button class="btn block" data-action="openLoginGateForm">🔐 Log In</button>'+
+    '<button class="btn secondary block" data-action="openCreateProfileForm">✨ Create Profile</button>'+
+    '</div>'+
+    (loadProfiles().length ? '<button class="btn ghost block" style="margin-top:10px;" data-action="backToProfilePicker">← Switch device profile</button>' : '')+
+    '<button class="btn ghost block" style="margin-top:6px;" data-action="viewDemoProfile">🎬 View a Demo Profile</button>'+
+    '</div></div></div>';
+  document.getElementById("app").innerHTML = html;
+}
+function loginGateLoginFormHtml(){
+  return '<h2>🔐 Log In</h2>'+
+    '<p class="hc-meta">Sign in as an admin or as an existing client — same form either way.</p>'+
+    '<div class="field"><label>Email</label><input id="lg_email" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="field"><label>Password</label><div style="position:relative;">'+
+    '<input id="lg_pw" type="password" placeholder="Your password" style="padding-right:42px;">'+
+    '<span data-action="toggleLgPwVisibility" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="doCloudLoginFresh" style="flex:1">Log In</button></div>';
+}
+function createProfileFormHtml(){
+  return '<h2>✨ Create Profile</h2>'+
+    '<p class="hc-meta">Enter the invite code your coach sent, along with the same email address, to set up your account and choose a password.</p>'+
+    '<div class="field"><label>Email</label><input id="cp_email" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="field"><label>Invite code</label><input id="cp_code" type="text" placeholder="e.g. AB12CD34" autocapitalize="off" autocorrect="off" style="text-transform:uppercase;"></div>'+
+    '<div class="field"><label>Your name</label><input id="cp_name" type="text" placeholder="First name"></div>'+
+    '<div class="field"><label>Password</label><input id="cp_pw" type="password" placeholder="Choose a password"></div>'+
+    '<div class="field"><label>Confirm password</label><input id="cp_pw2" type="password" placeholder="Re-enter password"></div>'+
+    '<p class="hc-meta">Don\'t have a code? Ask your coach to send you an invite.</p>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="doRedeemInvite" style="flex:1">Create Profile</button></div>';
+}
+async function completeCloudLogin(json, displayNameHint){
+  const userId = json.user.id, userEmail = json.user.email;
+  let profiles = loadProfiles();
+  let p = profiles.find(x=>x.cloudUserId===userId);
+  if(!p){
+    p = { id: uid(), firstName: displayNameHint || displayLoginIdentifier(userEmail), lastName:"", nickname:"", emoji:"🙂", pin:null, cloudUserId:userId };
+    profiles.push(p); saveProfiles(profiles);
+  }
+  activateProfile(p.id);
+  applySession(json);
+  const flags = await acctFetchProfileFlags();
+  state.profile.isCloudAdmin = !!(flags && flags.is_admin);
+  if(flags && flags.display_name && !state.profile.firstName) state.profile.firstName = flags.display_name;
+  state.profile.cloudSyncEnabled = true;
+  state.profile.onboarded = true;
+  saveState();
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+userId+"&select=state_json", {headers: acctHeaders(true)});
+    if(res.ok){
+      const rows = await res.json();
+      if(rows[0] && rows[0].state_json){
+        const snap = rows[0].state_json;
+        const sess = state.profile.cloudSession, isAdmin = state.profile.isCloudAdmin;
+        const fresh = defaultState();
+        state = Object.assign(fresh, snap);
+        state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+        state.profile.cloudSession = sess;
+        state.profile.isCloudAdmin = isAdmin;
+        state.profile.cloudSyncEnabled = true;
+        state.profile.onboarded = true;
+        saveState();
+      }
+    }
+  }catch(e){}
+  _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
+  closeModal();
+  location.hash = "#/home";
+  render();
+  toast("Logged in!");
+}
+async function sendInviteCodeFn(email, displayName){
+  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/send-invite", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({email, display_name: displayName})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't send that invite");
+  return json;
+}
+async function redeemInviteFn(email, code, password, displayName){
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/redeem-invite", {
+    method:"POST",
+    headers: {apikey: SB_ACCOUNTS_KEY, "Content-Type":"application/json"},
+    body: JSON.stringify({email, code, password, display_name: displayName})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "That invite code didn't work");
+  return json;
+}
+function inviteClientFormHtml(){
+  return '<h2>✉️ Invite New Client</h2>'+
+    '<p class="hc-meta">Sends a one-time invite code to their email so they can create their own account and set a password.</p>'+
+    '<div class="field"><label>Client email</label><input id="inv_email" type="email" placeholder="client@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="field"><label>Client name (optional)</label><input id="inv_name" type="text" placeholder="e.g. Jordan Smith"></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="adminSendInvite" style="flex:1">Send Invite</button></div>';
+}
+function inviteResultModalHtml(email, code, emailed){
+  return '<h2>✅ Invite Created</h2>'+
+    '<p class="hc-meta">'+(emailed ? ("Emailed to <b>"+escapeHtml(email)+"</b>. You can also share the code below directly.") : "Email sending isn't set up yet, so share this code with them directly:")+'</p>'+
+    '<div class="field"><label>Invite code</label><input id="inv_result_code" type="text" value="'+escapeHtml(code)+'" readonly style="font-size:20px;font-weight:800;text-align:center;letter-spacing:2px;"></div>'+
+    '<p class="hc-meta">They\'ll enter this code with the same email ('+escapeHtml(email)+') on the Create Profile screen. Expires in 14 days.</p>'+
+    '<div class="modal-actions"><button class="btn secondary sm" data-action="copyInviteCode" data-v="'+escapeHtml(code)+'" style="flex:1">📋 Copy Code</button>'+
+    '<button class="btn" data-action="closeModal" style="flex:1">Done</button></div>';
 }
 function newProfileFormHtml(saveAction){
   saveAction = saveAction || "saveNewProfile";
@@ -2365,7 +2485,7 @@ let _lastRenderedRoute = null;
 function render(){
   const hash = location.hash;
   if(hash.indexOf("#share=")===0){ renderMentorView(decodeURIComponent(hash.slice(7))); return; }
-  if(!state){ renderProfilePicker(); return; }
+  if(!state){ if(loadProfiles().length>0) renderProfilePicker(); else renderLoginGate(); return; }
   applyTheme();
   if(!state.profile.onboarded){ renderOnboarding(); return; }
   const route = currentRoute();
@@ -6067,6 +6187,63 @@ document.addEventListener("click", async function(e){
       if(currentRoute()==="admin" || currentRoute()==="assessments") location.hash = "#/home";
       render();
       toast("Logged out");
+      break;
+    }
+    case "goToLoginGate": renderLoginGate(); break;
+    case "backToProfilePicker": renderProfilePicker(); break;
+    case "openLoginGateForm": openModal(loginGateLoginFormHtml()); break;
+    case "openCreateProfileForm": openModal(createProfileFormHtml()); break;
+    case "toggleLgPwVisibility": {
+      const inp = document.getElementById("lg_pw");
+      if(inp){
+        const showing = inp.type === "text";
+        inp.type = showing ? "password" : "text";
+        t.textContent = showing ? "👁️" : "🙈";
+      }
+      break;
+    }
+    case "doCloudLoginFresh": {
+      const email = document.getElementById("lg_email").value.trim();
+      const pw = document.getElementById("lg_pw").value;
+      if(!email || !pw){ toast("Enter your email and password"); return; }
+      try{
+        const json = await acctSignIn(email, pw);
+        await completeCloudLogin(json);
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "doRedeemInvite": {
+      const email = document.getElementById("cp_email").value.trim();
+      const code = document.getElementById("cp_code").value.trim();
+      const pw = document.getElementById("cp_pw").value;
+      const pw2 = document.getElementById("cp_pw2").value;
+      const displayName = document.getElementById("cp_name").value.trim();
+      if(!email || !code || !pw){ toast("Fill in email, invite code, and password"); return; }
+      if(pw.length < 6){ toast("Password must be at least 6 characters"); return; }
+      if(pw !== pw2){ toast("Passwords don't match"); return; }
+      try{
+        await redeemInviteFn(email, code, pw, displayName);
+        const json = await acctSignIn(email, pw);
+        await completeCloudLogin(json, displayName);
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "adminOpenInviteForm": openModal(inviteClientFormHtml()); break;
+    case "adminSendInvite": {
+      const email = document.getElementById("inv_email").value.trim();
+      const displayName = document.getElementById("inv_name").value.trim();
+      if(!email){ toast("Enter an email address"); return; }
+      try{
+        const res = await sendInviteCodeFn(email, displayName);
+        openModal(inviteResultModalHtml(email, res.code, res.emailed));
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "copyInviteCode": {
+      const code = v || (document.getElementById("inv_result_code")||{}).value || "";
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(code).then(()=>toast("Code copied")).catch(()=>toast("Couldn't copy — copy it manually"));
+      } else { toast("Copy not supported — select the code manually"); }
       break;
     }
     case "toggleCloudSync": {
