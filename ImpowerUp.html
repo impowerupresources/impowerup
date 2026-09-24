@@ -1111,7 +1111,7 @@ async function ensureFreshSession(){
 async function acctFetchProfileFlags(){
   if(!(await ensureFreshSession())) return null;
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+state.profile.cloudSession.user_id+"&select=display_name,is_admin", {headers: acctHeaders(true)});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+state.profile.cloudSession.user_id+"&select=display_name,is_admin,approved", {headers: acctHeaders(true)});
     if(!res.ok) return null;
     const rows = await res.json();
     return rows[0]||null;
@@ -1149,26 +1149,43 @@ function maybeAutoSyncCloud(){
 
 /* ---- Admin: view/edit any client's cloud data using the same app screens ---- */
 let adminClientList = null;
+let adminPendingList = null;
 let _adminOwnState = null, _adminOwnKey = null, _adminViewing = null;
 async function loadAdminClientList(){
   if(!(await ensureFreshSession())) return [];
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?select=id,display_name,username,is_admin,created_at,ai_insights_text,ai_insights_generated_at&order=created_at.desc", {headers: acctHeaders(true)});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?approved=eq.true&select=id,display_name,username,is_admin,created_at,ai_insights_text,ai_insights_generated_at&order=created_at.desc", {headers: acctHeaders(true)});
+    if(!res.ok) return [];
+    return await res.json();
+  }catch(e){ return []; }
+}
+async function loadAdminPendingList(){
+  if(!(await ensureFreshSession())) return [];
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?approved=eq.false&select=id,display_name,created_at&order=created_at.desc", {headers: acctHeaders(true)});
     if(!res.ok) return [];
     return await res.json();
   }catch(e){ return []; }
 }
 function renderAdmin(){
   if(!state.profile.isCloudAdmin) return renderHome();
-  if(adminClientList===null){
-    adminClientList = [];
-    loadAdminClientList().then(list=>{ adminClientList = list; render(); });
+  if(adminClientList===null || adminPendingList===null){
+    adminClientList = adminClientList || []; adminPendingList = adminPendingList || [];
+    Promise.all([loadAdminClientList(), loadAdminPendingList()]).then(([list,pending])=>{ adminClientList = list; adminPendingList = pending; render(); });
     return topbarHtml("🛡️ Admin","View or edit any client's data.")+'<div class="empty"><div class="big">⏳</div>Loading client list…</div>';
   }
   let html = topbarHtml("🛡️ Admin","View or edit any client's data.");
-  html += '<button class="btn block" style="margin-bottom:10px;" data-action="adminOpenInviteForm">✉️ Invite New Client by Email</button>';
+  if(adminPendingList.length){
+    html += '<div class="card" style="margin-bottom:14px;"><h2>⏳ Pending Approvals ('+adminPendingList.length+')</h2>'+
+      adminPendingList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">👤</div>'+
+        '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||"New request")+'</div>'+
+        '<div class="hc-meta">Requested '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn sm" data-action="adminApproveClient" data-id="'+c.id+'">✅ Approve</button>'+
+        '<button class="btn ghost sm" data-action="adminRejectClient" data-id="'+c.id+'">✕ Reject</button></div></div>').join("")+
+      '</div>';
+  }
   html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
-  if(!adminClientList.length){ html += emptyState("👥","No clients yet","Use + New Client above to set one up with a username and password."); return html; }
+  if(!adminClientList.length){ html += emptyState("👥","No clients yet","Approve a pending request above, or use + New Client to set one up with a username and password."); return html; }
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
     '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
@@ -1657,6 +1674,7 @@ function renderAssessTake(){
 
 function bootApp(){
   setupPwaMeta();
+  if(checkPasswordRecoveryReturn()) return;
   const profiles = loadProfiles();
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
@@ -1780,10 +1798,10 @@ function renderLoginGate(){
     '<div class="picker-grid" style="max-width:880px;width:100%;">'+
     '<div class="card">'+samplePreviewHtml()+'</div>'+
     '<div class="card" style="text-align:center;">'+
-    '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Welcome to ImpowerUp</h1><p class="subtitle">Log in to your account, or use an invite code from your coach to get started.</p>'+
+    '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Welcome to ImpowerUp</h1><p class="subtitle">Log in to your account, or request access to get started.</p>'+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:16px;">'+
     '<button class="btn block" data-action="openLoginGateForm">🔐 Log In</button>'+
-    '<button class="btn secondary block" data-action="openCreateProfileForm">✨ Create Profile</button>'+
+    '<button class="btn secondary block" data-action="openCreateProfileForm">✨ Request Access</button>'+
     '</div>'+
     (loadProfiles().length ? '<button class="btn ghost block" style="margin-top:10px;" data-action="backToProfilePicker">← Switch device profile</button>' : '')+
     '<button class="btn ghost block" style="margin-top:6px;" data-action="viewDemoProfile">🎬 View a Demo Profile</button>'+
@@ -1798,23 +1816,43 @@ function loginGateLoginFormHtml(){
     '<input id="lg_pw" type="password" placeholder="Your password" style="padding-right:42px;">'+
     '<span data-action="toggleLgPwVisibility" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
     '</div></div>'+
+    '<button class="btn ghost sm" style="padding:4px 0;margin-top:2px;" data-action="openForgotPasswordForm">Forgot password?</button>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="doCloudLoginFresh" style="flex:1">Log In</button></div>';
 }
 function createProfileFormHtml(){
-  return '<h2>✨ Create Profile</h2>'+
-    '<p class="hc-meta">Enter the invite code your coach sent, along with the same email address, to set up your account and choose a password.</p>'+
+  return '<h2>✨ Request Access</h2>'+
+    '<p class="hc-meta">Set up your email and password now. Your admin reviews and approves each request before you can log in.</p>'+
     '<div class="field"><label>Email</label><input id="cp_email" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off"></div>'+
-    '<div class="field"><label>Invite code</label><input id="cp_code" type="text" placeholder="e.g. AB12CD34" autocapitalize="off" autocorrect="off" style="text-transform:uppercase;"></div>'+
     '<div class="field"><label>Your name</label><input id="cp_name" type="text" placeholder="First name"></div>'+
     '<div class="field"><label>Password</label><input id="cp_pw" type="password" placeholder="Choose a password"></div>'+
     '<div class="field"><label>Confirm password</label><input id="cp_pw2" type="password" placeholder="Re-enter password"></div>'+
-    '<p class="hc-meta">Don\'t have a code? Ask your coach to send you an invite.</p>'+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
-    '<button class="btn" data-action="doRedeemInvite" style="flex:1">Create Profile</button></div>';
+    '<button class="btn" data-action="doRequestAccess" style="flex:1">Request Access</button></div>';
+}
+function forgotPasswordFormHtml(){
+  return '<h2>🔑 Forgot Password</h2>'+
+    '<p class="hc-meta">Enter your account email and we\'ll send a password reset link.</p>'+
+    '<div class="field"><label>Email</label><input id="fp_email" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="doSendPasswordReset" style="flex:1">Send Reset Link</button></div>';
+}
+function setNewPasswordFormHtml(){
+  return '<h2>🔑 Set New Password</h2>'+
+    '<p class="hc-meta">Choose a new password for your account.</p>'+
+    '<div class="field"><label>New password</label><input id="np_pw" type="password" placeholder="New password"></div>'+
+    '<div class="field"><label>Confirm password</label><input id="np_pw2" type="password" placeholder="Re-enter password"></div>'+
+    '<div class="modal-actions"><button class="btn" style="flex:1" data-action="doSetNewPassword">Save New Password</button></div>';
 }
 async function completeCloudLogin(json, displayNameHint){
   const userId = json.user.id, userEmail = json.user.email;
+  const flagsPreCheck = await fetchProfileFlagsByToken(json.access_token, userId);
+  if(flagsPreCheck && flagsPreCheck.approved===false){
+    try{ await fetch(SB_ACCOUNTS_URL+"/auth/v1/logout", {method:"POST", headers:{apikey:SB_ACCOUNTS_KEY, Authorization:"Bearer "+json.access_token}}); }catch(e){}
+    closeModal();
+    toast("Your account is still waiting on admin approval");
+    return;
+  }
   let profiles = loadProfiles();
   let p = profiles.find(x=>x.cloudUserId===userId);
   if(!p){
@@ -1823,9 +1861,8 @@ async function completeCloudLogin(json, displayNameHint){
   }
   activateProfile(p.id);
   applySession(json);
-  const flags = await acctFetchProfileFlags();
-  state.profile.isCloudAdmin = !!(flags && flags.is_admin);
-  if(flags && flags.display_name && !state.profile.firstName) state.profile.firstName = flags.display_name;
+  state.profile.isCloudAdmin = !!(flagsPreCheck && flagsPreCheck.is_admin);
+  if(flagsPreCheck && flagsPreCheck.display_name && !state.profile.firstName) state.profile.firstName = flagsPreCheck.display_name;
   state.profile.cloudSyncEnabled = true;
   state.profile.onboarded = true;
   saveState();
@@ -1853,42 +1890,70 @@ async function completeCloudLogin(json, displayNameHint){
   render();
   toast("Logged in!");
 }
-async function sendInviteCodeFn(email, displayName){
-  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
-  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/send-invite", {
-    method:"POST",
-    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
-    body: JSON.stringify({email, display_name: displayName})
-  });
-  const json = await res.json();
-  if(!res.ok) throw new Error(json.error || "Couldn't send that invite");
-  return json;
+async function fetchProfileFlagsByToken(token, userId){
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+userId+"&select=display_name,is_admin,approved", {headers:{apikey:SB_ACCOUNTS_KEY, Authorization:"Bearer "+token}});
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return rows[0]||null;
+  }catch(e){ return null; }
 }
-async function redeemInviteFn(email, code, password, displayName){
-  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/redeem-invite", {
+async function requestAccessFn(email, password, displayName){
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/request-access", {
     method:"POST",
     headers: {apikey: SB_ACCOUNTS_KEY, "Content-Type":"application/json"},
-    body: JSON.stringify({email, code, password, display_name: displayName})
+    body: JSON.stringify({email, password, display_name: displayName})
   });
   const json = await res.json();
-  if(!res.ok) throw new Error(json.error || "That invite code didn't work");
+  if(!res.ok) throw new Error(json.error || "Couldn't submit that request");
   return json;
 }
-function inviteClientFormHtml(){
-  return '<h2>✉️ Invite New Client</h2>'+
-    '<p class="hc-meta">Sends a one-time invite code to their email so they can create their own account and set a password.</p>'+
-    '<div class="field"><label>Client email</label><input id="inv_email" type="email" placeholder="client@example.com" autocapitalize="off" autocorrect="off"></div>'+
-    '<div class="field"><label>Client name (optional)</label><input id="inv_name" type="text" placeholder="e.g. Jordan Smith"></div>'+
-    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
-    '<button class="btn" data-action="adminSendInvite" style="flex:1">Send Invite</button></div>';
+async function adminApproveClientFn(userId, action){
+  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/admin-approve-client", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({user_id: userId, action})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't update that request");
+  return json;
 }
-function inviteResultModalHtml(email, code, emailed){
-  return '<h2>✅ Invite Created</h2>'+
-    '<p class="hc-meta">'+(emailed ? ("Emailed to <b>"+escapeHtml(email)+"</b>. You can also share the code below directly.") : "Email sending isn't set up yet, so share this code with them directly:")+'</p>'+
-    '<div class="field"><label>Invite code</label><input id="inv_result_code" type="text" value="'+escapeHtml(code)+'" readonly style="font-size:20px;font-weight:800;text-align:center;letter-spacing:2px;"></div>'+
-    '<p class="hc-meta">They\'ll enter this code with the same email ('+escapeHtml(email)+') on the Create Profile screen. Expires in 14 days.</p>'+
-    '<div class="modal-actions"><button class="btn secondary sm" data-action="copyInviteCode" data-v="'+escapeHtml(code)+'" style="flex:1">📋 Copy Code</button>'+
-    '<button class="btn" data-action="closeModal" style="flex:1">Done</button></div>';
+async function acctSendPasswordReset(email){
+  const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/recover?redirect_to="+encodeURIComponent(location.origin+location.pathname), {
+    method:"POST",
+    headers: {apikey: SB_ACCOUNTS_KEY, "Content-Type":"application/json"},
+    body: JSON.stringify({email})
+  });
+  if(!res.ok){ const json = await res.json().catch(()=>({})); throw new Error(json.error_description || json.msg || "Couldn't send a reset email"); }
+  return true;
+}
+let _recoveryAccessToken = null;
+function checkPasswordRecoveryReturn(){
+  const hash = location.hash || "";
+  if(hash.indexOf("type=recovery") >= 0 && hash.indexOf("access_token=") >= 0){
+    const raw = hash.replace(/^#\/?/, "");
+    const params = new URLSearchParams(raw);
+    const token = params.get("access_token");
+    if(token){
+      _recoveryAccessToken = token;
+      history.replaceState(null, "", location.pathname);
+      document.body.setAttribute("data-theme", effectivePickerTheme());
+      document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;"><div class="card" style="max-width:420px;width:100%;">'+setNewPasswordFormHtml()+'</div></div>';
+      return true;
+    }
+  }
+  return false;
+}
+async function acctSetNewPassword(token, password){
+  const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/user", {
+    method:"PUT",
+    headers: {apikey: SB_ACCOUNTS_KEY, Authorization:"Bearer "+token, "Content-Type":"application/json"},
+    body: JSON.stringify({password})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error_description || json.msg || "Couldn't set your new password");
+  return json;
 }
 function newProfileFormHtml(saveAction){
   saveAction = saveAction || "saveNewProfile";
@@ -3468,6 +3533,68 @@ function collectBlocksFromDOM(){
 }
 function rerenderBlockList(){ document.getElementById("blockList").innerHTML = renderBlockRows(templateFormBlocks); }
 
+/* Visual template gallery (card grid) */
+function templateBlockIcon(b){
+  if(b.type==="habit"){ const h=state.habits.find(x=>x.id===b.habit_id); return h?(h.emoji||"✅"):"✅"; }
+  if(b.type==="reminder") return "🔔";
+  return "⏰";
+}
+function templateBlockLabel(b){
+  if(b.type==="habit"){ const h=state.habits.find(x=>x.id===b.habit_id); return h?h.title:"Habit"; }
+  if(b.type==="reminder"){ const r=state.reminders.find(x=>x.id===b.reminder_id); return r?r.title:"Reminder"; }
+  return b.label||"Event";
+}
+function templateBlockHasAlarm(b){
+  if(b.type==="reminder") return true;
+  if(b.type==="habit"){ const h=state.habits.find(x=>x.id===b.habit_id); return !!(h && h.alarm_reminder_id); }
+  return !!b.alarm_enabled;
+}
+function templateAlarmCount(tm){ return (tm.time_blocks||[]).filter(templateBlockHasAlarm).length; }
+function templateCardHtml(tm){
+  const blocks = (tm.time_blocks||[]).slice().sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  const alarmCount = templateAlarmCount(tm);
+  const preview = blocks.slice(0,5);
+  const extra = blocks.length - preview.length;
+  const rule = (state.templateRules||[]).find(r=>r.template_id===tm.id);
+  const searchBlob = (tm.name+" "+blocks.map(templateBlockLabel).join(" ")).toLowerCase().replace(/"/g,"");
+  return '<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;" data-tmplcard data-search="'+escapeHtml(searchBlob)+'">'+
+    '<div style="height:5px;background:'+tm.color+';"></div>'+
+    '<div style="padding:14px;flex:1;display:flex;flex-direction:column;">'+
+    '<div style="display:flex;align-items:flex-start;gap:10px;">'+
+    '<div class="emoji-badge" style="background:'+tm.color+'22;flex:0 0 auto;">'+tm.emoji+'</div>'+
+    '<div style="flex:1;min-width:0;"><div class="hc-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(tm.name)+'</div>'+
+    '<div class="hc-meta">'+blocks.length+' task'+(blocks.length===1?"":"s")+(rule?' · 🔁 repeats':'')+'</div></div>'+
+    '</div>'+
+    '<div class="hc-meta" style="display:flex;gap:14px;margin-top:8px;">'+
+    '<span>☑️ '+blocks.length+' tasks</span><span>🔔 '+alarmCount+' alarms</span></div>'+
+    '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;flex:1;">'+
+    (preview.length ? preview.map(b=>'<div style="display:flex;align-items:center;gap:8px;font-size:13px;">'+
+      '<span style="flex:0 0 20px;text-align:center;">'+templateBlockIcon(b)+'</span>'+
+      '<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(templateBlockLabel(b))+'</span>'+
+      (templateBlockHasAlarm(b)?'<span style="opacity:.7;">🔔</span>':'')+
+      '<span class="hc-meta" style="flex:0 0 auto;">'+fmtTime12(b.time)+'</span>'+
+      '</div>').join("") : '<p class="hc-meta">No items yet.</p>')+
+    (extra>0?'<div class="hc-meta">+'+extra+' more task'+(extra===1?"":"s")+'</div>':'')+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-top:12px;">'+
+    '<button class="btn sm" style="flex:1;" data-action="useTemplateToday" data-id="'+tm.id+'">▶ Use</button>'+
+    '<button class="btn secondary sm" style="flex:1;" data-action="openTemplateForm" data-id="'+tm.id+'">✏️ Edit</button>'+
+    '<button class="icon-btn" data-action="duplicateTemplate" data-id="'+tm.id+'" title="Duplicate">⧉</button>'+
+    '<button class="icon-btn" data-action="deleteTemplate" data-id="'+tm.id+'" title="Delete">🗑️</button>'+
+    '</div>'+
+    '</div></div>';
+}
+function templateGalleryHtml(){
+  let html = '<h2>📅 Schedule Templates</h2>'+
+    '<div class="field" style="margin-bottom:12px;"><input id="tmplSearch" type="text" placeholder="Search templates or tasks…" oninput="var q=this.value.toLowerCase();document.querySelectorAll(\'[data-tmplcard]\').forEach(function(el){el.style.display = el.getAttribute(\'data-search\').indexOf(q)>=0 ? \'\' : \'none\';});"></div>';
+  if(state.scheduleTemplates.length===0){
+    html += '<p class="hc-meta">No schedules yet — create one to get started.</p>';
+  } else {
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:12px;">'+state.scheduleTemplates.map(templateCardHtml).join("")+'</div>';
+  }
+  html += '<button class="btn block" style="margin-top:14px;" data-action="openTemplateForm">+ New Schedule</button>';
+  return html;
+}
 function openApplyTemplateModal(dateStr){
   let html = '<h2>Apply Schedule to '+fmtDatePretty(dateStr)+'</h2>';
   if(state.scheduleTemplates.length===0){
@@ -5654,18 +5781,28 @@ document.addEventListener("click", async function(e){
       toast("Stopped repeating");
       break;
     }
-    case "openManageTemplates": {
-      let html = "<h2>Schedule Templates</h2>";
-      if(state.scheduleTemplates.length===0) html += '<p class="hc-meta">No schedules yet.</p>';
-      else html += state.scheduleTemplates.map(tm=>{
-        const rule = (state.templateRules||[]).find(r=>r.template_id===tm.id);
-        const ruleMeta = rule ? ('🔁 Repeats '+(rule.days||[]).map(d=>WEEKDAY_OPTS[d][1]).join("/")+(rule.endDate?' until '+fmtDatePretty(rule.endDate):'')) : (tm.time_blocks||[]).length+' items';
-        return '<div class="habit-card"><div class="emoji-badge" style="background:'+tm.color+'22">'+tm.emoji+'</div><div class="hc-body"><div class="hc-title">'+escapeHtml(tm.name)+'</div><div class="hc-meta">'+ruleMeta+'</div></div>'+
-          '<button class="icon-btn" data-action="openTemplateRepeatForm" data-id="'+tm.id+'" title="Repeat">🔁</button>'+
-          '<button class="icon-btn" data-action="openTemplateForm" data-id="'+tm.id+'">✏️</button></div>';
-      }).join("");
-      html += '<button class="btn block" style="margin-top:12px;" data-action="openTemplateForm">+ New Schedule</button>';
-      openModal(html);
+    case "openManageTemplates": openModal(templateGalleryHtml()); break;
+    case "useTemplateToday": {
+      const date = todayStr();
+      const existing = state.dayPlans.find(dp=>dp.date===date);
+      if(existing) existing.template_id = id; else state.dayPlans.push({id:uid(), date, template_id:id});
+      saveState(); closeModal();
+      location.hash = "#/planner";
+      render();
+      toast("Schedule applied to today");
+      break;
+    }
+    case "duplicateTemplate": {
+      const tm = state.scheduleTemplates.find(x=>x.id===id);
+      if(!tm){ toast("Couldn't find that schedule"); return; }
+      const copy = JSON.parse(JSON.stringify(tm));
+      copy.id = uid();
+      copy.name = tm.name + " (Copy)";
+      copy.time_blocks = (copy.time_blocks||[]).map(b=>Object.assign({}, b, {id:uid()}));
+      state.scheduleTemplates.push(copy);
+      saveState(); closeModal();
+      openModal(templateGalleryHtml());
+      toast("Schedule duplicated");
       break;
     }
     case "openTemplateForm": openTemplateForm(id||null); break;
@@ -5684,10 +5821,12 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "deleteTemplate": {
+      if(!confirm("Delete this schedule template? This can't be undone.")) return;
       state.scheduleTemplates = state.scheduleTemplates.filter(x=>x.id!==id);
       state.dayPlans = state.dayPlans.filter(dp=>dp.template_id!==id);
       state.templateRules = (state.templateRules||[]).filter(r=>r.template_id!==id);
       saveState(); closeModal(); render();
+      toast("Schedule deleted");
       break;
     }
 
@@ -6170,6 +6309,11 @@ document.addEventListener("click", async function(e){
         const json = await acctSignIn(email, pw);
         applySession(json);
         const flags = await acctFetchProfileFlags();
+        if(flags && flags.approved===false){
+          state.profile.cloudSession = null; saveState();
+          toast("Your account is still waiting on admin approval");
+          return;
+        }
         state.profile.isCloudAdmin = !!(flags && flags.is_admin);
         saveState(); closeModal();
         _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
@@ -6212,38 +6356,53 @@ document.addEventListener("click", async function(e){
       }catch(err){ toast(err.message); }
       break;
     }
-    case "doRedeemInvite": {
+    case "doRequestAccess": {
       const email = document.getElementById("cp_email").value.trim();
-      const code = document.getElementById("cp_code").value.trim();
       const pw = document.getElementById("cp_pw").value;
       const pw2 = document.getElementById("cp_pw2").value;
       const displayName = document.getElementById("cp_name").value.trim();
-      if(!email || !code || !pw){ toast("Fill in email, invite code, and password"); return; }
+      if(!email || !pw){ toast("Fill in email and password"); return; }
       if(pw.length < 6){ toast("Password must be at least 6 characters"); return; }
       if(pw !== pw2){ toast("Passwords don't match"); return; }
       try{
-        await redeemInviteFn(email, code, pw, displayName);
-        const json = await acctSignIn(email, pw);
-        await completeCloudLogin(json, displayName);
+        await requestAccessFn(email, pw, displayName);
+        closeModal();
+        openModal('<h2>✅ Request Sent</h2><p class="hc-meta">Thanks — your request is waiting on your admin\'s approval. You\'ll be able to log in with this email and password once it\'s approved.</p><div class="modal-actions"><button class="btn" style="flex:1" data-action="closeModal">Got it</button></div>');
       }catch(err){ toast(err.message); }
       break;
     }
-    case "adminOpenInviteForm": openModal(inviteClientFormHtml()); break;
-    case "adminSendInvite": {
-      const email = document.getElementById("inv_email").value.trim();
-      const displayName = document.getElementById("inv_name").value.trim();
-      if(!email){ toast("Enter an email address"); return; }
+    case "openForgotPasswordForm": openModal(forgotPasswordFormHtml()); break;
+    case "doSendPasswordReset": {
+      const email = document.getElementById("fp_email").value.trim();
+      if(!email){ toast("Enter your email"); return; }
       try{
-        const res = await sendInviteCodeFn(email, displayName);
-        openModal(inviteResultModalHtml(email, res.code, res.emailed));
+        await acctSendPasswordReset(email);
+        closeModal();
+        toast("If that email has an account, a reset link is on its way");
       }catch(err){ toast(err.message); }
       break;
     }
-    case "copyInviteCode": {
-      const code = v || (document.getElementById("inv_result_code")||{}).value || "";
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(code).then(()=>toast("Code copied")).catch(()=>toast("Couldn't copy — copy it manually"));
-      } else { toast("Copy not supported — select the code manually"); }
+    case "doSetNewPassword": {
+      const pw = document.getElementById("np_pw").value;
+      const pw2 = document.getElementById("np_pw2").value;
+      if(!pw || pw.length < 6){ toast("Password must be at least 6 characters"); return; }
+      if(pw !== pw2){ toast("Passwords don't match"); return; }
+      if(!_recoveryAccessToken){ toast("That reset link expired — request a new one"); return; }
+      try{
+        await acctSetNewPassword(_recoveryAccessToken, pw);
+        _recoveryAccessToken = null;
+        toast("Password updated — log in with your new password");
+        renderLoginGate();
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "adminApproveClient": {
+      try{ await adminApproveClientFn(id, "approve"); toast("Approved"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
+      break;
+    }
+    case "adminRejectClient": {
+      if(!confirm("Reject and delete this request? This can't be undone.")) return;
+      try{ await adminApproveClientFn(id, "reject"); toast("Request rejected"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
       break;
     }
     case "toggleCloudSync": {
@@ -6254,7 +6413,7 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "syncNowCloud": { const ok = await syncStateToCloud(); render(); toast(ok?"Synced":"Sync failed — check your connection"); break; }
-    case "refreshAdminList": adminClientList = null; render(); break;
+    case "refreshAdminList": adminClientList = null; adminPendingList = null; render(); break;
     case "openNewClientForm": openNewClientForm(); break;
     case "regenNewClientPw": {
       newClientPw = generateSimplePassword();
