@@ -1115,16 +1115,29 @@ async function generateAiClientInsights(clientId){
   }catch(err){ toast(err.message); }
   _aiClientInsightsLoading = false; openModal(aiClientInsightsModalHtml(client));
 }
+/* Shared in-flight refresh promise so concurrent callers (e.g. Admin panel loading
+   the client list + pending list at the same time) never fire two simultaneous
+   refresh-token requests — Supabase treats a reused refresh token as a theft signal
+   and revokes the whole session, which is what produced the "Invalid session" errors. */
+let _refreshInFlight = null;
 async function acctRefreshSession(){
+  if(_refreshInFlight) return _refreshInFlight;
   const sess = state.profile.cloudSession;
   if(!sess || !sess.refresh_token) return false;
+  _refreshInFlight = (async () => {
+    try{
+      const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/token?grant_type=refresh_token", {method:"POST", headers: acctHeaders(false), body: JSON.stringify({refresh_token: sess.refresh_token})});
+      const json = await res.json();
+      if(!res.ok) return false;
+      applySession(json);
+      return true;
+    }catch(e){ return false; }
+  })();
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/auth/v1/token?grant_type=refresh_token", {method:"POST", headers: acctHeaders(false), body: JSON.stringify({refresh_token: sess.refresh_token})});
-    const json = await res.json();
-    if(!res.ok) return false;
-    applySession(json);
-    return true;
-  }catch(e){ return false; }
+    return await _refreshInFlight;
+  } finally {
+    _refreshInFlight = null;
+  }
 }
 async function ensureFreshSession(){
   const sess = state.profile.cloudSession;
@@ -2692,7 +2705,10 @@ function navHtml(active){
     const moreActive = overflowRoutes.some(r=>r.path===active);
     bottomItems += '<a href="javascript:void(0)" data-action="openMoreNav" class="'+(moreActive?"active":"")+'"><span class="ic">'+NAV_ICONS.more+'</span><span>More</span></a>';
   }
-  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+sidebarItems+'</nav>'+
+  const signOutItem = state.profile.cloudSession
+    ? '<a href="javascript:void(0)" data-action="doLogOut" style="margin-top:auto;color:var(--danger);"><span class="ic">🚪</span><span>Sign Out</span></a>'
+    : '';
+  return '<nav class="sidebar" id="sidebarNav"><div class="brand"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</div>'+sidebarItems+signOutItem+'</nav>'+
          '<nav class="bottombar">'+bottomItems+'</nav>';
 }
 function moreNavModalHtml(){
@@ -4653,8 +4669,8 @@ function accountCardHtml(){
     '<p class="hc-meta">Signed in as <b>'+escapeHtml(displayLoginIdentifier(sess.email))+'</b>'+(state.profile.isCloudAdmin?' <span class="tag">Admin</span>':'')+'</p>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">☁️ Sync this profile\'s data to the cloud</div><div class="switch '+(state.profile.cloudSyncEnabled?"on":"")+'" data-action="toggleCloudSync"></div></div>'+
     '<p class="hc-meta">'+(state.profile.cloudSyncEnabled ? ("Last synced: "+(state.profile.lastCloudSync ? new Date(state.profile.lastCloudSync).toLocaleString() : "not yet")) : "Turn this on so your mentor can see your progress.")+'</p>'+
-    '<div class="modal-actions" style="margin-top:8px;">'+(state.profile.cloudSyncEnabled?'<button class="btn secondary sm" style="flex:1" data-action="syncNowCloud">Sync Now</button>':'<div style="flex:1"></div>')+
-    '<button class="btn danger sm" style="flex:1" data-action="doLogOut">Log Out</button></div></div>';
+    (state.profile.cloudSyncEnabled?'<button class="btn secondary sm block" style="margin-top:8px;" data-action="syncNowCloud">Sync Now</button>':'')+
+    '<button class="btn danger block" style="margin-top:10px;font-size:15px;padding:13px;" data-action="doLogOut">🚪 Sign Out</button></div>';
 }
 
 /* ============ Settings ============ */
@@ -4792,11 +4808,18 @@ function renderSettings(){
       ).join("")+'</div></div>';
   }
 
-  html += '<div class="card" style="margin-top:14px;"><h2>👥 Profile</h2><p class="hc-meta">Switch to a different person\'s profile on this device, or manage this one.</p>'+
-    '<div class="modal-actions" style="margin-top:8px;"><button class="btn secondary" style="flex:1" data-action="switchProfile">Switch Profile</button>'+
-    '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
+  /* Local multi-profile switching/creation is leftover from before cloud accounts existed.
+     A real client (logged into their own cloud account, not admin) should never see it —
+     they have exactly one account and no reason to add, switch to, or delete a profile.
+     Admin (and anyone not on a cloud account, e.g. local-only/demo use) still gets it. */
+  const isRealClient = !!(state.profile.cloudSession && !state.profile.isCloudAdmin);
+  if(!isRealClient){
+    html += '<div class="card" style="margin-top:14px;"><h2>👥 Profile</h2><p class="hc-meta">Switch to a different person\'s profile on this device, or manage this one.</p>'+
+      '<div class="modal-actions" style="margin-top:8px;"><button class="btn secondary" style="flex:1" data-action="switchProfile">Switch Profile</button>'+
+      '<button class="btn danger" style="flex:1" data-action="deleteProfile">Delete This Profile</button></div></div>';
 
-  html += renderAllProfilesSection();
+    html += renderAllProfilesSection();
+  }
 
   html += '<div class="card" style="margin-top:14px;"><h2>Your Data</h2><p class="hc-meta">Everything is stored locally in this browser. Nothing is sent to a server.</p>'+
     '<div class="modal-actions" style="margin-top:10px;">'+
