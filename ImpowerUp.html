@@ -1679,7 +1679,7 @@ function bootApp(){
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
     activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
-  } else if(profiles.length===1 && !profiles[0].pin && profiles[0].id!==DEMO_PROFILE_ID){
+  } else if(profiles.length===1 && profiles[0].id!==DEMO_PROFILE_ID){
     activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else if(profiles.length>0){
     renderProfilePicker();
@@ -1785,7 +1785,7 @@ function renderProfilePicker(){
     '<div class="card" style="text-align:center;">'+
     '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Who\'s using ImpowerUp?</h1><p class="subtitle">Everyone gets their own private space on this device.</p>'+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">'+
-    profiles.map(p=>'<button class="btn secondary block" style="justify-content:flex-start;font-size:15px;padding:14px;" data-action="selectProfile" data-id="'+p.id+'">'+(p.emoji||"🙂")+' '+escapeHtml(p.nickname||p.firstName||"Profile")+(p.pin?' 🔒':'')+'</button>').join("")+
+    profiles.map(p=>'<button class="btn secondary block" style="justify-content:flex-start;font-size:15px;padding:14px;" data-action="selectProfile" data-id="'+p.id+'">'+(p.emoji||"🙂")+' '+escapeHtml(p.nickname||p.firstName||"Profile")+'</button>').join("")+
     '</div><button class="btn block" style="margin-top:14px;" data-action="goToLoginGate">+ Log In / Create Profile</button>'+
     '<button class="btn ghost block" style="margin-top:6px;" data-action="viewDemoProfile">🎬 View a Demo Profile</button>'+
     '</div></div></div>';
@@ -1840,8 +1840,14 @@ function forgotPasswordFormHtml(){
 function setNewPasswordFormHtml(){
   return '<h2>🔑 Set New Password</h2>'+
     '<p class="hc-meta">Choose a new password for your account.</p>'+
-    '<div class="field"><label>New password</label><input id="np_pw" type="password" placeholder="New password"></div>'+
-    '<div class="field"><label>Confirm password</label><input id="np_pw2" type="password" placeholder="Re-enter password"></div>'+
+    '<div class="field"><label>New password</label><div style="position:relative;">'+
+    '<input id="np_pw" type="password" placeholder="New password" style="padding-right:42px;">'+
+    '<span data-action="toggleNpPwVisibility" data-id="np_pw" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
+    '<div class="field"><label>Confirm password</label><div style="position:relative;">'+
+    '<input id="np_pw2" type="password" placeholder="Re-enter password" style="padding-right:42px;">'+
+    '<span data-action="toggleNpPwVisibility" data-id="np_pw2" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
     '<div class="modal-actions"><button class="btn" style="flex:1" data-action="doSetNewPassword">Save New Password</button></div>';
 }
 async function completeCloudLogin(json, displayNameHint){
@@ -1962,7 +1968,6 @@ function newProfileFormHtml(saveAction){
     '<div class="field" style="flex:1;"><label>First name</label><input id="np_first" type="text" placeholder="First name"></div></div>'+
     '<div class="field"><label>Last name</label><input id="np_last" type="text" placeholder="Last name"></div>'+
     '<div class="field"><label>Nickname (optional)</label><input id="np_nick" type="text" placeholder="What should we call you?"></div>'+
-    '<div class="field"><label>Optional PIN (light privacy only, not secure)</label><input id="np_pin" type="password" inputmode="numeric" maxlength="8" placeholder="Leave blank for no PIN"></div>'+
     '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
     '<button class="btn" style="flex:1" data-action="'+saveAction+'">Create Profile</button></div>';
 }
@@ -5243,7 +5248,7 @@ document.addEventListener("click", async function(e){
     case "viewDemoProfile": {
       let profiles = loadProfiles();
       if(!profiles.find(p=>p.id===DEMO_PROFILE_ID)){
-        profiles.push({id:DEMO_PROFILE_ID, firstName:"Jordan", lastName:"", nickname:"Jordan (Demo)", emoji:"🎬", pin:null});
+        profiles.push({id:DEMO_PROFILE_ID, firstName:"Jordan", lastName:"", nickname:"Jordan (Demo)", emoji:"🎬"});
         saveProfiles(profiles);
       }
       localStorage.setItem(storeKeyFor(DEMO_PROFILE_ID), JSON.stringify(seedDemoState()));
@@ -5258,8 +5263,7 @@ document.addEventListener("click", async function(e){
       if(!fn){ toast("Enter a first name"); return; }
       const profiles = loadProfiles();
       const newP = { id: uid(), firstName: fn, lastName: document.getElementById("np_last").value.trim(),
-        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂",
-        pin: document.getElementById("np_pin").value.trim() || null };
+        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂" };
       profiles.push(newP); saveProfiles(profiles);
       activateProfile(newP.id);
       state.profile.firstName = newP.firstName; state.profile.lastName = newP.lastName; state.profile.nickname = newP.nickname;
@@ -5273,8 +5277,7 @@ document.addEventListener("click", async function(e){
       if(!fn){ toast("Enter a first name"); return; }
       const profiles = loadProfiles();
       const newP = { id: uid(), firstName: fn, lastName: document.getElementById("np_last").value.trim(),
-        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂",
-        pin: document.getElementById("np_pin").value.trim() || null };
+        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂" };
       profiles.push(newP); saveProfiles(profiles);
       // Initialize their data store without switching away from the currently active profile
       const prevState = state, prevKey = STORE_KEY;
@@ -5307,24 +5310,7 @@ document.addEventListener("click", async function(e){
         '<button class="btn secondary block" style="margin-top:14px;" data-action="closeModal">Close</button>');
       break;
     }
-    case "selectProfile": {
-      const profiles = loadProfiles();
-      const p = profiles.find(x=>x.id===id);
-      if(p && p.pin){
-        openModal('<h2>Enter PIN</h2><p class="hc-meta">This is a light privacy gate for shared devices, not secure encryption.</p><div class="field"><input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"></div><button class="btn block" data-action="submitPin" data-id="'+id+'">Continue</button>');
-      } else {
-        activateProfile(id); render();
-      }
-      break;
-    }
-    case "submitPin": {
-      const profiles = loadProfiles();
-      const p = profiles.find(x=>x.id===id);
-      const val = document.getElementById("pinInput").value;
-      if(p && val===p.pin){ closeModal(); activateProfile(id); render(); }
-      else toast("Incorrect PIN");
-      break;
-    }
+    case "selectProfile": { activateProfile(id); render(); break; }
     case "switchProfile": { state=null; STORE_KEY=null; setCurrentProfileId(""); bootApp(); break; }
     case "deleteProfile": {
       if(!confirm("Delete this profile and all its data? This can't be undone.")) return;
@@ -6339,6 +6325,15 @@ document.addEventListener("click", async function(e){
     case "openCreateProfileForm": openModal(createProfileFormHtml()); break;
     case "toggleLgPwVisibility": {
       const inp = document.getElementById("lg_pw");
+      if(inp){
+        const showing = inp.type === "text";
+        inp.type = showing ? "password" : "text";
+        t.textContent = showing ? "👁️" : "🙈";
+      }
+      break;
+    }
+    case "toggleNpPwVisibility": {
+      const inp = document.getElementById(id);
       if(inp){
         const showing = inp.type === "text";
         inp.type = showing ? "password" : "text";
