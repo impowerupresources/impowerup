@@ -84,6 +84,12 @@
   .dash-order-row{cursor:grab;}
   .dash-order-row.dash-dragging{opacity:.35;}
   .dash-order-row.dash-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
+  .dash-widget-box{cursor:grab;position:relative;border-radius:16px;transition:box-shadow .12s;}
+  .dash-widget-box:hover{box-shadow:0 0 0 2px var(--border);}
+  .dash-widget-box.dash-dragging{opacity:.35;}
+  .dash-widget-box.dash-drag-over{box-shadow:inset 0 3px 0 var(--accent);}
+  .dash-drag-handle{position:absolute;top:6px;right:10px;color:var(--text-muted);font-size:16px;line-height:1;cursor:grab;z-index:2;opacity:.55;}
+  .dash-widget-box:hover .dash-drag-handle{opacity:1;}
 
   nav.bottombar{
     position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;
@@ -2762,7 +2768,8 @@ function renderHome(){
     if(hidden.includes(id)) return;
     const chunk = widgetHtml[id];
     if(!chunk) return;
-    html += '<div style="margin-top:14px;">'+chunk+'</div>';
+    html += '<div class="dash-widget-box" draggable="true" data-widget-id="'+id+'" style="margin-top:14px;">'+
+      '<div class="dash-drag-handle" title="Drag to reorder">⠿</div>'+chunk+'</div>';
   });
 
   return html;
@@ -5212,7 +5219,8 @@ document.addEventListener("dragstart", function(e){
     if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingNavRoute); }catch(err){} }
     return;
   }
-  const row = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  const DASH_WIDGET_SEL = ".dash-order-row[data-widget-id], .dash-widget-box[data-widget-id]";
+  const row = e.target.closest && e.target.closest(DASH_WIDGET_SEL);
   if(row){
     _draggingWidgetId = row.getAttribute("data-widget-id");
     row.classList.add("dash-dragging");
@@ -5220,10 +5228,22 @@ document.addEventListener("dragstart", function(e){
   }
 });
 document.addEventListener("dragover", function(e){
+  const DASH_WIDGET_SEL = ".dash-order-row[data-widget-id], .dash-widget-box[data-widget-id]";
   if(_draggingNavRoute && e.target.closest && e.target.closest(".sidebar a[data-route]")){ e.preventDefault(); return; }
-  if(_draggingWidgetId && e.target.closest && e.target.closest(".dash-order-row[data-widget-id]")){ e.preventDefault(); }
+  if(_draggingWidgetId && e.target.closest){
+    const over = e.target.closest(DASH_WIDGET_SEL);
+    if(over){
+      e.preventDefault();
+      if(over.getAttribute("data-widget-id") !== _draggingWidgetId){
+        document.querySelectorAll(".dash-drag-over").forEach(el=>{ if(el!==over) el.classList.remove("dash-drag-over"); });
+        over.classList.add("dash-drag-over");
+      }
+    }
+  }
 });
 document.addEventListener("drop", function(e){
+  const DASH_WIDGET_SEL = ".dash-order-row[data-widget-id], .dash-widget-box[data-widget-id]";
+  document.querySelectorAll(".dash-drag-over").forEach(el=>el.classList.remove("dash-drag-over"));
   const navTarget = e.target.closest && e.target.closest(".sidebar a[data-route]");
   if(_draggingNavRoute && navTarget){
     e.preventDefault();
@@ -5239,7 +5259,7 @@ document.addEventListener("drop", function(e){
     }
     return;
   }
-  const widgetTarget = e.target.closest && e.target.closest(".dash-order-row[data-widget-id]");
+  const widgetTarget = e.target.closest && e.target.closest(DASH_WIDGET_SEL);
   if(_draggingWidgetId && widgetTarget){
     e.preventDefault();
     const targetId = widgetTarget.getAttribute("data-widget-id");
@@ -5249,7 +5269,7 @@ document.addEventListener("drop", function(e){
       if(from>=0 && to>=0){
         order.splice(from,1); order.splice(to,0,_draggingWidgetId);
         state.profile.dashboardOrder = order;
-        saveState(); refreshDashOrderList();
+        saveState(); render(); refreshDashOrderList();
       }
     }
   }
@@ -5257,6 +5277,7 @@ document.addEventListener("drop", function(e){
 document.addEventListener("dragend", function(){
   document.querySelectorAll(".nav-dragging").forEach(el=>el.classList.remove("nav-dragging"));
   document.querySelectorAll(".dash-dragging").forEach(el=>el.classList.remove("dash-dragging"));
+  document.querySelectorAll(".dash-drag-over").forEach(el=>el.classList.remove("dash-drag-over"));
   _draggingNavRoute = null; _draggingWidgetId = null;
 });
 
