@@ -1175,6 +1175,46 @@ async function saveGlobalConfigFn(cfg){
     throw new Error("Couldn't save"+(detail?": "+detail.slice(0,140):""));
   }
 }
+/* ---- Quick Assistant (v1): a few narrow, AI-parsed commands, always confirmed before anything changes ---- */
+let _pendingAiAction = null;
+let _quickAssistantLoading = false;
+function quickAssistantFormHtml(){
+  return '<h2>✨ Quick Assistant</h2>'+
+    '<p class="hc-meta">Type a request. For now it understands: moving today\'s tasks to tomorrow, marking a specific habit done, or marking a specific task done.</p>'+
+    '<div class="field"><textarea id="qa_input" rows="3" placeholder="e.g. Move all of today\'s tasks to tomorrow"></textarea></div>'+
+    '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
+    '<button class="btn" style="flex:1" data-action="submitQuickAssistant"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Ask")+'</button></div>';
+}
+async function callAiCommandFn(message){
+  if(!(await ensureFreshSession())) throw new Error("Log in to use the Quick Assistant");
+  const todayTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).map(t=>({id:t.id, title:t.title}));
+  const todayHabits = habitsDueToday().map(h=>({id:h.id, title:h.title}));
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/ai-command", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({message, todayTasks, todayHabits})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't understand that request");
+  return json.action;
+}
+function describeAiAction(action){
+  if(action.action==="move_tasks"){
+    const n = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).length;
+    return n ? ("Move "+n+" incomplete task"+(n===1?"":"s")+" from today to tomorrow?") : "There aren't any incomplete tasks today to move.";
+  }
+  if(action.action==="complete_task") return 'Mark the task "'+(action.title||"")+'" as done?';
+  if(action.action==="complete_habit") return 'Mark the habit "'+(action.title||"")+'" as done for today?';
+  return action.reason || "Sorry, I can't do that yet.";
+}
+function aiConfirmModalHtml(action){
+  const desc = describeAiAction(action);
+  const actionable = action.action!=="unsupported" && !(action.action==="move_tasks" && desc.indexOf("aren't")>=0);
+  return '<h2>✨ Quick Assistant</h2><p class="hc-meta">'+escapeHtml(desc)+'</p>'+
+    (actionable ? '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
+      '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
+      : '<div class="modal-actions"><button class="btn block" data-action="closeModal">OK</button></div>');
+}
 function slugifyGc(s){ return ((s||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")) || "item"; }
 function parseEmojiLabelLines(text, existingArr){
   const lines = (text||"").split("\n").map(l=>l.trim()).filter(Boolean);
@@ -2830,6 +2870,7 @@ function renderHome(){
 
   let html = '<div class="topbar"><div><h1>Hey there, '+escapeHtml(displayName())+'! '+themeEmoji("greet")+'</h1><p class="subtitle" style="margin:2px 0 0">'+todayLongDate()+'</p></div>'+
     '<div style="display:flex;align-items:center;gap:8px;"><div class="points-pill">⭐ '+totalPoints()+' XP</div>'+
+    '<button class="icon-btn" data-action="openQuickAssistant" title="Quick Assistant">✨</button>'+
     '<button class="icon-btn" data-action="openDashboardEditor" title="Customize dashboard">🧩</button>'+
     '<a href="#/settings" class="icon-btn" style="text-decoration:none;" title="Settings">⚙️</a></div></div>';
 
@@ -6530,6 +6571,46 @@ document.addEventListener("click", async function(e){
         toast("Password updated — log in with your new password");
         renderLoginGate();
       }catch(err){ toast(err.message); }
+      break;
+    }
+    case "openQuickAssistant": _pendingAiAction = null; _quickAssistantLoading = false; openModal(quickAssistantFormHtml()); break;
+    case "submitQuickAssistant": {
+      const msg = (document.getElementById("qa_input").value||"").trim();
+      if(!msg){ toast("Type what you'd like to do"); return; }
+      _quickAssistantLoading = true; openModal(quickAssistantFormHtml());
+      try{
+        const action = await callAiCommandFn(msg);
+        _pendingAiAction = action;
+        openModal(aiConfirmModalHtml(action));
+      }catch(err){ toast(err.message); closeModal(); }
+      _quickAssistantLoading = false;
+      break;
+    }
+    case "confirmAiAction": {
+      const action = _pendingAiAction;
+      if(!action){ closeModal(); return; }
+      if(action.action==="move_tasks"){
+        const tmrw = addDays(todayStr(),1);
+        let n = 0;
+        (state.tasks||[]).forEach(t=>{ if(t.status!=="done" && t.date===todayStr()){ t.date = tmrw; n++; } });
+        saveState(); closeModal(); render();
+        toast("Moved "+n+" task"+(n===1?"":"s")+" to tomorrow");
+      } else if(action.action==="complete_task"){
+        const tsk = (state.tasks||[]).find(t=>t.id===action.task_id);
+        if(!tsk){ toast("Couldn't find that task"); closeModal(); break; }
+        tsk.status = "done";
+        saveState(); closeModal(); render();
+        toast("Marked \""+tsk.title+"\" as done");
+      } else if(action.action==="complete_habit"){
+        const h = state.habits.find(x=>x.id===action.habit_id);
+        if(!h){ toast("Couldn't find that habit"); closeModal(); break; }
+        if(isHabitCompletedOn(h, todayStr())){ toast("Already marked done today"); closeModal(); break; }
+        performToggleHabit(h.id, todayStr());
+        closeModal();
+      } else {
+        closeModal();
+      }
+      _pendingAiAction = null;
       break;
     }
     case "openGlobalConfigEditor": openModal(globalConfigEditorHtml()); break;
