@@ -1052,6 +1052,18 @@ async function adminResetClientPassword(userId, password){
   if(!res.ok) throw new Error(json.error || "Couldn't reset that password");
   return json;
 }
+/* Admin-only: create a real-email client account (already approved, no invite needed). */
+async function adminCreateClientByEmail(email, password, displayName){
+  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/admin-create-client-email", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({email, password, display_name: displayName})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't create that account");
+  return json;
+}
 /* ---- AI (admin-only): assessment interpretation + client insight summaries ---- */
 async function callAiInsightsFn(payload){
   if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
@@ -1184,6 +1196,7 @@ function renderAdmin(){
         '<button class="btn ghost sm" data-action="adminRejectClient" data-id="'+c.id+'">✕ Reject</button></div></div>').join("")+
       '</div>';
   }
+  html += '<button class="btn block" style="margin-bottom:10px;" data-action="openNewClientEmailForm">✉️ New Client (Email)</button>';
   html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
   if(!adminClientList.length){ html += emptyState("👥","No clients yet","Approve a pending request above, or use + New Client to set one up with a username and password."); return html; }
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
@@ -1212,6 +1225,21 @@ function newClientFormHtml(){
     '<button class="btn" data-action="saveNewClient" style="flex:1">Create Client</button></div>';
 }
 function openNewClientForm(){ newClientPw = generateSimplePassword(); openModal(newClientFormHtml()); }
+function newClientEmailFormHtml(){
+  newClientPw = newClientPw || generateSimplePassword();
+  return '<h2>✉️ New Client (Email)</h2>'+
+    '<p class="hc-meta">Creates a full, already-approved account tied to their real email — no request or invite step needed. Share the email and password below with them so they can log in.</p>'+
+    '<div class="field"><label>Client name</label><input id="nce_name" type="text" placeholder="e.g. Jordan Smith"></div>'+
+    '<div class="field"><label>Client email</label><input id="nce_email" type="email" placeholder="jordan@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="field"><label>Password</label><div style="position:relative;">'+
+    '<input id="nce_pw" type="text" value="'+escapeHtml(newClientPw)+'" style="padding-right:42px;">'+
+    '<span data-action="regenNewClientPw" title="Generate a new password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">🎲</span>'+
+    '</div></div>'+
+    '<p class="hc-meta">Write down or share this password with the client now — you can always reset it later, but it won\'t be shown again after you save.</p>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveNewClientEmail" style="flex:1">Create Client</button></div>';
+}
+function openNewClientEmailForm(){ newClientPw = generateSimplePassword(); openModal(newClientEmailFormHtml()); }
 function generateSimplePassword(){
   const words = ["sunny","brave","calm","bright","kind","swift","bold","happy","gentle","clever"];
   const w = words[Math.floor(Math.random()*words.length)];
@@ -6410,10 +6438,25 @@ document.addEventListener("click", async function(e){
     case "syncNowCloud": { const ok = await syncStateToCloud(); render(); toast(ok?"Synced":"Sync failed — check your connection"); break; }
     case "refreshAdminList": adminClientList = null; adminPendingList = null; render(); break;
     case "openNewClientForm": openNewClientForm(); break;
+    case "openNewClientEmailForm": openNewClientEmailForm(); break;
     case "regenNewClientPw": {
       newClientPw = generateSimplePassword();
-      const pwInp = document.getElementById("nc_pw") || document.getElementById("rp_pw");
+      const pwInp = document.getElementById("nc_pw") || document.getElementById("rp_pw") || document.getElementById("nce_pw");
       if(pwInp) pwInp.value = newClientPw;
+      break;
+    }
+    case "saveNewClientEmail": {
+      const displayName = document.getElementById("nce_name").value.trim();
+      const email = document.getElementById("nce_email").value.trim();
+      const password = document.getElementById("nce_pw").value;
+      if(!displayName){ toast("Enter the client's name"); return; }
+      if(!email || !email.includes("@")){ toast("Enter a valid email"); return; }
+      try{
+        await adminCreateClientByEmail(email, password, displayName);
+        closeModal();
+        adminClientList = null; adminPendingList = null; render();
+        toast("Client created — share the email/password with them");
+      }catch(err){ toast(err.message); }
       break;
     }
     case "saveNewClient": {
