@@ -1287,18 +1287,25 @@ async function openAsClient(clientId){
 }
 async function saveAndExitClientView(){
   if(!_adminViewing) return;
-  let ok = false;
-  if(await ensureFreshSession()){
+  let ok = false, errMsg = "";
+  if(!(await ensureFreshSession())){
+    errMsg = "Your session expired — log back in and try again";
+  } else {
     try{
       const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
         method:"POST",
         headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ user_id: _adminViewing.id, state_json: state, updated_at: new Date().toISOString() })
+        body: JSON.stringify({ user_id: _adminViewing.id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
       });
       ok = res.ok;
-    }catch(e){ ok = false; }
+      if(!ok){
+        let detail = "";
+        try{ const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); }catch(e){ try{ detail = await res.text(); }catch(e2){} }
+        errMsg = "Couldn't save (status "+res.status+")"+(detail?": "+detail.slice(0,140):"");
+      }
+    }catch(e){ ok = false; errMsg = "Couldn't save — "+(e && e.message ? e.message : "check your connection and try again"); }
   }
-  exitClientView(ok ? "Saved changes for "+_adminViewing.name : "Couldn't save — check your connection and try again");
+  exitClientView(ok ? "Saved changes for "+_adminViewing.name : errMsg);
 }
 function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
