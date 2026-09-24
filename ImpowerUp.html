@@ -1271,12 +1271,16 @@ async function openAsClient(clientId){
     const profRows = profRes.ok ? await profRes.json() : [];
     const clientName = (profRows[0] && profRows[0].display_name) || "Client";
     _adminOwnState = state; _adminOwnKey = STORE_KEY;
+    const adminSession = state.profile.cloudSession, adminIsAdmin = state.profile.isCloudAdmin;
     const snap = rows[0] ? rows[0].state_json : null;
     const fresh = defaultState();
     state = snap ? Object.assign(fresh, snap) : fresh;
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
     state.profile.onboarded = true;
     if(!state.profile.firstName && !state.profile.nickname) state.profile.firstName = clientName;
+    // Keep browsing authenticated as the admin — this is a preview of the client's DATA, not their login.
+    state.profile.cloudSession = adminSession;
+    state.profile.isCloudAdmin = adminIsAdmin;
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
     _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
@@ -1303,7 +1307,7 @@ async function saveAndExitClientView(){
         try{ const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); }catch(e){ try{ detail = await res.text(); }catch(e2){} }
         errMsg = "Couldn't save (status "+res.status+")"+(detail?": "+detail.slice(0,140):"");
       }
-    }catch(e){ ok = false; errMsg = "Couldn't save — "+(e && e.message ? e.message : "check your connection and try again"); }
+    }catch(e){ ok = false; errMsg = "Couldn't save — "+((e && (e.name||"")+": "+(e.message||"")) || "unknown error"); }
   }
   exitClientView(ok ? "Saved changes for "+_adminViewing.name : errMsg);
 }

@@ -1052,6 +1052,18 @@ async function adminResetClientPassword(userId, password){
   if(!res.ok) throw new Error(json.error || "Couldn't reset that password");
   return json;
 }
+/* Admin-only: create a real-email client account (already approved, no invite needed). */
+async function adminCreateClientByEmail(email, password, displayName){
+  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/admin-create-client-email", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({email, password, display_name: displayName})
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't create that account");
+  return json;
+}
 /* ---- AI (admin-only): assessment interpretation + client insight summaries ---- */
 async function callAiInsightsFn(payload){
   if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
@@ -1184,6 +1196,7 @@ function renderAdmin(){
         '<button class="btn ghost sm" data-action="adminRejectClient" data-id="'+c.id+'">✕ Reject</button></div></div>').join("")+
       '</div>';
   }
+  html += '<button class="btn block" style="margin-bottom:10px;" data-action="openNewClientEmailForm">✉️ New Client (Email)</button>';
   html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
   if(!adminClientList.length){ html += emptyState("👥","No clients yet","Approve a pending request above, or use + New Client to set one up with a username and password."); return html; }
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
@@ -1212,6 +1225,21 @@ function newClientFormHtml(){
     '<button class="btn" data-action="saveNewClient" style="flex:1">Create Client</button></div>';
 }
 function openNewClientForm(){ newClientPw = generateSimplePassword(); openModal(newClientFormHtml()); }
+function newClientEmailFormHtml(){
+  newClientPw = newClientPw || generateSimplePassword();
+  return '<h2>✉️ New Client (Email)</h2>'+
+    '<p class="hc-meta">Creates a full, already-approved account tied to their real email — no request or invite step needed. Share the email and password below with them so they can log in.</p>'+
+    '<div class="field"><label>Client name</label><input id="nce_name" type="text" placeholder="e.g. Jordan Smith"></div>'+
+    '<div class="field"><label>Client email</label><input id="nce_email" type="email" placeholder="jordan@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<div class="field"><label>Password</label><div style="position:relative;">'+
+    '<input id="nce_pw" type="text" value="'+escapeHtml(newClientPw)+'" style="padding-right:42px;">'+
+    '<span data-action="regenNewClientPw" title="Generate a new password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">🎲</span>'+
+    '</div></div>'+
+    '<p class="hc-meta">Write down or share this password with the client now — you can always reset it later, but it won\'t be shown again after you save.</p>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveNewClientEmail" style="flex:1">Create Client</button></div>';
+}
+function openNewClientEmailForm(){ newClientPw = generateSimplePassword(); openModal(newClientEmailFormHtml()); }
 function generateSimplePassword(){
   const words = ["sunny","brave","calm","bright","kind","swift","bold","happy","gentle","clever"];
   const w = words[Math.floor(Math.random()*words.length)];
@@ -1243,10 +1271,16 @@ async function openAsClient(clientId){
     const profRows = profRes.ok ? await profRes.json() : [];
     const clientName = (profRows[0] && profRows[0].display_name) || "Client";
     _adminOwnState = state; _adminOwnKey = STORE_KEY;
+    const adminSession = state.profile.cloudSession, adminIsAdmin = state.profile.isCloudAdmin;
     const snap = rows[0] ? rows[0].state_json : null;
     const fresh = defaultState();
     state = snap ? Object.assign(fresh, snap) : fresh;
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+    state.profile.onboarded = true;
+    if(!state.profile.firstName && !state.profile.nickname) state.profile.firstName = clientName;
+    // Keep browsing authenticated as the admin — this is a preview of the client's DATA, not their login.
+    state.profile.cloudSession = adminSession;
+    state.profile.isCloudAdmin = adminIsAdmin;
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
     _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
@@ -1257,18 +1291,25 @@ async function openAsClient(clientId){
 }
 async function saveAndExitClientView(){
   if(!_adminViewing) return;
-  let ok = false;
-  if(await ensureFreshSession()){
+  let ok = false, errMsg = "";
+  if(!(await ensureFreshSession())){
+    errMsg = "Your session expired — log back in and try again";
+  } else {
     try{
       const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
         method:"POST",
         headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ user_id: _adminViewing.id, state_json: state, updated_at: new Date().toISOString() })
+        body: JSON.stringify({ user_id: _adminViewing.id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
       });
       ok = res.ok;
-    }catch(e){ ok = false; }
+      if(!ok){
+        let detail = "";
+        try{ const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); }catch(e){ try{ detail = await res.text(); }catch(e2){} }
+        errMsg = "Couldn't save (status "+res.status+")"+(detail?": "+detail.slice(0,140):"");
+      }
+    }catch(e){ ok = false; errMsg = "Couldn't save — "+((e && (e.name||"")+": "+(e.message||"")) || "unknown error"); }
   }
-  exitClientView(ok ? "Saved changes for "+_adminViewing.name : "Couldn't save — check your connection and try again");
+  exitClientView(ok ? "Saved changes for "+_adminViewing.name : errMsg);
 }
 function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
@@ -1679,7 +1720,7 @@ function bootApp(){
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
     activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
-  } else if(profiles.length===1 && !profiles[0].pin && profiles[0].id!==DEMO_PROFILE_ID){
+  } else if(profiles.length===1 && profiles[0].id!==DEMO_PROFILE_ID){
     activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
   } else if(profiles.length>0){
     renderProfilePicker();
@@ -1785,7 +1826,7 @@ function renderProfilePicker(){
     '<div class="card" style="text-align:center;">'+
     '<div style="font-size:40px;">👋</div><h1 style="margin-bottom:2px;">Who\'s using ImpowerUp?</h1><p class="subtitle">Everyone gets their own private space on this device.</p>'+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">'+
-    profiles.map(p=>'<button class="btn secondary block" style="justify-content:flex-start;font-size:15px;padding:14px;" data-action="selectProfile" data-id="'+p.id+'">'+(p.emoji||"🙂")+' '+escapeHtml(p.nickname||p.firstName||"Profile")+(p.pin?' 🔒':'')+'</button>').join("")+
+    profiles.map(p=>'<button class="btn secondary block" style="justify-content:flex-start;font-size:15px;padding:14px;" data-action="selectProfile" data-id="'+p.id+'">'+(p.emoji||"🙂")+' '+escapeHtml(p.nickname||p.firstName||"Profile")+'</button>').join("")+
     '</div><button class="btn block" style="margin-top:14px;" data-action="goToLoginGate">+ Log In / Create Profile</button>'+
     '<button class="btn ghost block" style="margin-top:6px;" data-action="viewDemoProfile">🎬 View a Demo Profile</button>'+
     '</div></div></div>';
@@ -1840,8 +1881,14 @@ function forgotPasswordFormHtml(){
 function setNewPasswordFormHtml(){
   return '<h2>🔑 Set New Password</h2>'+
     '<p class="hc-meta">Choose a new password for your account.</p>'+
-    '<div class="field"><label>New password</label><input id="np_pw" type="password" placeholder="New password"></div>'+
-    '<div class="field"><label>Confirm password</label><input id="np_pw2" type="password" placeholder="Re-enter password"></div>'+
+    '<div class="field"><label>New password</label><div style="position:relative;">'+
+    '<input id="np_pw" type="password" placeholder="New password" style="padding-right:42px;">'+
+    '<span data-action="toggleNpPwVisibility" data-id="np_pw" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
+    '<div class="field"><label>Confirm password</label><div style="position:relative;">'+
+    '<input id="np_pw2" type="password" placeholder="Re-enter password" style="padding-right:42px;">'+
+    '<span data-action="toggleNpPwVisibility" data-id="np_pw2" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
+    '</div></div>'+
     '<div class="modal-actions"><button class="btn" style="flex:1" data-action="doSetNewPassword">Save New Password</button></div>';
 }
 async function completeCloudLogin(json, displayNameHint){
@@ -1962,7 +2009,6 @@ function newProfileFormHtml(saveAction){
     '<div class="field" style="flex:1;"><label>First name</label><input id="np_first" type="text" placeholder="First name"></div></div>'+
     '<div class="field"><label>Last name</label><input id="np_last" type="text" placeholder="Last name"></div>'+
     '<div class="field"><label>Nickname (optional)</label><input id="np_nick" type="text" placeholder="What should we call you?"></div>'+
-    '<div class="field"><label>Optional PIN (light privacy only, not secure)</label><input id="np_pin" type="password" inputmode="numeric" maxlength="8" placeholder="Leave blank for no PIN"></div>'+
     '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
     '<button class="btn" style="flex:1" data-action="'+saveAction+'">Create Profile</button></div>';
 }
@@ -2660,8 +2706,9 @@ function dashboardOrderRowHtml(id, i, total){
 function dashboardEditModalHtml(){
   const order = getDashboardOrder();
   return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Drag ⠿ to reorder sections, or tap 👁️ to hide one from your Home screen.</p>'+
+    (_adminViewing ? '<div style="background:var(--danger);color:#fff;font-weight:700;font-size:12.5px;padding:8px 10px;border-radius:10px;margin-bottom:10px;">🛡️ This won\'t save for '+escapeHtml(_adminViewing.name)+' until you tap "Save & Exit" at the top of the screen after closing this.</div>' : '')+
     '<div id="dashOrderList">'+order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("")+'</div>'+
-    '<div class="modal-actions"><button class="btn block" data-action="closeModal">Done</button></div>';
+    '<div class="modal-actions"><button class="btn block" data-action="closeDashboardEditModal">Done</button></div>';
 }
 function refreshDashOrderList(){
   const order = getDashboardOrder();
@@ -5225,6 +5272,11 @@ document.addEventListener("click", async function(e){
 
   switch(action){
     case "closeModal": closeModal(); break;
+    case "closeDashboardEditModal": {
+      closeModal();
+      if(_adminViewing) toast("Tap \"Save & Exit\" at the top to save this for "+_adminViewing.name);
+      break;
+    }
 
     case "openPickerSettings": {
       const cur = getPickerTheme();
@@ -5243,7 +5295,7 @@ document.addEventListener("click", async function(e){
     case "viewDemoProfile": {
       let profiles = loadProfiles();
       if(!profiles.find(p=>p.id===DEMO_PROFILE_ID)){
-        profiles.push({id:DEMO_PROFILE_ID, firstName:"Jordan", lastName:"", nickname:"Jordan (Demo)", emoji:"🎬", pin:null});
+        profiles.push({id:DEMO_PROFILE_ID, firstName:"Jordan", lastName:"", nickname:"Jordan (Demo)", emoji:"🎬"});
         saveProfiles(profiles);
       }
       localStorage.setItem(storeKeyFor(DEMO_PROFILE_ID), JSON.stringify(seedDemoState()));
@@ -5258,8 +5310,7 @@ document.addEventListener("click", async function(e){
       if(!fn){ toast("Enter a first name"); return; }
       const profiles = loadProfiles();
       const newP = { id: uid(), firstName: fn, lastName: document.getElementById("np_last").value.trim(),
-        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂",
-        pin: document.getElementById("np_pin").value.trim() || null };
+        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂" };
       profiles.push(newP); saveProfiles(profiles);
       activateProfile(newP.id);
       state.profile.firstName = newP.firstName; state.profile.lastName = newP.lastName; state.profile.nickname = newP.nickname;
@@ -5273,8 +5324,7 @@ document.addEventListener("click", async function(e){
       if(!fn){ toast("Enter a first name"); return; }
       const profiles = loadProfiles();
       const newP = { id: uid(), firstName: fn, lastName: document.getElementById("np_last").value.trim(),
-        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂",
-        pin: document.getElementById("np_pin").value.trim() || null };
+        nickname: document.getElementById("np_nick").value.trim(), emoji: document.getElementById("np_emoji").value.trim()||"🙂" };
       profiles.push(newP); saveProfiles(profiles);
       // Initialize their data store without switching away from the currently active profile
       const prevState = state, prevKey = STORE_KEY;
@@ -5307,24 +5357,7 @@ document.addEventListener("click", async function(e){
         '<button class="btn secondary block" style="margin-top:14px;" data-action="closeModal">Close</button>');
       break;
     }
-    case "selectProfile": {
-      const profiles = loadProfiles();
-      const p = profiles.find(x=>x.id===id);
-      if(p && p.pin){
-        openModal('<h2>Enter PIN</h2><p class="hc-meta">This is a light privacy gate for shared devices, not secure encryption.</p><div class="field"><input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"></div><button class="btn block" data-action="submitPin" data-id="'+id+'">Continue</button>');
-      } else {
-        activateProfile(id); render();
-      }
-      break;
-    }
-    case "submitPin": {
-      const profiles = loadProfiles();
-      const p = profiles.find(x=>x.id===id);
-      const val = document.getElementById("pinInput").value;
-      if(p && val===p.pin){ closeModal(); activateProfile(id); render(); }
-      else toast("Incorrect PIN");
-      break;
-    }
+    case "selectProfile": { activateProfile(id); render(); break; }
     case "switchProfile": { state=null; STORE_KEY=null; setCurrentProfileId(""); bootApp(); break; }
     case "deleteProfile": {
       if(!confirm("Delete this profile and all its data? This can't be undone.")) return;
@@ -6346,6 +6379,15 @@ document.addEventListener("click", async function(e){
       }
       break;
     }
+    case "toggleNpPwVisibility": {
+      const inp = document.getElementById(id);
+      if(inp){
+        const showing = inp.type === "text";
+        inp.type = showing ? "password" : "text";
+        t.textContent = showing ? "👁️" : "🙈";
+      }
+      break;
+    }
     case "doCloudLoginFresh": {
       const email = document.getElementById("lg_email").value.trim();
       const pw = document.getElementById("lg_pw").value;
@@ -6415,10 +6457,25 @@ document.addEventListener("click", async function(e){
     case "syncNowCloud": { const ok = await syncStateToCloud(); render(); toast(ok?"Synced":"Sync failed — check your connection"); break; }
     case "refreshAdminList": adminClientList = null; adminPendingList = null; render(); break;
     case "openNewClientForm": openNewClientForm(); break;
+    case "openNewClientEmailForm": openNewClientEmailForm(); break;
     case "regenNewClientPw": {
       newClientPw = generateSimplePassword();
-      const pwInp = document.getElementById("nc_pw") || document.getElementById("rp_pw");
+      const pwInp = document.getElementById("nc_pw") || document.getElementById("rp_pw") || document.getElementById("nce_pw");
       if(pwInp) pwInp.value = newClientPw;
+      break;
+    }
+    case "saveNewClientEmail": {
+      const displayName = document.getElementById("nce_name").value.trim();
+      const email = document.getElementById("nce_email").value.trim();
+      const password = document.getElementById("nce_pw").value;
+      if(!displayName){ toast("Enter the client's name"); return; }
+      if(!email || !email.includes("@")){ toast("Enter a valid email"); return; }
+      try{
+        await adminCreateClientByEmail(email, password, displayName);
+        closeModal();
+        adminClientList = null; adminPendingList = null; render();
+        toast("Client created — share the email/password with them");
+      }catch(err){ toast(err.message); }
       break;
     }
     case "saveNewClient": {
