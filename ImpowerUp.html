@@ -524,7 +524,7 @@ function defaultState(){
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
-      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
@@ -3159,13 +3159,20 @@ function renderPlanner(){
 function renderPlannerSchedule(){
   return scheduleSettingsCardHtml();
 }
+function getWeekStartDow(){ return (state.profile.weekStartDay==="monday") ? 1 : 0; }
+function weekdayLabelsFromStart(){
+  const base = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+  const startDow = getWeekStartDow();
+  return base.slice(startDow).concat(base.slice(0,startDow));
+}
 function monthCalendarHtml(monthCursor, selectedDate, navAction, clickAction, expandable, richView){
   const [y,m] = monthCursor.split("-").map(Number);
   const firstOfMonth = y+"-"+String(m).padStart(2,"0")+"-01";
   const firstDow = new Date(y,m-1,1).getDay();
-  const mondayOffset = (firstDow+6)%7;
-  const gridStart = addDays(firstOfMonth, -mondayOffset);
-  const monLabels = ["Mo","Tu","We","Th","Fr","Sa","Su"];
+  const startDow = getWeekStartDow();
+  const gridOffset = (firstDow - startDow + 7)%7;
+  const gridStart = addDays(firstOfMonth, -gridOffset);
+  const monLabels = weekdayLabelsFromStart();
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'+
     '<div style="font-weight:800;font-size:17px;">'+new Date(y,m-1,1).toLocaleDateString(undefined,{month:"long",year:"numeric"})+'</div>'+
     '<div style="display:flex;gap:6px;"><button class="icon-btn" data-action="'+navAction+'" data-v="-1">‹</button><button class="icon-btn" data-action="'+navAction+'" data-v="1">›</button></div></div>';
@@ -3255,7 +3262,12 @@ function renderPlannerDay(){
 
   const overviewBlock = '<div class="card">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'+
-    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+dayLetterBadgeHtml(plannerDate)+plannerHolidayBadgeHtml(plannerDate)+'</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
+    '<button class="icon-btn" data-action="shiftPlannerDay" data-v="-1" title="Previous day">‹</button>'+
+    '<div style="font-weight:800;font-size:16px;">'+dayLabel+'</div>'+dayLetterBadgeHtml(plannerDate)+plannerHolidayBadgeHtml(plannerDate)+
+    '<button class="icon-btn" data-action="shiftPlannerDay" data-v="1" title="Next day">›</button>'+
+    (plannerDate!==todayStr()?'<button class="btn ghost sm" data-action="jumpToDay" data-v="'+todayStr()+'">Today</button>':"")+
+    '</div>'+
     '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
     '<button class="icon-btn" data-action="togglePlannerDayCalPos" title="'+(calPos==="bottom"?"Move calendar above":"Move calendar below")+'">'+(calPos==="bottom"?"⬆️":"⬇️")+'</button>'+
     '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
@@ -3272,13 +3284,16 @@ function renderPlannerDay(){
 function renderPlannerWeek(){
   const [y,m,d] = plannerDate.split("-").map(Number);
   const dow = new Date(y,m-1,d).getDay();
-  const weekStart = addDays(plannerDate, -dow);
+  const startDow = getWeekStartDow();
+  const weekStart = addDays(plannerDate, -((dow - startDow + 7)%7));
   const view = state.profile.weekGlanceView || "horizontal";
+  const weekStartDay = state.profile.weekStartDay || "sunday";
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;">'+
     '<button class="icon-btn" data-action="shiftWeek" data-v="-7">‹</button>'+
     '<div style="font-weight:800;">'+fmtDatePretty(weekStart)+' – '+fmtDatePretty(addDays(weekStart,6))+'</div>'+
     '<div style="display:flex;gap:4px;align-items:center;">'+
     '<button class="icon-btn" data-action="shiftWeek" data-v="7">›</button>'+
+    '<button class="icon-btn" data-action="toggleWeekStartDay" title="Currently starts on '+(weekStartDay==="monday"?"Monday — tap for Sunday":"Sunday — tap for Monday")+'">'+(weekStartDay==="monday"?"Mon→":"Sun→")+'</button>'+
     '<button class="icon-btn" data-action="toggleWeekGlanceView" title="'+(view==="horizontal"?"Switch to vertical view":"Switch to horizontal view")+'">'+(view==="horizontal"?"☰":"▦")+'</button>'+
     '</div></div>';
   if(view==="vertical"){
@@ -3326,7 +3341,9 @@ function renderPlannerWeek(){
 function renderPlannerMonth(){
   const view = state.profile.monthGlanceView || "compact";
   const expanded = view==="expanded";
-  let html = '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">'+
+  const weekStartDay = state.profile.weekStartDay || "sunday";
+  let html = '<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">'+
+    '<button class="btn ghost sm" data-action="toggleWeekStartDay" title="Currently starts on '+(weekStartDay==="monday"?"Monday — tap for Sunday":"Sunday — tap for Monday")+'">'+(weekStartDay==="monday"?"Mon→":"Sun→")+' Start</button>'+
     '<button class="btn ghost sm" data-action="toggleMonthGlanceView" title="'+(expanded?"Switch to compact view":"Switch to expanded view")+'">'+(expanded?"☰ Compact":"▦ Expand")+'</button></div>';
   html += '<div class="card">'+monthCalendarHtml(plannerMonthCursor, plannerDate, "shiftMonth", "jumpToDay", true, expanded)+'</div>';
   html += '<p class="hc-meta" style="margin-top:10px;text-align:center;">'+(expanded?"Tap a day to open it, or tap 🔍 to preview it here.":"Tap a day to open it, or tap 🔍 to preview it here. Dots mark days with completed habits — switch to Expand to see events.")+'</p>';
@@ -5896,12 +5913,19 @@ document.addEventListener("click", async function(e){
     case "setPlannerView": plannerViewMode=v; render(); break;
     case "jumpToDay": closeModal(); plannerDate=v; plannerViewMode="day"; render(); break;
     case "shiftWeek": plannerDate = addDays(plannerDate, Number(v)); render(); break;
+    case "shiftPlannerDay": {
+      plannerDate = addDays(plannerDate, Number(v));
+      plannerMonthCursor = plannerDate.slice(0,7);
+      render();
+      break;
+    }
     case "shiftMonth": plannerMonthCursor = addMonths(plannerMonthCursor, Number(v)); render(); break;
     case "pickPlannerDay": plannerDate=v; render(); break;
     case "expandDayPreview": openModal(dayPreviewModalHtml(v)); break;
     case "togglePlannerDayCalPos": state.profile.plannerDayCalPos = (state.profile.plannerDayCalPos==="bottom"?"top":"bottom"); saveState(); render(); break;
     case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="horizontal"?"vertical":"horizontal"); saveState(); render(); break;
     case "toggleMonthGlanceView": state.profile.monthGlanceView = (state.profile.monthGlanceView==="expanded"?"compact":"expanded"); saveState(); render(); break;
+    case "toggleWeekStartDay": state.profile.weekStartDay = (state.profile.weekStartDay==="monday"?"sunday":"monday"); saveState(); render(); break;
     case "openApplyTemplateModal": openApplyTemplateModal(plannerDate); break;
     case "applyTemplate": {
       const date = t.getAttribute("data-date");
