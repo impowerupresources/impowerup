@@ -381,12 +381,13 @@ const VAPID_PUBLIC_KEY = "BMlAUJLoE9ePByckfiTIEeHDLsuAwfazX40aHG_xW7EaoRC45W5vxd
 // it only grants what Row Level Security allows, same idea as the VAPID public key above.
 const SB_ACCOUNTS_URL = "https://ikkbdtsjedwdhadnmalj.supabase.co";
 const SB_ACCOUNTS_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlra2JkdHNqZWR3ZGhhZG5tYWxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzMTYyMTYsImV4cCI6MjEwNDg5MjIxNn0.mVpGAd2PHPdisJLZVS9eojyl4EgjS_oGrYrxFE4nJcs";
-const CATEGORIES = [
+let CATEGORIES = [
   {v:"health",l:"Health",e:"❤️"},{v:"mindfulness",l:"Mindfulness",e:"🧘"},
   {v:"productivity",l:"Productivity",e:"⚡"},{v:"social",l:"Social",e:"👥"},
   {v:"self_care",l:"Self Care",e:"🛋️"},{v:"learning",l:"Learning",e:"📚"},
   {v:"fitness",l:"Fitness",e:"💪"},{v:"other",l:"Other",e:"✨"}
 ];
+const DEFAULT_CATEGORIES = JSON.parse(JSON.stringify(CATEGORIES));
 const COLORS = ["#2563EB","#14B8A6","#FB923C","#EC4899","#3B82F6","#F43F5E","#10B981","#EAB308"];
 const THEMES = {
   default:    {label:"Classic",        icon:"🎯", accent:"#2563EB", accent2:"#14B8A6", font:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif", emoji:{complete:"✅",streak:"🔥",hero:"✨",greet:"👋"}},
@@ -398,13 +399,18 @@ const THEMES = {
 };
 function currentTheme(){ return THEMES[(state&&state.profile&&state.profile.aestheticTheme)||"default"] || THEMES.default; }
 function themeEmoji(key){ return currentTheme().emoji[key] || THEMES.default.emoji[key]; }
-const MOODS = [{v:"great",l:"Great",e:"😄"},{v:"good",l:"Good",e:"🙂"},{v:"okay",l:"Okay",e:"😐"},{v:"struggled",l:"Struggled",e:"😤"}];
+let MOODS = [{v:"great",l:"Great",e:"😄"},{v:"good",l:"Good",e:"🙂"},{v:"okay",l:"Okay",e:"😐"},{v:"struggled",l:"Struggled",e:"😤"}];
+const DEFAULT_MOODS = JSON.parse(JSON.stringify(MOODS));
 function moodValueNum(v){ return {great:4,good:3,okay:2,struggled:1}[v] || 0; }
-const SLEEP_QUALITY = [{v:"great",l:"Great",e:"😴"},{v:"good",l:"Good",e:"🙂"},{v:"okay",l:"Okay",e:"😐"},{v:"poor",l:"Poor",e:"😩"}];
+let SLEEP_QUALITY = [{v:"great",l:"Great",e:"😴"},{v:"good",l:"Good",e:"🙂"},{v:"okay",l:"Okay",e:"😐"},{v:"poor",l:"Poor",e:"😩"}];
+const DEFAULT_SLEEP_QUALITY = JSON.parse(JSON.stringify(SLEEP_QUALITY));
 function sleepQualityValueNum(v){ return {great:4,good:3,okay:2,poor:1}[v] || 0; }
-const SYMPTOM_OPTIONS = ["Headache","Fatigue","Anxious","Stomachache","Irritable","Trouble focusing","Muscle tension","Low energy"];
-const DISTRACTION_OPTIONS = ["Phone/social media","Noise","Other people","Worrying thoughts","Hunger","Clutter/messy space","TV/screens","Overwhelm"];
-const NEED_OPTIONS = ["Rest","More sleep","Encouragement","Accountability check-in","Quiet space","Movement/exercise","Time with others","Help from someone"];
+let SYMPTOM_OPTIONS = ["Headache","Fatigue","Anxious","Stomachache","Irritable","Trouble focusing","Muscle tension","Low energy"];
+const DEFAULT_SYMPTOM_OPTIONS = SYMPTOM_OPTIONS.slice();
+let DISTRACTION_OPTIONS = ["Phone/social media","Noise","Other people","Worrying thoughts","Hunger","Clutter/messy space","TV/screens","Overwhelm"];
+const DEFAULT_DISTRACTION_OPTIONS = DISTRACTION_OPTIONS.slice();
+let NEED_OPTIONS = ["Rest","More sleep","Encouragement","Accountability check-in","Quiet space","Movement/exercise","Time with others","Help from someone"];
+const DEFAULT_NEED_OPTIONS = NEED_OPTIONS.slice();
 const CHECKIN_FREQUENCIES = [{v:"daily",l:"Daily"},{v:"3x_week",l:"3x per week"},{v:"custom",l:"Custom days"}];
 const COMPANIONS = ["Sam","Riley","Jordan","Casey","Morgan","Alex"];
 const GREETINGS = [
@@ -1135,6 +1141,70 @@ async function acctFetchProfileFlags(){
     return rows[0]||null;
   }catch(e){ return null; }
 }
+/* Shared/global content (categories, moods, check-in options) — admin-editable, applies to every profile. */
+let _globalConfigLoaded = false;
+function applyGlobalConfig(cfg){
+  if(!cfg) return;
+  if(Array.isArray(cfg.categories) && cfg.categories.length) CATEGORIES = cfg.categories;
+  if(Array.isArray(cfg.moods) && cfg.moods.length) MOODS = cfg.moods;
+  if(Array.isArray(cfg.sleepQuality) && cfg.sleepQuality.length) SLEEP_QUALITY = cfg.sleepQuality;
+  if(Array.isArray(cfg.symptomOptions) && cfg.symptomOptions.length) SYMPTOM_OPTIONS = cfg.symptomOptions;
+  if(Array.isArray(cfg.distractionOptions) && cfg.distractionOptions.length) DISTRACTION_OPTIONS = cfg.distractionOptions;
+  if(Array.isArray(cfg.needOptions) && cfg.needOptions.length) NEED_OPTIONS = cfg.needOptions;
+}
+async function loadGlobalConfig(){
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_global_config?id=eq.global&select=config_json", {headers: acctHeaders(true)});
+    if(!res.ok) return;
+    const rows = await res.json();
+    if(rows[0] && rows[0].config_json) applyGlobalConfig(rows[0].config_json);
+    _globalConfigLoaded = true;
+    render();
+  }catch(e){}
+}
+async function saveGlobalConfigFn(cfg){
+  if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
+  const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_global_config?on_conflict=id", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+    body: JSON.stringify({ id:"global", config_json: cfg, updated_at: new Date().toISOString() })
+  });
+  if(!res.ok){
+    let detail = "";
+    try{ const j = await res.json(); detail = j.message || j.error || ""; }catch(e){}
+    throw new Error("Couldn't save"+(detail?": "+detail.slice(0,140):""));
+  }
+}
+function slugifyGc(s){ return ((s||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")) || "item"; }
+function parseEmojiLabelLines(text, existingArr){
+  const lines = (text||"").split("\n").map(l=>l.trim()).filter(Boolean);
+  const used = {};
+  return lines.map((line,i)=>{
+    const parts = line.split("|").map(p=>p.trim());
+    const e = parts[0] || "•";
+    const l = parts[1] || parts[0] || "Untitled";
+    let v = (existingArr[i] && existingArr[i].v) || slugifyGc(l);
+    let base = v, n = 2;
+    while(used[v]){ v = base+"_"+n; n++; }
+    used[v] = true;
+    return {v, l, e};
+  });
+}
+function parseGcLines(text){ return (text||"").split("\n").map(l=>l.trim()).filter(Boolean); }
+function globalConfigEditorHtml(){
+  return '<h2>🧩 Global Content</h2>'+
+    '<p class="hc-meta">Edit the shared options everyone sees across habits, goals, and check-ins. Saves instantly for every profile — no need to update each client separately.</p>'+
+    '<div class="field"><label>Habit/Goal Categories — emoji | label, one per line</label><textarea id="gc_categories" rows="6" style="font-family:monospace;font-size:13px;">'+escapeHtml(CATEGORIES.map(c=>c.e+" | "+c.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Mood options — emoji | label, one per line</label><textarea id="gc_moods" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(MOODS.map(m=>m.e+" | "+m.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Sleep quality options — emoji | label, one per line</label><textarea id="gc_sleep" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(SLEEP_QUALITY.map(s=>s.e+" | "+s.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Symptom options — one per line</label><textarea id="gc_symptoms" rows="4">'+escapeHtml(SYMPTOM_OPTIONS.join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Distraction options — one per line</label><textarea id="gc_distractions" rows="4">'+escapeHtml(DISTRACTION_OPTIONS.join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Need / support options — one per line</label><textarea id="gc_needs" rows="4">'+escapeHtml(NEED_OPTIONS.join("\n"))+'</textarea></div>'+
+    '<p class="hc-meta">Tip: adding new lines at the end is always safe. Reordering or deleting from the middle of the top three lists can shift which item already-logged data points to — worth double-checking after a big reshuffle.</p>'+
+    '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="resetGlobalConfigDefaults">Reset to Defaults</button>'+
+    '<button class="btn" style="flex:1" data-action="saveGlobalConfig">Save for Everyone</button></div>'+
+    '<button class="btn ghost sm block" style="margin-top:8px;" data-action="closeModal">Cancel</button>';
+}
 function serializableStateSnapshot(){
   const copy = JSON.parse(JSON.stringify(state));
   if(copy.profile) delete copy.profile.cloudSession;
@@ -1203,7 +1273,8 @@ function renderAdmin(){
       '</div>';
   }
   html += '<button class="btn block" style="margin-bottom:10px;" data-action="openNewClientEmailForm">✉️ New Client (Email)</button>';
-  html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
+  html += '<button class="btn secondary block" style="margin-bottom:10px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
+  html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openGlobalConfigEditor">🧩 Edit Global Content</button>';
   if(!adminClientList.length){ html += emptyState("👥","No clients yet","Approve a pending request above, or use + New Client to set one up with a username and password."); return html; }
   html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
@@ -1725,9 +1796,9 @@ function bootApp(){
   const profiles = loadProfiles();
   const curId = getCurrentProfileId();
   if(curId && profiles.find(p=>p.id===curId)){
-    activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
+    activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
   } else if(profiles.length===1 && profiles[0].id!==DEMO_PROFILE_ID){
-    activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn();
+    activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
   } else if(profiles.length>0){
     renderProfilePicker();
   } else {
@@ -1941,6 +2012,7 @@ async function completeCloudLogin(json, displayNameHint){
   closeModal();
   location.hash = "#/home";
   render();
+  loadGlobalConfig();
   toast("Logged in!");
 }
 async function fetchProfileFlagsByToken(token, userId){
@@ -6372,6 +6444,7 @@ document.addEventListener("click", async function(e){
         saveState(); closeModal();
         _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
         render();
+        loadGlobalConfig();
         toast("Logged in!");
       }catch(err){ toast(err.message); }
       break;
@@ -6456,6 +6529,37 @@ document.addEventListener("click", async function(e){
         _recoveryAccessToken = null;
         toast("Password updated — log in with your new password");
         renderLoginGate();
+      }catch(err){ toast(err.message); }
+      break;
+    }
+    case "openGlobalConfigEditor": openModal(globalConfigEditorHtml()); break;
+    case "resetGlobalConfigDefaults": {
+      CATEGORIES = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+      MOODS = JSON.parse(JSON.stringify(DEFAULT_MOODS));
+      SLEEP_QUALITY = JSON.parse(JSON.stringify(DEFAULT_SLEEP_QUALITY));
+      SYMPTOM_OPTIONS = DEFAULT_SYMPTOM_OPTIONS.slice();
+      DISTRACTION_OPTIONS = DEFAULT_DISTRACTION_OPTIONS.slice();
+      NEED_OPTIONS = DEFAULT_NEED_OPTIONS.slice();
+      openModal(globalConfigEditorHtml());
+      toast("Reset in this editor — tap Save for Everyone to make it permanent");
+      break;
+    }
+    case "saveGlobalConfig": {
+      const cfg = {
+        categories: parseEmojiLabelLines(document.getElementById("gc_categories").value, CATEGORIES),
+        moods: parseEmojiLabelLines(document.getElementById("gc_moods").value, MOODS),
+        sleepQuality: parseEmojiLabelLines(document.getElementById("gc_sleep").value, SLEEP_QUALITY),
+        symptomOptions: parseGcLines(document.getElementById("gc_symptoms").value),
+        distractionOptions: parseGcLines(document.getElementById("gc_distractions").value),
+        needOptions: parseGcLines(document.getElementById("gc_needs").value)
+      };
+      if(!cfg.categories.length || !cfg.moods.length || !cfg.sleepQuality.length){ toast("Categories, moods, and sleep quality can't be empty"); return; }
+      try{
+        await saveGlobalConfigFn(cfg);
+        applyGlobalConfig(cfg);
+        closeModal();
+        render();
+        toast("Saved — this now applies to every profile");
       }catch(err){ toast(err.message); }
       break;
     }
