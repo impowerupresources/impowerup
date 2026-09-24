@@ -1350,6 +1350,7 @@ function renderAdmin(){
     '<button class="btn ghost sm" data-action="openAiClientInsights" data-id="'+c.id+'">✨ Insights</button>'+
     '<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username?("@"+c.username):(c.display_name||""))+'">🔑 Reset Password</button>'+
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
+    '<button class="btn ghost sm" style="color:var(--danger);" data-action="adminDeleteClient" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🗑️ Delete</button>'+
     '</div>')+'</div>').join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
   return html;
@@ -6727,6 +6728,11 @@ document.addEventListener("click", async function(e){
     case "adminRejectClient": {
       if(!confirm("Reject and delete this request? This can't be undone.")) return;
       try{ await adminApproveClientFn(id, "reject"); toast("Request rejected"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
+      break;
+    }
+    case "adminDeleteClient": {
+      if(!confirm("Permanently delete "+(v||"this client")+"'s account? This removes their login and all of their habit/goal/assessment data. This can't be undone.")) return;
+      try{ await adminApproveClientFn(id, "delete"); toast("Client deleted"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
       break;
     }
     case "toggleCloudSync": {
