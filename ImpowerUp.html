@@ -1275,6 +1275,8 @@ async function openAsClient(clientId){
     const fresh = defaultState();
     state = snap ? Object.assign(fresh, snap) : fresh;
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+    state.profile.onboarded = true;
+    if(!state.profile.firstName && !state.profile.nickname) state.profile.firstName = clientName;
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
     _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
@@ -2693,8 +2695,9 @@ function dashboardOrderRowHtml(id, i, total){
 function dashboardEditModalHtml(){
   const order = getDashboardOrder();
   return '<h2>🧩 Customize Dashboard</h2><p class="hc-meta">Drag ⠿ to reorder sections, or tap 👁️ to hide one from your Home screen.</p>'+
+    (_adminViewing ? '<div style="background:var(--danger);color:#fff;font-weight:700;font-size:12.5px;padding:8px 10px;border-radius:10px;margin-bottom:10px;">🛡️ This won\'t save for '+escapeHtml(_adminViewing.name)+' until you tap "Save & Exit" at the top of the screen after closing this.</div>' : '')+
     '<div id="dashOrderList">'+order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("")+'</div>'+
-    '<div class="modal-actions"><button class="btn block" data-action="closeModal">Done</button></div>';
+    '<div class="modal-actions"><button class="btn block" data-action="closeDashboardEditModal">Done</button></div>';
 }
 function refreshDashOrderList(){
   const order = getDashboardOrder();
@@ -5258,6 +5261,11 @@ document.addEventListener("click", async function(e){
 
   switch(action){
     case "closeModal": closeModal(); break;
+    case "closeDashboardEditModal": {
+      closeModal();
+      if(_adminViewing) toast("Tap \"Save & Exit\" at the top to save this for "+_adminViewing.name);
+      break;
+    }
 
     case "openPickerSettings": {
       const cur = getPickerTheme();
