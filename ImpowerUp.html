@@ -166,6 +166,11 @@
   .swatch-group{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
   .swatch{width:32px;height:32px;border-radius:50%;border:2px solid transparent;flex-shrink:0;}
   .swatch.selected{border-color:var(--text);box-shadow:0 0 0 2px var(--surface);}
+  .emoji-picker-wrap{position:relative;display:inline-block;}
+  .emoji-picker-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:80;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px;box-shadow:var(--shadow);grid-template-columns:repeat(8,1fr);gap:2px;max-height:190px;overflow-y:auto;width:264px;}
+  .emoji-picker-panel.open{display:grid;}
+  .emoji-picker-btn{font-size:18px;padding:5px;border-radius:7px;cursor:pointer;text-align:center;line-height:1.2;}
+  .emoji-picker-btn:hover{background:var(--surface-2);}
   .colorwheel-input{width:36px;height:36px;border:none;border-radius:50%;padding:0;overflow:hidden;background:none;cursor:pointer;}
   .modal-actions{display:flex;gap:10px;margin-top:18px;}
 
@@ -1242,6 +1247,19 @@ function aiConfirmModalHtml(action){
       '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
       : '<div class="modal-actions"><button class="btn block" data-action="closeModal">OK</button></div>');
 }
+/* ---- Reusable emoji picker: a small dropdown of common emojis. Works on either a plain
+   text input (replaces its value) or a textarea (inserts at the cursor), so the same picker
+   powers the profile/habit/goal/event/task emoji fields and the Global Content editor's
+   "emoji | label" lists. Pure DOM manipulation on open/pick — no render() — so it never
+   disturbs other fields already filled in on the same form. */
+const EMOJI_PICKER_SET = ["😀","😃","😄","😁","😆","🥹","😊","🙂","🙃","😉","😍","🥰","😘","😋","😛","🤪","🤨","🧐","🤓","😎","🥳","🥺","😢","😭","😤","😡","😱","😨","😰","🤗","🤔","😴","🥱","🤒","🥵","🥶","😇","🤩","🫶","💪","🧠","❤️","🧡","💛","💚","💙","💜","🤍","⭐","🌟","✨","🔥","💧","🌈","☀️","🌙","⚡","❄️","🌱","🌸","🍀","🎯","🏆","🥇","🎉","🎈","📚","✏️","📝","💻","📱","🎨","🎵","🎧","🎮","⚽","🏀","🏈","⚾","🎾","🏐","🏋️","🧘","🏃","🚴","🏊","🧗","🍎","🥗","☕","🛌","🧹","🧺","💊","🩺","🦷","🚿","🐶","🐱","🐢","🦋","🌳","👍","👏","🙌","🤝","💯","✅","📌","🗓️","⏰","🧩","😐","😑","🎬"];
+function emojiPickerHtml(targetId){
+  return '<span class="emoji-picker-wrap">'+
+    '<button type="button" class="icon-btn" data-action="toggleEmojiPicker" data-id="'+targetId+'" title="Pick an emoji">🙂+</button>'+
+    '<div id="emojiPanel_'+targetId+'" class="emoji-picker-panel">'+
+    EMOJI_PICKER_SET.map(e=>'<div class="emoji-picker-btn" data-action="pickEmoji" data-id="'+targetId+'" data-v="'+e+'">'+e+'</div>').join("")+
+    '</div></span>';
+}
 function slugifyGc(s){ return ((s||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")) || "item"; }
 function parseEmojiLabelLines(text, existingArr){
   const lines = (text||"").split("\n").map(l=>l.trim()).filter(Boolean);
@@ -1261,9 +1279,9 @@ function parseGcLines(text){ return (text||"").split("\n").map(l=>l.trim()).filt
 function globalConfigEditorHtml(){
   return '<h2>🧩 Global Content</h2>'+
     '<p class="hc-meta">Edit the shared options everyone sees across habits, goals, and check-ins. Saves instantly for every profile — no need to update each client separately.</p>'+
-    '<div class="field"><label>Habit/Goal Categories — emoji | label, one per line</label><textarea id="gc_categories" rows="6" style="font-family:monospace;font-size:13px;">'+escapeHtml(CATEGORIES.map(c=>c.e+" | "+c.l).join("\n"))+'</textarea></div>'+
-    '<div class="field"><label>Mood options — emoji | label, one per line</label><textarea id="gc_moods" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(MOODS.map(m=>m.e+" | "+m.l).join("\n"))+'</textarea></div>'+
-    '<div class="field"><label>Sleep quality options — emoji | label, one per line</label><textarea id="gc_sleep" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(SLEEP_QUALITY.map(s=>s.e+" | "+s.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Habit/Goal Categories — emoji | label, one per line</label>'+emojiPickerHtml("gc_categories")+'<textarea id="gc_categories" rows="6" style="font-family:monospace;font-size:13px;">'+escapeHtml(CATEGORIES.map(c=>c.e+" | "+c.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Mood options — emoji | label, one per line</label>'+emojiPickerHtml("gc_moods")+'<textarea id="gc_moods" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(MOODS.map(m=>m.e+" | "+m.l).join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Sleep quality options — emoji | label, one per line</label>'+emojiPickerHtml("gc_sleep")+'<textarea id="gc_sleep" rows="4" style="font-family:monospace;font-size:13px;">'+escapeHtml(SLEEP_QUALITY.map(s=>s.e+" | "+s.l).join("\n"))+'</textarea></div>'+
     '<div class="field"><label>Symptom options — one per line</label><textarea id="gc_symptoms" rows="4">'+escapeHtml(SYMPTOM_OPTIONS.join("\n"))+'</textarea></div>'+
     '<div class="field"><label>Distraction options — one per line</label><textarea id="gc_distractions" rows="4">'+escapeHtml(DISTRACTION_OPTIONS.join("\n"))+'</textarea></div>'+
     '<div class="field"><label>Need / support options — one per line</label><textarea id="gc_needs" rows="4">'+escapeHtml(NEED_OPTIONS.join("\n"))+'</textarea></div>'+
@@ -1292,15 +1310,26 @@ async function syncStateToCloud(){
     return true;
   }catch(e){ return false; }
 }
-let _lastCloudSyncCheck = 0;
+/* Debounced auto-sync: fires ~4s after the last edit rather than waiting up to 2 minutes,
+   so a task/habit added right before someone closes the tab has a real chance to reach the
+   cloud. flushCloudSyncNow() (wired to visibilitychange/pagehide below) forces an immediate
+   sync attempt the moment the tab is hidden or closed, so we don't depend on the debounce
+   timer alone. */
+let _syncDebounceTimer = null;
 function maybeAutoSyncCloud(){
   if(_adminViewing) return; // never sync while browsing as a client — would overwrite the admin's own row with client data
-  if(!state.profile.cloudSyncEnabled) return;
-  const now = Date.now();
-  if(now - _lastCloudSyncCheck < 120000) return;
-  _lastCloudSyncCheck = now;
+  if(!state.profile.cloudSyncEnabled || !state.profile.cloudSession) return;
+  if(_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+  _syncDebounceTimer = setTimeout(()=>{ _syncDebounceTimer = null; syncStateToCloud(); }, 4000);
+}
+function flushCloudSyncNow(){
+  if(_adminViewing) return;
+  if(!state || !state.profile || !state.profile.cloudSyncEnabled || !state.profile.cloudSession) return;
+  if(_syncDebounceTimer){ clearTimeout(_syncDebounceTimer); _syncDebounceTimer = null; }
   syncStateToCloud();
 }
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState==="hidden") flushCloudSyncNow(); });
+window.addEventListener("pagehide", flushCloudSyncNow);
 
 /* ---- Admin: view/edit any client's cloud data using the same app screens ---- */
 let adminClientList = null;
@@ -2166,7 +2195,7 @@ async function acctSetNewPassword(token, password){
 function newProfileFormHtml(saveAction){
   saveAction = saveAction || "saveNewProfile";
   return '<h2>New Profile</h2>'+
-    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Icon</label><input id="np_emoji" type="text" maxlength="4" value="🙂"></div>'+
+    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Icon</label><input id="np_emoji" type="text" maxlength="4" value="🙂">'+emojiPickerHtml("np_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>First name</label><input id="np_first" type="text" placeholder="First name"></div></div>'+
     '<div class="field"><label>Last name</label><input id="np_last" type="text" placeholder="Last name"></div>'+
     '<div class="field"><label>Nickname (optional)</label><input id="np_nick" type="text" placeholder="What should we call you?"></div>'+
@@ -3044,7 +3073,7 @@ function habitFormHtml(h){
   h = h || {title:"",description:"",emoji:"✨",frequency:"daily",custom_days:[],category:"other",points_per_completion:10,color:COLORS[0]};
   return '<h2>'+(h.id?"Edit Habit":"New Habit")+'</h2>'+
     '<div class="row-inline">'+
-    '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="f_emoji" type="text" maxlength="4" value="'+escapeHtml(h.emoji)+'"></div>'+
+    '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="f_emoji" type="text" maxlength="4" value="'+escapeHtml(h.emoji)+'">'+emojiPickerHtml("f_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="f_title" type="text" placeholder="e.g. Drink water" value="'+escapeHtml(h.title)+'"></div>'+
     '</div>'+
     '<div class="field"><label>Description (optional)</label><textarea id="f_desc">'+escapeHtml(h.description||"")+'</textarea></div>'+
@@ -3133,7 +3162,7 @@ function goalFormHtml(g){
   g = g || {title:"",description:"",emoji:"🎯",target_date:"",milestones:[],progress:0,status:"active",category:"other",color:COLORS[1]};
   return '<h2>'+(g.id?"Edit Goal":"New Goal")+'</h2>'+
     '<div class="row-inline">'+
-    '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'"></div>'+
+    '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'">'+emojiPickerHtml("g_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="g_title" type="text" placeholder="e.g. Run a 5K" value="'+escapeHtml(g.title)+'"></div></div>'+
     '<div class="field"><label>Description</label><textarea id="g_desc">'+escapeHtml(g.description||"")+'</textarea></div>'+
     '<div class="field"><label>Category</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(g.category===c.v?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
@@ -3414,7 +3443,7 @@ function customEventFormHtml(dateStr, ev){
   const unitLabels = {day:"day(s)", week:"week(s)", month:"month(s)"};
   const showDays = repeat==="weekly" || (repeat==="custom" && repeatUnit==="week");
   return '<h2>'+(ev.id?"Edit Event":"New Event")+'</h2>'+
-    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="ce_emoji" type="text" maxlength="4" value="'+escapeHtml(ev.emoji)+'"></div>'+
+    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="ce_emoji" type="text" maxlength="4" value="'+escapeHtml(ev.emoji)+'">'+emojiPickerHtml("ce_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="ce_label" type="text" placeholder="e.g. Dentist appointment" value="'+escapeHtml(ev.label)+'"></div></div>'+
     '<div class="row-inline"><div class="field"><label>Date</label><input id="ce_date" type="date" value="'+(ev.date||dateStr)+'"></div>'+
     '<div class="field"><label>Time</label><input id="ce_time" type="time" value="'+(ev.time||"09:00")+'"></div></div>'+
@@ -3709,7 +3738,7 @@ function openTemplateForm(id){
 function templateFormHtml(t){
   t = t || {name:"", emoji:"📅", color:COLORS[0], description:""};
   return '<h2>'+(t.id?"Edit Schedule":"New Schedule")+'</h2>'+
-    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="t_emoji" type="text" maxlength="4" value="'+escapeHtml(t.emoji)+'"></div>'+
+    '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="t_emoji" type="text" maxlength="4" value="'+escapeHtml(t.emoji)+'">'+emojiPickerHtml("t_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Name</label><input id="t_name" type="text" placeholder="e.g. Class Schedule A Day" value="'+escapeHtml(t.name)+'"></div></div>'+
     '<div class="field"><label>Description</label><input id="t_desc" type="text" value="'+escapeHtml(t.description||"")+'"></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(templateFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickTColor" data-v="'+c+'"></div>').join("")+'</div></div>'+
@@ -5979,6 +6008,30 @@ document.addEventListener("click", async function(e){
     case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="horizontal"?"vertical":"horizontal"); saveState(); render(); break;
     case "toggleMonthGlanceView": state.profile.monthGlanceView = (state.profile.monthGlanceView==="expanded"?"compact":"expanded"); saveState(); render(); break;
     case "toggleWeekStartDay": state.profile.weekStartDay = (state.profile.weekStartDay==="monday"?"sunday":"monday"); saveState(); render(); break;
+    case "toggleEmojiPicker": {
+      const panel = document.getElementById("emojiPanel_"+id);
+      const wasOpen = panel && panel.classList.contains("open");
+      document.querySelectorAll(".emoji-picker-panel.open").forEach(p=>p.classList.remove("open"));
+      if(panel && !wasOpen) panel.classList.add("open");
+      break;
+    }
+    case "pickEmoji": {
+      const inp = document.getElementById(id);
+      if(inp){
+        if(inp.tagName==="TEXTAREA"){
+          const start = inp.selectionStart!=null ? inp.selectionStart : inp.value.length;
+          const end = inp.selectionEnd!=null ? inp.selectionEnd : inp.value.length;
+          inp.value = inp.value.slice(0,start)+v+inp.value.slice(end);
+          const newPos = start+v.length;
+          inp.focus(); inp.setSelectionRange(newPos,newPos);
+        } else {
+          inp.value = v;
+        }
+      }
+      const panel = document.getElementById("emojiPanel_"+id);
+      if(panel) panel.classList.remove("open");
+      break;
+    }
     case "openApplyTemplateModal": openApplyTemplateModal(plannerDate); break;
     case "applyTemplate": {
       const date = t.getAttribute("data-date");
