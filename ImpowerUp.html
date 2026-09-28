@@ -4265,7 +4265,7 @@ function fmtMinutesDuration(mins){
   return m+"m";
 }
 function pendingTasksTotalMinutes(){
-  return (state.tasks||[]).filter(t=>t.status!=="done").reduce((sum,t)=>sum+(Number(t.planned_minutes)||0),0);
+  return (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).reduce((sum,t)=>sum+(Number(t.planned_minutes)||0),0);
 }
 function bedtimeTargetDate(){
   const bt = state.profile.bedtime||"22:00";
