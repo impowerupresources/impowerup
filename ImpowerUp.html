@@ -3166,6 +3166,12 @@ function renderGoals(){
       '<div style="display:flex;gap:6px;">'+(g.status==="completed"?'<button class="icon-btn" data-action="attachProof" data-kind="goal" data-id="'+g.id+'">'+(g.proof_photo_url?"🖼️":"📷")+'</button>':'')+
       '<button class="icon-btn" data-action="editGoal" data-id="'+g.id+'">✏️</button></div></div>'+
       (g.description?'<div style="font-size:13px;color:var(--text-muted);margin-top:8px;">'+escapeHtml(g.description)+'</div>':'')+
+      ((g.smart_specific||g.smart_measurable||g.smart_achievable||g.smart_relevant)?
+        '<div style="margin-top:10px;padding:10px;border-radius:10px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px;">'+
+        [["S",g.smart_specific],["M",g.smart_measurable],["A",g.smart_achievable],["R",g.smart_relevant]]
+          .filter(([,v])=>v).map(([letter,v])=>'<div style="font-size:12.5px;display:flex;gap:8px;"><b style="flex-shrink:0;color:var(--accent);">'+letter+'</b><span>'+escapeHtml(v)+'</span></div>').join("")+
+        (g.target_date?'<div style="font-size:12.5px;display:flex;gap:8px;"><b style="flex-shrink:0;color:var(--accent);">T</b><span>'+fmtDatePretty(g.target_date)+'</span></div>':"")+
+        '</div>' : '')+
       '<div class="progress-bar"><div style="width:'+pct+'%;"></div></div>'+
       '<div class="hc-meta" style="margin-top:6px;">'+pct+'% complete</div>'+
       (ms.length?'<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">'+ms.map((m,i)=>
@@ -3177,16 +3183,22 @@ function renderGoals(){
   return html;
 }
 function goalFormHtml(g){
-  g = g || {title:"",description:"",emoji:"🎯",target_date:"",milestones:[],progress:0,status:"active",category:"other",color:COLORS[1]};
+  g = g || {title:"",description:"",emoji:"🎯",target_date:"",milestones:[],progress:0,status:"active",category:"other",color:COLORS[1],smart_specific:"",smart_measurable:"",smart_achievable:"",smart_relevant:""};
   return '<h2>'+(g.id?"Edit Goal":"New Goal")+'</h2>'+
     '<div class="row-inline">'+
     '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'">'+emojiPickerHtml("g_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="g_title" type="text" placeholder="e.g. Run a 5K" value="'+escapeHtml(g.title)+'"></div></div>'+
-    '<div class="field"><label>Notes (optional)</label><textarea id="g_desc">'+escapeHtml(g.description||"")+'</textarea></div>'+
     '<div class="field"><label>Category</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(g.category===c.v?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
-    '<div class="row-inline">'+
-    '<div class="field"><label>Target date</label><input id="g_date" type="date" value="'+(g.target_date||"")+'"></div>'+
-    '<div class="field"><label>Status</label><select id="g_status">'+["active","paused","completed"].map(s=>'<option value="'+s+'" '+(g.status===s?"selected":"")+'>'+s+'</option>').join("")+'</select></div></div>'+
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);"><div style="font-weight:800;font-size:14px;margin-bottom:2px;">🎯 SMART Goal Framework</div>'+
+    '<p class="hc-meta" style="margin-bottom:10px;">Optional, but a goal is easier to hit when it\'s Specific, Measurable, Achievable, Relevant, and Time-bound.</p>'+
+    '<div class="field"><label>S — Specific: what exactly will you accomplish?</label><textarea id="g_smart_s" rows="2" placeholder="e.g. Run a full 5K (3.1 miles) without stopping">'+escapeHtml(g.smart_specific||"")+'</textarea></div>'+
+    '<div class="field"><label>M — Measurable: how will you know you\'ve succeeded?</label><textarea id="g_smart_m" rows="2" placeholder="e.g. Complete a timed 5K run under 35 minutes">'+escapeHtml(g.smart_measurable||"")+'</textarea></div>'+
+    '<div class="field"><label>A — Achievable: what makes this realistic for you right now?</label><textarea id="g_smart_a" rows="2" placeholder="e.g. I can already run 2 miles; I have time to train 3x/week">'+escapeHtml(g.smart_achievable||"")+'</textarea></div>'+
+    '<div class="field"><label>R — Relevant: why does this goal matter to you?</label><textarea id="g_smart_r" rows="2" placeholder="e.g. It supports my bigger goal of getting healthier">'+escapeHtml(g.smart_relevant||"")+'</textarea></div>'+
+    '<div class="field"><label>T — Time-bound: target date</label><input id="g_date" type="date" value="'+(g.target_date||"")+'"></div>'+
+    '</div>'+
+    '<div class="field" style="margin-top:10px;"><label>Additional notes (optional)</label><textarea id="g_desc">'+escapeHtml(g.description||"")+'</textarea></div>'+
+    '<div class="field"><label>Status</label><select id="g_status">'+["active","paused","completed"].map(s=>'<option value="'+s+'" '+(g.status===s?"selected":"")+'>'+s+'</option>').join("")+'</select></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(g.color===c?"selected":"")+'" style="background:'+c+'" data-action="pickGColor" data-v="'+c+'"></div>').join("")+'</div></div>'+
     '<div class="field"><label>Milestones</label><div id="milestoneList">'+(g.milestones||[]).map((m,i)=>
       '<div class="row-inline" style="margin-bottom:6px;"><input type="text" class="msInput" value="'+escapeHtml(m.title)+'" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><button class="icon-btn" type="button" data-action="removeMilestoneRow" data-idx="'+i+'">✕</button></div>').join("")+
@@ -5977,7 +5989,11 @@ document.addEventListener("click", async function(e){
         emoji: document.getElementById("g_emoji").value.trim() || "🎯",
         category: goalFormCat, target_date: document.getElementById("g_date").value,
         status: document.getElementById("g_status").value,
-        color: goalFormColor, milestones, progress
+        color: goalFormColor, milestones, progress,
+        smart_specific: (document.getElementById("g_smart_s").value||"").trim(),
+        smart_measurable: (document.getElementById("g_smart_m").value||"").trim(),
+        smart_achievable: (document.getElementById("g_smart_a").value||"").trim(),
+        smart_relevant: (document.getElementById("g_smart_r").value||"").trim()
       };
       const wasCompleted = id ? (state.goals.find(x=>x.id===id)||{}).status==="completed" : false;
       let goalObj;
@@ -6794,7 +6810,9 @@ document.addEventListener("click", async function(e){
         const payload = {
           id: uid(), title: (action.title||"Untitled goal").trim(), description:"", emoji:"🎯",
           category: action.category || "other", target_date: action.target_date || "",
-          status:"active", color: COLORS[state.goals.length % COLORS.length], milestones:[], progress:0
+          status:"active", color: COLORS[state.goals.length % COLORS.length], milestones:[], progress:0,
+          smart_specific: action.smart_specific||"", smart_measurable: action.smart_measurable||"",
+          smart_achievable: action.smart_achievable||"", smart_relevant: action.smart_relevant||""
         };
         state.goals.push(payload);
         if(action.reminder_enabled){
