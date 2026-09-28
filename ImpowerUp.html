@@ -394,6 +394,23 @@ let CATEGORIES = [
 ];
 const DEFAULT_CATEGORIES = JSON.parse(JSON.stringify(CATEGORIES));
 const COLORS = ["#2563EB","#14B8A6","#FB923C","#EC4899","#3B82F6","#F43F5E","#10B981","#EAB308"];
+const PRIORITY_LEVELS = [
+  {v:"low",l:"Low",e:"🟢",c:"#10B981"},
+  {v:"medium",l:"Medium",e:"🟡",c:"#EAB308"},
+  {v:"high",l:"High",e:"🔴",c:"#F43F5E"}
+];
+function priorityInfo(v){ return PRIORITY_LEVELS.find(p=>p.v===v) || PRIORITY_LEVELS[1]; }
+function priorityRank(v){ const i = PRIORITY_LEVELS.findIndex(p=>p.v===v); return i<0?1:i; }
+function priorityBadgeHtml(v){
+  if(!v || v==="medium") return "";
+  const p = priorityInfo(v);
+  return '<span class="tag" style="color:'+p.c+';">'+p.e+' '+p.l+'</span>';
+}
+function priorityChipsHtml(actionName, current){
+  return '<div class="field"><label>Priority</label><div class="chip-group">'+
+    PRIORITY_LEVELS.map(p=>'<div class="chip '+((current||"medium")===p.v?"selected":"")+'" data-action="'+actionName+'" data-v="'+p.v+'">'+p.e+' '+p.l+'</div>').join("")+
+    '</div></div>';
+}
 const THEMES = {
   default:    {label:"Classic",        icon:"🎯", accent:"#2563EB", accent2:"#14B8A6", font:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif", emoji:{complete:"✅",streak:"🔥",hero:"✨",greet:"👋"}},
   cute_girly: {label:"Cute & Girly",   icon:"🎀", accent:"#EC4899", accent2:"#F9A8D4", font:"'Segoe Print','Comic Sans MS',cursive", emoji:{complete:"💖",streak:"✨",hero:"🌸",greet:"💕"}},
@@ -549,7 +566,7 @@ function defaultState(){
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[]
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], grades:[]
   };
 }
 let state = null;
@@ -3009,7 +3026,7 @@ function habitRow(h){
   return '<div class="habit-card">'+
     '<div class="emoji-badge" style="background:'+h.color+'22;">'+(h.emoji||c.e)+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.title)+(h.alarm_reminder_id?' <span title="Has an alarm">🔔</span>':'')+'</div>'+
-    '<div class="hc-meta">'+categoryTagsHtml(cats)+(streak.current>0?'<span>🔥 '+streak.current+' day streak</span>':'')+'<span>+'+(h.points_per_completion||10)+' XP</span></div></div>'+
+    '<div class="hc-meta">'+categoryTagsHtml(cats)+(streak.current>0?'<span>🔥 '+streak.current+' day streak</span>':'')+'<span>+'+(h.points_per_completion||10)+' XP</span>'+priorityBadgeHtml(h.priority)+'</div></div>'+
     (done?'<button class="icon-btn" data-action="attachProof" data-kind="habitlog" data-id="'+(log?log.id:"")+'">'+(log&&log.proof_photo_url?"🖼️":"📷")+'</button>':
       '<button class="btn secondary sm" data-action="proveIt" data-id="'+h.id+'" data-date="'+todayStr()+'">Prove it 📸</button>')+
     '<button class="check-circle '+(done?"done":"")+'" data-action="toggleHabit" data-id="'+h.id+'">'+(done?"✓":"")+'</button>'+
@@ -3032,12 +3049,26 @@ function goalRow(g){
     '<div class="hc-meta" style="margin-top:6px;">'+pct+'% complete'+(g.target_date?' · due '+fmtDatePretty(g.target_date):'')+'</div>'+
     '</div></a>';
 }
+function subtaskProgressBadgeHtml(t){
+  const subs = t.subtasks||[];
+  if(!subs.length) return "";
+  const doneCount = subs.filter(s=>s.done).length;
+  return '<span class="tag">☑️ '+doneCount+'/'+subs.length+' subtasks</span>';
+}
+function subtaskChecklistHtml(t){
+  const subs = t.subtasks||[];
+  if(!subs.length) return "";
+  return '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">'+subs.map((s,i)=>
+    '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">'+
+    '<input type="checkbox" '+(s.done?"checked":"")+' data-action="toggleSubtask" data-id="'+t.id+'" data-idx="'+i+'" style="width:16px;height:16px;flex:0 0 auto;">'+
+    '<span style="'+(s.done?"text-decoration:line-through;color:var(--text-muted);":"")+'">'+escapeHtml(s.title)+'</span></label>').join("")+'</div>';
+}
 function taskRow(t){
   const cat = t.category ? catInfo(t.category) : null;
   return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
     '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-    '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(cat?' · '+escapeHtml(cat.l):'')+'</div></div>'+
+    '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+subtaskProgressBadgeHtml(t)+'</div></div>'+
     '<div style="display:flex;flex-direction:column;gap:6px;">'+
     '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Done</button>'+
     '<button class="icon-btn" data-action="openTaskForm" data-id="'+t.id+'">✏️</button>'+
@@ -3091,7 +3122,7 @@ function renderHabits(){
       '<div class="emoji-badge" style="background:'+h.color+'22;">'+(h.emoji||c.e)+'</div>'+
       '<div class="hc-body" data-action="editHabit" data-id="'+h.id+'" style="cursor:pointer;">'+
       '<div class="hc-title">'+escapeHtml(h.title)+(h.alarm_reminder_id?' 🔔':'')+'</div>'+
-      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span>'+h.frequency+'</span><span>🔥 '+streak.current+' · best '+streak.best+'</span></div></div>'+
+      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span>'+h.frequency+'</span><span>🔥 '+streak.current+' · best '+streak.best+'</span>'+priorityBadgeHtml(h.priority)+'</div></div>'+
       '<button class="check-circle '+(done?"done":"")+'" data-action="toggleHabit" data-id="'+h.id+'">'+(done?"✓":"")+'</button>'+
       '<button class="icon-btn" data-action="editHabit" data-id="'+h.id+'">✏️</button>'+
       '</div>';
@@ -3107,6 +3138,7 @@ function habitFormHtml(h){
     '</div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="f_desc">'+escapeHtml(h.description||"")+'</textarea></div>'+
     '<div class="field"><label>Category — tap to select one or more</label><div class="chip-group" id="habitCatChips">'+allCategories().map(c=>'<div class="chip '+(formCats.includes(c.v)?"selected":"")+'" data-action="pickCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="habit">+ Custom</div></div></div>'+
+    priorityChipsHtml("pickHabitPriority", formPriority)+
     '<div class="field"><label>Frequency</label><div class="chip-group">'+
       ["daily","weekdays","weekly","custom"].map(f=>'<div class="chip '+(h.frequency===f?"selected":"")+'" data-action="pickFreq" data-v="'+f+'">'+f+'</div>').join("")+'</div></div>'+
     '<div class="field" id="customDaysField" style="'+(h.frequency==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+
@@ -3120,7 +3152,7 @@ function habitFormHtml(h){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveHabit" data-id="'+(h.id||"")+'" style="flex:1">Save</button></div>';
 }
-let formCats=[], formFreq="daily", formDays=[], formColor=COLORS[0];
+let formCats=[], formFreq="daily", formDays=[], formColor=COLORS[0], formPriority="medium";
 function openHabitForm(id, prefill){
   const base = {title:"",description:"",emoji:"✨",frequency:"daily",custom_days:[],category:"other",points_per_completion:10,color:COLORS[0]};
   const h = id ? state.habits.find(x=>x.id===id) : (prefill ? Object.assign({}, base, prefill) : null);
@@ -3128,6 +3160,7 @@ function openHabitForm(id, prefill){
   formFreq = h ? h.frequency : "daily";
   formDays = h ? (h.custom_days||[]).slice() : [];
   formColor = h ? h.color : COLORS[0];
+  formPriority = h ? (h.priority||"medium") : "medium";
   const linkedReminder = h && h.alarm_reminder_id ? state.reminders.find(r=>r.id===h.alarm_reminder_id) : null;
   habitAlarmOn = !!linkedReminder;
   notifyEmailOn = !!(linkedReminder && linkedReminder.notify_email);
@@ -3173,7 +3206,7 @@ function renderGoals(){
     return '<div class="card" style="margin-bottom:12px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div><div class="hc-title" style="font-size:16px;">'+(g.emoji||"🎯")+' '+escapeHtml(g.title)+(g.alarm_reminder_id?' 🔔':'')+'</div>'+
-      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span class="tag">'+g.status+'</span>'+(g.target_date?'<span>due '+fmtDatePretty(g.target_date)+'</span>':'')+'</div></div>'+
+      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span class="tag">'+g.status+'</span>'+(g.target_date?'<span>due '+fmtDatePretty(g.target_date)+'</span>':'')+priorityBadgeHtml(g.priority)+'</div></div>'+
       '<div style="display:flex;gap:6px;">'+(g.status==="completed"?'<button class="icon-btn" data-action="attachProof" data-kind="goal" data-id="'+g.id+'">'+(g.proof_photo_url?"🖼️":"📷")+'</button>':'')+
       '<button class="icon-btn" data-action="editGoal" data-id="'+g.id+'">✏️</button></div></div>'+
       (g.description?'<div style="font-size:13px;color:var(--text-muted);margin-top:8px;">'+escapeHtml(g.description)+'</div>':'')+
@@ -3200,6 +3233,7 @@ function goalFormHtml(g){
     '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'">'+emojiPickerHtml("g_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="g_title" type="text" placeholder="e.g. Run a 5K" value="'+escapeHtml(g.title)+'"></div></div>'+
     '<div class="field"><label>Category — tap to select one or more</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(goalFormCats.includes(c.v)?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
+    priorityChipsHtml("pickGoalPriority", goalFormPriority)+
     '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);"><div style="font-weight:800;font-size:14px;margin-bottom:2px;">🎯 SMART Goal Framework</div>'+
     '<p class="hc-meta" style="margin-bottom:10px;">Optional, but a goal is easier to hit when it\'s Specific, Measurable, Achievable, Relevant, and Time-bound.</p>'+
     '<div class="field"><label>S — Specific: what exactly will you accomplish?</label><textarea id="g_smart_s" rows="2" placeholder="e.g. Run a full 5K (3.1 miles) without stopping">'+escapeHtml(g.smart_specific||"")+'</textarea></div>'+
@@ -3220,11 +3254,12 @@ function goalFormHtml(g){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveGoal" data-id="'+(g.id||"")+'" style="flex:1">Save</button></div>';
 }
-let goalFormCats=[], goalFormColor=COLORS[1], goalFormMilestones=[];
+let goalFormCats=[], goalFormColor=COLORS[1], goalFormMilestones=[], goalFormPriority="medium";
 function openGoalForm(id){
   const g = id ? state.goals.find(x=>x.id===id) : null;
   goalFormCats = g ? goalCategories(g) : [];
   goalFormColor = g ? g.color : COLORS[1];
+  goalFormPriority = g ? (g.priority||"medium") : "medium";
   goalFormMilestones = g ? (g.milestones||[]).slice() : [];
   const linkedReminder = g && g.alarm_reminder_id ? state.reminders.find(r=>r.id===g.alarm_reminder_id) : null;
   goalAlarmOn = !!linkedReminder;
@@ -4038,12 +4073,41 @@ function renderLineChart(days, color){
   const labels = days.map((d,i)=> i%everyN===0 ? '<text x="'+pts[i][0].toFixed(1)+'" y="'+(h-6)+'" font-size="9" fill="var(--text-muted)" text-anchor="middle">'+d.label+'</text>' : "").join("");
   return '<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:140px;"><path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>'+dots+labels+'</svg>';
 }
+function gradesByClass(){
+  const groups = {};
+  (state.grades||[]).forEach(g=>{
+    const key = g.class_id || g.class_name || "unassigned";
+    if(!groups[key]) groups[key] = { class_id: g.class_id, class_name: g.class_name||"Unassigned", entries: [] };
+    groups[key].entries.push(g);
+  });
+  Object.values(groups).forEach(gr=>gr.entries.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
+  return Object.values(groups);
+}
+function gradesSectionHtml(){
+  const groups = gradesByClass();
+  if(!groups.length) return '<p class="hc-meta">No grades logged yet — mark a homework/graded task as done and enter a score to start tracking.</p>';
+  return groups.map(gr=>{
+    const avg = Math.round((gr.entries.reduce((s,e)=>s+e.percentage,0)/gr.entries.length)*10)/10;
+    const chartData = gr.entries.map(e=>({label:fmtDatePretty(e.date).slice(0,6), value:e.percentage}));
+    return '<div style="margin-bottom:18px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;"><h3 style="margin:0;font-size:14px;">'+escapeHtml(gr.class_name)+'</h3><span style="font-weight:800;color:var(--accent);">'+avg+'% avg</span></div>'+
+      (gr.entries.length>1 ? renderLineChart(chartData, "var(--accent)") :
+        '<p class="hc-meta" style="margin-top:6px;">'+escapeHtml(gr.entries[0].title)+': '+gr.entries[0].score+'/'+gr.entries[0].max+' ('+gr.entries[0].percentage+'%)</p>')+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">'+gr.entries.slice().reverse().slice(0,6).map(e=>
+        '<span class="tag" title="'+escapeHtml(e.title)+'">'+fmtDatePretty(e.date).slice(0,6)+': '+e.percentage+'%</span>').join("")+'</div>'+
+      '</div>';
+  }).join("");
+}
 function renderProgress(){
   let html = topbarHtml("Progress","See how far you've come.");
   html += '<div class="grid cols-3">'+stat(totalPoints(),"Total XP")+stat(state.habitLogs.length,"Completions")+stat(bestActiveStreak(),"Best streak")+'</div>';
 
   html += '<div class="section-head"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>';
   html += '<div class="card">'+checkInTrendChartsHtml()+'</div>';
+
+  if((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length)){
+    html += '<div class="card" style="margin-top:14px;"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+gradesSectionHtml()+'</div>';
+  }
 
   html += '<div class="card" style="margin-top:14px;"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>';
 
@@ -4335,6 +4399,12 @@ function bedtimeFormHtml(){
 }
 let taskFormColor = COLORS[0];
 let taskFormCat = "";
+function gradeClassOptionsHtml(selectedId){
+  const sem = activeSemester();
+  const classes = (sem && sem.classSubjects) || [];
+  if(!classes.length) return '<option value="">No classes set up yet — add one in Planner</option>';
+  return '<option value="">Choose a class…</option>'+classes.map(c=>'<option value="'+c.id+'" '+(selectedId===c.id?"selected":"")+'>'+escapeHtml(c.name)+'</option>').join("");
+}
 function taskLinkOptionsHtml(selectedValue){
   let html = '<option value="">None</option>';
   const sem = activeSemester();
@@ -4386,6 +4456,11 @@ function taskFormHtml(t){
     '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="tsk_notes" placeholder="Any extra details">'+escapeHtml(t.description||"")+'</textarea></div>'+
+    '<div class="field"><label>Subtasks (optional)</label><div id="subtaskList">'+subtaskListRowsHtml()+
+      '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
+    priorityChipsHtml("pickTaskPriority", taskFormPriority)+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Homework / graded assignment</div><div class="hc-meta" style="margin-top:2px;">Marks this task so you can log a grade when it\'s done</div></div><div class="switch '+(taskGradedOn?"on":"")+'" data-action="toggleTaskGraded"></div></div>'+
+    '<div id="tsk_gradedBlock" style="'+(taskGradedOn?"":"display:none;")+'"><div class="field"><label>Class</label><select id="tsk_gradeClass">'+gradeClassOptionsHtml(t.grade_class_id)+'</select></div></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
     '<div id="tsk_alarmBlock" style="'+(taskAlarmOn?"":"display:none;")+'"><div class="row-inline"><div class="field"><label>Time</label><input id="tsk_alarmTime" type="time" value="'+(t.alarm_time||"09:00")+'"></div>'+
@@ -4402,10 +4477,32 @@ function taskFormHtml(t){
     '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
 }
 let taskAlarmOn = false;
+let taskFormPriority = "medium";
+let taskGradedOn = false;
+let taskFormSubtasks = [];
+function subtaskListRowsHtml(){
+  return taskFormSubtasks.map((s,i)=>
+    '<div class="row-inline" style="margin-bottom:6px;align-items:center;">'+
+    '<input type="checkbox" class="stDone" data-idx="'+i+'" '+(s.done?"checked":"")+' style="width:18px;height:18px;flex:0 0 auto;">'+
+    '<input type="text" class="stInput" value="'+escapeHtml(s.title)+'" placeholder="e.g. Read chapter 3" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);'+(s.done?"text-decoration:line-through;opacity:.6;":"")+'">'+
+    '<button class="icon-btn" type="button" data-action="removeSubtaskRow" data-idx="'+i+'">✕</button></div>'
+  ).join("");
+}
+function collectSubtasksFromDOM(){
+  document.querySelectorAll("#subtaskList .stInput").forEach((inp,i)=>{ if(taskFormSubtasks[i]) taskFormSubtasks[i].title = inp.value; });
+  document.querySelectorAll("#subtaskList .stDone").forEach((cb,i)=>{ if(taskFormSubtasks[i]) taskFormSubtasks[i].done = cb.checked; });
+}
+function rerenderSubtaskList(){
+  const list = document.getElementById("subtaskList");
+  if(list) list.innerHTML = subtaskListRowsHtml();
+}
 function openTaskForm(id, prefillDate){
   const t = id ? (state.tasks||[]).find(x=>x.id===id) : (prefillDate ? {title:"", planned_minutes:30, category:"", date:prefillDate} : null);
   taskFormColor = t ? (t.color||COLORS[0]) : COLORS[(state.tasks||[]).length % COLORS.length];
   taskFormCat = t ? (t.category||"") : "";
+  taskFormPriority = t ? (t.priority||"medium") : "medium";
+  taskGradedOn = !!(t && t.is_graded);
+  taskFormSubtasks = t ? (t.subtasks||[]).map(s=>Object.assign({},s)) : [];
   taskAlarmOn = !!(t && t.alarm_enabled);
   notifyEmailOn = !!(t && t.notify_email);
   notifySmsOn = !!(t && t.notify_sms);
@@ -4418,6 +4515,9 @@ function taskCompleteFormHtml(t){
     '<div class="field"><label>Actual time it took (minutes)</label><input id="tskc_actual" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>What distracted you? (optional)</label><input id="tskc_distraction" type="text" placeholder="e.g. Phone notifications"></div>'+
     '<div class="field"><label>What helped you stay on task? (optional)</label><input id="tskc_helped" type="text" placeholder="e.g. Noise-canceling headphones"></div>'+
+    (t.is_graded ? '<div class="field" style="padding:10px;border-radius:10px;background:var(--surface-2);"><label>📊 Grade received'+(t.grade_class_name?(" — "+escapeHtml(t.grade_class_name)):"")+'</label>'+
+      '<div class="row-inline"><input id="tskc_gradeScore" type="number" step="0.01" placeholder="Score" value="'+(t.grade_score!=null?t.grade_score:"")+'" style="flex:1;"><span style="align-self:center;">out of</span><input id="tskc_gradeMax" type="number" step="0.01" placeholder="100" value="'+(t.grade_max!=null?t.grade_max:100)+'" style="flex:1;"></div>'+
+      '<p class="hc-meta" style="margin-top:4px;">Leave blank to skip logging a grade for now — you can add it later.</p></div>' : '')+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔁 Needs a follow-up</div><div class="switch" data-action="toggleTaskFollowUp"></div></div>'+
     '<div id="tskc_followUpBlock" style="display:none;">'+
     '<div class="field"><label>Follow-up date</label><input id="tskc_followUpDate" type="date" value="'+todayStr()+'"></div>'+
@@ -4438,6 +4538,8 @@ function renderTasks(){
   const pending = (state.tasks||[]).filter(t=>t.status!=="done").slice().sort((a,b)=>{
     const ad = a.date||"9999-99-99", bd = b.date||"9999-99-99";
     if(ad!==bd) return ad.localeCompare(bd);
+    const pr = priorityRank(b.priority) - priorityRank(a.priority);
+    if(pr!==0) return pr;
     return (a.created_at||"").localeCompare(b.created_at||"");
   });
   const done = (state.tasks||[]).filter(t=>t.status==="done");
@@ -4453,7 +4555,8 @@ function renderTasks(){
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+(cat?' · '+escapeHtml(cat.l):'')+'</div></div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+subtaskProgressBadgeHtml(t)+'</div>'+
+      subtaskChecklistHtml(t)+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:6px;">'+
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
       '<button class="icon-btn" data-action="openTaskForm" data-id="'+t.id+'">✏️</button>'+
@@ -4483,6 +4586,7 @@ function renderTasks(){
         '<div class="hc-meta">Planned '+fmtMinutesDuration(t.planned_minutes||0)+(t.actual_minutes!=null?' · Actual '+fmtMinutesDuration(t.actual_minutes):'')+deltaLabel+'</div>'+
         (t.distraction?'<div style="font-size:12px;margin-top:4px;color:var(--text-muted);">🌀 Distraction: '+escapeHtml(t.distraction)+'</div>':'')+
         (t.helped?'<div style="font-size:12px;margin-top:2px;color:var(--text-muted);">✨ Helped: '+escapeHtml(t.helped)+'</div>':'')+
+        (t.is_graded && t.grade_percentage!=null?'<div style="font-size:12px;margin-top:2px;color:var(--text-muted);">📊 Grade: '+t.grade_score+'/'+t.grade_max+' ('+t.grade_percentage+'%)'+(t.grade_class_name?" — "+escapeHtml(t.grade_class_name):"")+'</div>':'')+
         '</div>'+
         '<button class="icon-btn" data-action="reopenTask" data-id="'+t.id+'" title="Reopen">↺</button>'+
         '</div>';
@@ -5808,10 +5912,29 @@ document.addEventListener("click", async function(e){
     case "openTaskForm": openTaskForm(id||null, v||null); break;
     case "pickTaskColor": { taskFormColor = v; document.querySelectorAll('[data-action="pickTaskColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "pickTaskCat": { taskFormCat = v; document.querySelectorAll('[data-action="pickTaskCat"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
+    case "pickTaskPriority": { taskFormPriority = v; document.querySelectorAll('[data-action="pickTaskPriority"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
     case "toggleTaskAlarm": {
       const isOn = t.classList.toggle("on");
       taskAlarmOn = isOn;
       const block = document.getElementById("tsk_alarmBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
+    case "addSubtaskRow": { collectSubtasksFromDOM(); taskFormSubtasks.push({title:"",done:false}); rerenderSubtaskList(); break; }
+    case "removeSubtaskRow": { collectSubtasksFromDOM(); taskFormSubtasks.splice(Number(t.getAttribute("data-idx")),1); rerenderSubtaskList(); break; }
+    case "toggleSubtask": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      const idx = Number(t.getAttribute("data-idx"));
+      if(tsk && tsk.subtasks && tsk.subtasks[idx]){
+        tsk.subtasks[idx].done = !tsk.subtasks[idx].done;
+        saveState(); render();
+      }
+      break;
+    }
+    case "toggleTaskGraded": {
+      const isOn = t.classList.toggle("on");
+      taskGradedOn = isOn;
+      const block = document.getElementById("tsk_gradedBlock");
       if(block) block.style.display = isOn ? "" : "none";
       break;
     }
@@ -5823,7 +5946,15 @@ document.addEventListener("click", async function(e){
       const linkParts = linkVal ? linkVal.split(":") : ["",""];
       const taskDate = document.getElementById("tsk_date").value||"";
       if(taskAlarmOn && !taskDate){ toast("Add a date above to set a reminder"); return; }
-      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: taskDate, linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
+      const gradeClassEl = document.getElementById("tsk_gradeClass");
+      const gradeClassId = (taskGradedOn && gradeClassEl) ? gradeClassEl.value : "";
+      const gradeClassName = gradeClassId ? (gradeClassEl.options[gradeClassEl.selectedIndex].textContent||"") : "";
+      if(taskGradedOn && !gradeClassId){ toast("Pick a class for this graded assignment"); return; }
+      collectSubtasksFromDOM();
+      const subtasks = taskFormSubtasks.filter(s=>s.title.trim()!=="").map(s=>({id:s.id||uid(), title:s.title.trim(), done:!!s.done}));
+      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate,
+        is_graded: taskGradedOn, grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
+        linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
         description: (document.getElementById("tsk_notes")?document.getElementById("tsk_notes").value:"").trim(),
         alarm_enabled: taskAlarmOn,
         alarm_time: taskAlarmOn ? document.getElementById("tsk_alarmTime").value : "",
@@ -5841,7 +5972,7 @@ document.addEventListener("click", async function(e){
       toast("Task saved");
       break;
     }
-    case "deleteTask": { state.tasks = (state.tasks||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
+    case "deleteTask": { state.tasks = (state.tasks||[]).filter(x=>x.id!==id); state.grades = (state.grades||[]).filter(g=>g.task_id!==id); saveState(); closeModal(); render(); break; }
     case "openTaskCompleteForm": openTaskCompleteForm(id); break;
     case "toggleTaskFollowUp": {
       const isOn = t.classList.toggle("on");
@@ -5861,6 +5992,23 @@ document.addEventListener("click", async function(e){
       tsk.follow_up_date = taskCompleteFollowUp ? document.getElementById("tskc_followUpDate").value : "";
       tsk.follow_up_notes = taskCompleteFollowUp ? document.getElementById("tskc_followUpNotes").value.trim() : "";
       tsk.completed_at = new Date().toISOString();
+      if(tsk.is_graded){
+        const scoreEl = document.getElementById("tskc_gradeScore");
+        const maxEl = document.getElementById("tskc_gradeMax");
+        const scoreVal = scoreEl && scoreEl.value !== "" ? Number(scoreEl.value) : null;
+        const maxVal = maxEl && maxEl.value !== "" ? Number(maxEl.value) : 100;
+        if(scoreVal!=null && maxVal>0){
+          tsk.grade_score = scoreVal; tsk.grade_max = maxVal;
+          tsk.grade_percentage = Math.round((scoreVal/maxVal)*1000)/10;
+          tsk.graded_at = todayStr();
+          state.grades = state.grades || [];
+          const existing = state.grades.find(g=>g.task_id===tsk.id);
+          const gradeEntry = { task_id: tsk.id, class_id: tsk.grade_class_id||"", class_name: tsk.grade_class_name||"Unassigned",
+            title: tsk.title, score: scoreVal, max: maxVal, percentage: tsk.grade_percentage, date: tsk.graded_at };
+          if(existing){ Object.assign(existing, gradeEntry); }
+          else { state.grades.push(Object.assign({id:uid()}, gradeEntry)); }
+        }
+      }
       saveState(); closeModal(); render();
       toast("Nice work! Task complete.");
       break;
@@ -5937,6 +6085,7 @@ document.addEventListener("click", async function(e){
     }
     case "pickDay": { const idx=formDays.indexOf(v); if(idx>=0) formDays.splice(idx,1); else formDays.push(v); refreshHabitFormSelections(); break; }
     case "pickColor": formColor=v; refreshHabitFormSelections(); break;
+    case "pickHabitPriority": { formPriority = v; document.querySelectorAll('[data-action="pickHabitPriority"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
     case "toggleAlarmBlock": {
       const prefix = t.getAttribute("data-prefix");
       const block = document.getElementById(prefix+"_alarmBlock");
@@ -5961,7 +6110,7 @@ document.addEventListener("click", async function(e){
         emoji: document.getElementById("f_emoji").value.trim() || "✨",
         category: formCats[0]||"other", categories: formCats.slice(), frequency: formFreq, custom_days: formDays.slice(),
         points_per_completion: Number(document.getElementById("f_points").value)||10,
-        color: formColor, is_active:true
+        color: formColor, priority: formPriority, is_active:true
       };
       let habitObj;
       if(id){ habitObj = state.habits.find(x=>x.id===id); Object.assign(habitObj, payload); }
@@ -5985,6 +6134,7 @@ document.addEventListener("click", async function(e){
     case "editGoal": openGoalForm(id); break;
     case "pickGCat": { const idx=goalFormCats.indexOf(v); if(idx>=0) goalFormCats.splice(idx,1); else goalFormCats.push(v); refreshGoalFormSelections(); break; }
     case "pickGColor": goalFormColor=v; refreshGoalFormSelections(); break;
+    case "pickGoalPriority": { goalFormPriority = v; document.querySelectorAll('[data-action="pickGoalPriority"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
     case "addMilestoneRow": { collectMilestonesFromDOM(); goalFormMilestones.push({title:"",completed:false}); rerenderMilestoneList(); break; }
     case "removeMilestoneRow": { collectMilestonesFromDOM(); goalFormMilestones.splice(Number(t.getAttribute("data-idx")),1); rerenderMilestoneList(); break; }
     case "saveGoal": {
@@ -6000,7 +6150,7 @@ document.addEventListener("click", async function(e){
         emoji: document.getElementById("g_emoji").value.trim() || "🎯",
         category: goalFormCats[0]||"other", categories: goalFormCats.slice(), target_date: document.getElementById("g_date").value,
         status: document.getElementById("g_status").value,
-        color: goalFormColor, milestones, progress,
+        color: goalFormColor, priority: goalFormPriority, milestones, progress,
         smart_specific: (document.getElementById("g_smart_s").value||"").trim(),
         smart_measurable: (document.getElementById("g_smart_m").value||"").trim(),
         smart_achievable: (document.getElementById("g_smart_a").value||"").trim(),
@@ -7222,10 +7372,12 @@ function refreshHabitFormSelections(){
   document.querySelectorAll('[data-action="pickFreq"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formFreq));
   document.querySelectorAll('[data-action="pickDay"]').forEach(c=>c.classList.toggle("selected", formDays.includes(c.getAttribute("data-v"))));
   document.querySelectorAll('[data-action="pickColor"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formColor));
+  document.querySelectorAll('[data-action="pickHabitPriority"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formPriority));
 }
 function refreshGoalFormSelections(){
   document.querySelectorAll('[data-action="pickGCat"]').forEach(c=>c.classList.toggle("selected", goalFormCats.includes(c.getAttribute("data-v"))));
   document.querySelectorAll('[data-action="pickGColor"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===goalFormColor));
+  document.querySelectorAll('[data-action="pickGoalPriority"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===goalFormPriority));
 }
 function refreshReminderFormSelections(){
   document.querySelectorAll('[data-action="pickRDay"]').forEach(c=>c.classList.toggle("selected", reminderFormDays.includes(c.getAttribute("data-v"))));
