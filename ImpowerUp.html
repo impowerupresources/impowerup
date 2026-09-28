@@ -1207,45 +1207,63 @@ async function saveGlobalConfigFn(cfg){
     throw new Error("Couldn't save"+(detail?": "+detail.slice(0,140):""));
   }
 }
-/* ---- Quick Assistant (v1): a few narrow, AI-parsed commands, always confirmed before anything changes ---- */
-let _pendingAiAction = null;
+/* ---- Quick Assistant: a short back-and-forth chat that can add tasks/habits/goals/classes
+   (asking a quick follow-up for due date, reminder, etc. when needed), plus a few narrow
+   direct commands (move today's tasks, mark something done). Nothing is ever created or
+   changed until the user taps Confirm on a final, plain-English summary. ---- */
+let _aiConversation = [];
+let _aiLastAction = null;
 let _quickAssistantLoading = false;
 function quickAssistantFormHtml(){
+  const bubbles = _aiConversation.map(m=>'<div style="margin:6px 0;'+(m.role==="user"?"text-align:right;":"")+'">'+
+    '<span style="display:inline-block;max-width:85%;padding:8px 12px;border-radius:14px;font-size:13.5px;text-align:left;'+
+    (m.role==="user"?"background:var(--accent);color:#fff;":"background:var(--surface-2);")+'">'+escapeHtml(m.content)+'</span></div>').join("");
+  const showConfirm = _aiLastAction && _aiLastAction.action!=="clarify" && _aiLastAction.action!=="unsupported";
   return '<h2>✨ Quick Assistant</h2>'+
-    '<p class="hc-meta">Type a request. For now it understands: moving today\'s tasks to tomorrow, marking a specific habit done, or marking a specific task done.</p>'+
-    '<div class="field"><textarea id="qa_input" rows="3" placeholder="e.g. Move all of today\'s tasks to tomorrow"></textarea></div>'+
-    '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
-    '<button class="btn" style="flex:1" data-action="submitQuickAssistant"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Ask")+'</button></div>';
+    (bubbles?'':'<p class="hc-meta">Add a task, habit, goal, or class — or move/complete something. I\'ll ask if I need a bit more info.</p>')+
+    (bubbles?'<div style="max-height:280px;overflow-y:auto;margin-bottom:8px;">'+bubbles+'</div>':'')+
+    (showConfirm
+      ? '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="cancelAiConversation">Cancel</button>'+
+        '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
+      : ('<div class="field"><textarea id="qa_input" rows="2" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'"></textarea></div>'+
+        '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Close</button>'+
+        '<button class="btn" style="flex:1" data-action="sendQuickAssistantMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Send")+'</button></div>'));
 }
-async function callAiCommandFn(message){
+async function callAiCommandFn(messages){
   if(!(await ensureFreshSession())) throw new Error("Log in to use the Quick Assistant");
   const todayTasks = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).map(t=>({id:t.id, title:t.title}));
   const todayHabits = habitsDueToday().map(h=>({id:h.id, title:h.title}));
+  const categories = allCategories().map(c=>({v:c.v, l:c.l}));
+  const sem = activeSemester();
+  const classDayOptions = sem ? dayKeyOptions(sem) : [];
   const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/ai-command", {
     method:"POST",
     headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
-    body: JSON.stringify({message, todayTasks, todayHabits})
+    body: JSON.stringify({ messages, todayTasks, todayHabits, todayDate: todayStr(), categories, hasActiveSemester: !!sem, classDayOptions })
   });
   const json = await res.json();
   if(!res.ok) throw new Error(json.error || "Couldn't understand that request");
   return json.action;
 }
+/* Fallback summaries for the few action types the AI might not phrase a "message" for
+   (kept mainly for backward compatibility — the model is asked to always include one). */
 function describeAiAction(action){
+  if(action.message) return action.message;
   if(action.action==="move_tasks"){
     const n = (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).length;
     return n ? ("Move "+n+" incomplete task"+(n===1?"":"s")+" from today to tomorrow?") : "There aren't any incomplete tasks today to move.";
   }
   if(action.action==="complete_task") return 'Mark the task "'+(action.title||"")+'" as done?';
   if(action.action==="complete_habit") return 'Mark the habit "'+(action.title||"")+'" as done for today?';
-  return action.reason || "Sorry, I can't do that yet.";
+  return "Sorry, I can't do that yet.";
 }
-function aiConfirmModalHtml(action){
-  const desc = describeAiAction(action);
-  const actionable = action.action!=="unsupported" && !(action.action==="move_tasks" && desc.indexOf("aren't")>=0);
-  return '<h2>✨ Quick Assistant</h2><p class="hc-meta">'+escapeHtml(desc)+'</p>'+
-    (actionable ? '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
-      '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
-      : '<div class="modal-actions"><button class="btn block" data-action="closeModal">OK</button></div>');
+/* Creates a reminder row directly (mirrors what syncHabitAlarm/syncGoalAlarm do from their
+   forms), since the AI-driven flow has no open form DOM to read from. */
+function aiCreateReminder(payload){
+  const rid = uid();
+  state.reminders = state.reminders || [];
+  state.reminders.push(Object.assign({id:rid, is_active:true, notify_email:false, notify_sms:false, days:[], alarm_level:"moderate", message:""}, payload));
+  return rid;
 }
 /* ---- Reusable emoji picker: a small dropdown of common emojis. Works on either a plain
    text input (replaces its value) or a textarea (inserts at the cursor), so the same picker
@@ -6703,21 +6721,25 @@ document.addEventListener("click", async function(e){
       }catch(err){ toast(err.message); }
       break;
     }
-    case "openQuickAssistant": _pendingAiAction = null; _quickAssistantLoading = false; openModal(quickAssistantFormHtml()); break;
-    case "submitQuickAssistant": {
-      const msg = (document.getElementById("qa_input").value||"").trim();
+    case "openQuickAssistant": _aiConversation = []; _aiLastAction = null; _quickAssistantLoading = false; openModal(quickAssistantFormHtml()); break;
+    case "cancelAiConversation": { _aiLastAction = null; openModal(quickAssistantFormHtml()); break; }
+    case "sendQuickAssistantMessage": {
+      const inp = document.getElementById("qa_input");
+      const msg = inp ? (inp.value||"").trim() : "";
       if(!msg){ toast("Type what you'd like to do"); return; }
+      _aiConversation.push({role:"user", content: msg});
       _quickAssistantLoading = true; openModal(quickAssistantFormHtml());
       try{
-        const action = await callAiCommandFn(msg);
-        _pendingAiAction = action;
-        openModal(aiConfirmModalHtml(action));
-      }catch(err){ toast(err.message); closeModal(); }
+        const action = await callAiCommandFn(_aiConversation);
+        _aiLastAction = action;
+        _aiConversation.push({role:"assistant", content: describeAiAction(action)});
+      }catch(err){ toast(err.message); _aiConversation.pop(); }
       _quickAssistantLoading = false;
+      openModal(quickAssistantFormHtml());
       break;
     }
     case "confirmAiAction": {
-      const action = _pendingAiAction;
+      const action = _aiLastAction;
       if(!action){ closeModal(); return; }
       if(action.action==="move_tasks"){
         const tmrw = addDays(todayStr(),1);
@@ -6737,10 +6759,65 @@ document.addEventListener("click", async function(e){
         if(isHabitCompletedOn(h, todayStr())){ toast("Already marked done today"); closeModal(); break; }
         performToggleHabit(h.id, todayStr());
         closeModal();
+      } else if(action.action==="create_task"){
+        const payload = {
+          id: uid(), title: (action.title||"Untitled task").trim(), status:"pending", actual_minutes:null,
+          planned_minutes: Number(action.planned_minutes)||30,
+          color: COLORS[(state.tasks||[]).length % COLORS.length],
+          category: action.category || "", date: action.date || "", linked_type:"", linked_id:"",
+          alarm_enabled: !!action.alarm_enabled, alarm_time: action.alarm_enabled ? (action.alarm_time||"09:00") : "",
+          alarm_level: action.alarm_level || "moderate",
+          notify_email:false, notify_sms:false, distraction:"", helped:"", follow_up_needed:false,
+          follow_up_date:"", follow_up_notes:"", created_at:new Date().toISOString(), completed_at:null
+        };
+        state.tasks = state.tasks || []; state.tasks.push(payload);
+        saveState(); closeModal(); render();
+        toast("Task added: "+payload.title);
+      } else if(action.action==="create_habit"){
+        const payload = {
+          id: uid(), title: (action.title||"Untitled habit").trim(), description:"", emoji:"✨",
+          category: action.category || "other",
+          frequency: ["daily","weekdays","weekly","custom"].includes(action.frequency) ? action.frequency : "daily",
+          custom_days: Array.isArray(action.custom_days) ? action.custom_days.filter(d=>DAY_NAMES.includes(d)) : [],
+          points_per_completion: 10, color: COLORS[state.habits.length % COLORS.length], is_active:true
+        };
+        state.habits.push(payload);
+        if(action.reminder_enabled){
+          const days = Array.isArray(action.reminder_days) ? action.reminder_days.filter(d=>DAY_NAMES.includes(d)) : defaultDaysForFrequency(payload.frequency, payload.custom_days);
+          payload.alarm_reminder_id = aiCreateReminder({title: payload.title, time: action.reminder_time||"09:00", days, habit_id: payload.id});
+        }
+        saveState(); closeModal(); render();
+        toast("Habit added: "+payload.title);
+      } else if(action.action==="create_goal"){
+        const payload = {
+          id: uid(), title: (action.title||"Untitled goal").trim(), description:"", emoji:"🎯",
+          category: action.category || "other", target_date: action.target_date || "",
+          status:"active", color: COLORS[state.goals.length % COLORS.length], milestones:[], progress:0
+        };
+        state.goals.push(payload);
+        if(action.reminder_enabled){
+          payload.alarm_reminder_id = aiCreateReminder({title:"Goal check-in: "+payload.title, time: action.reminder_time||"09:00", days: DAY_NAMES.slice(), goal_id: payload.id});
+        }
+        saveState(); closeModal(); render();
+        toast("Goal added: "+payload.title);
+      } else if(action.action==="create_class"){
+        const sem = activeSemester();
+        if(!sem){ toast("No active class schedule to add to"); closeModal(); break; }
+        const opts = dayKeyOptions(sem);
+        const match = opts.find(o=>o.key===action.day_key) || opts[0];
+        if(!match){ toast("Couldn't figure out which day to use"); closeModal(); break; }
+        const cls = {
+          id: uid(), name: (action.name||"Untitled class").trim(), color: COLORS[(sem.classSubjects||[]).length % COLORS.length],
+          slots: [{ id: uid(), dayKey: match.key, time: action.time||"09:00", duration: Number(action.duration_minutes)||50, dateRangeMode:"none", termId:null, startDate:null, endDate:null }]
+        };
+        sem.classSubjects = sem.classSubjects || [];
+        sem.classSubjects.push(cls);
+        saveState(); closeModal(); render();
+        toast("Class added: "+cls.name);
       } else {
         closeModal();
       }
-      _pendingAiAction = null;
+      _aiLastAction = null; _aiConversation = [];
       break;
     }
     case "openGlobalConfigEditor": openModal(globalConfigEditorHtml()); break;
