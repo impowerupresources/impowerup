@@ -478,6 +478,15 @@ function fmtDatePretty(dateStr){ if(!dateStr) return ""; const [y,m,d]=dateStr.s
 function fmtTime12(t){ if(!t) return ""; let [h,m]=t.split(":").map(Number); const ap = h>=12?"PM":"AM"; h = h%12; if(h===0)h=12; return h+":"+String(m).padStart(2,"0")+" "+ap; }
 function allCategories(){ return CATEGORIES.concat((state&&state.customCategories)||[]); }
 function catInfo(v){ return allCategories().find(c=>c.v===v) || CATEGORIES[CATEGORIES.length-1]; }
+/* Habits and Goals can carry more than one category. `categories` is the source of truth;
+   `category` (singular) is kept in sync with the first entry for any older code path that
+   might still read it, so nothing breaks. */
+function habitCategories(h){ return (h && h.categories && h.categories.length) ? h.categories : (h && h.category ? [h.category] : []); }
+function goalCategories(g){ return (g && g.categories && g.categories.length) ? g.categories : (g && g.category ? [g.category] : []); }
+function categoryTagsHtml(catVals){
+  const vals = (catVals && catVals.length) ? catVals : ["other"];
+  return vals.map(v=>'<span class="tag">'+catInfo(v).l+'</span>').join("");
+}
 function insertCategoryChip(containerId, cat, action){
   const container = document.getElementById(containerId);
   if(!container) return;
@@ -2994,12 +3003,13 @@ function dashboardQuickLinksHtml(paths){
 function habitRow(h){
   const done = isHabitCompletedOn(h, todayStr());
   const streak = computeStreaks(h);
-  const c = catInfo(h.category);
+  const cats = habitCategories(h);
+  const c = catInfo(cats[0]||"other");
   const log = findHabitLog(h.id, todayStr());
   return '<div class="habit-card">'+
     '<div class="emoji-badge" style="background:'+h.color+'22;">'+(h.emoji||c.e)+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.title)+(h.alarm_reminder_id?' <span title="Has an alarm">🔔</span>':'')+'</div>'+
-    '<div class="hc-meta"><span class="tag">'+c.l+'</span>'+(streak.current>0?'<span>🔥 '+streak.current+' day streak</span>':'')+'<span>+'+(h.points_per_completion||10)+' XP</span></div></div>'+
+    '<div class="hc-meta">'+categoryTagsHtml(cats)+(streak.current>0?'<span>🔥 '+streak.current+' day streak</span>':'')+'<span>+'+(h.points_per_completion||10)+' XP</span></div></div>'+
     (done?'<button class="icon-btn" data-action="attachProof" data-kind="habitlog" data-id="'+(log?log.id:"")+'">'+(log&&log.proof_photo_url?"🖼️":"📷")+'</button>':
       '<button class="btn secondary sm" data-action="proveIt" data-id="'+h.id+'" data-date="'+todayStr()+'">Prove it 📸</button>')+
     '<button class="check-circle '+(done?"done":"")+'" data-action="toggleHabit" data-id="'+h.id+'">'+(done?"✓":"")+'</button>'+
@@ -3075,12 +3085,13 @@ function renderHabits(){
   html += active.map(h=>{
     const done = isHabitCompletedOn(h, todayStr());
     const streak = computeStreaks(h);
-    const c = catInfo(h.category);
+    const cats = habitCategories(h);
+    const c = catInfo(cats[0]||"other");
     return '<div class="habit-card">'+
       '<div class="emoji-badge" style="background:'+h.color+'22;">'+(h.emoji||c.e)+'</div>'+
       '<div class="hc-body" data-action="editHabit" data-id="'+h.id+'" style="cursor:pointer;">'+
       '<div class="hc-title">'+escapeHtml(h.title)+(h.alarm_reminder_id?' 🔔':'')+'</div>'+
-      '<div class="hc-meta"><span class="tag">'+c.l+'</span><span>'+h.frequency+'</span><span>🔥 '+streak.current+' · best '+streak.best+'</span></div></div>'+
+      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span>'+h.frequency+'</span><span>🔥 '+streak.current+' · best '+streak.best+'</span></div></div>'+
       '<button class="check-circle '+(done?"done":"")+'" data-action="toggleHabit" data-id="'+h.id+'">'+(done?"✓":"")+'</button>'+
       '<button class="icon-btn" data-action="editHabit" data-id="'+h.id+'">✏️</button>'+
       '</div>';
@@ -3095,7 +3106,7 @@ function habitFormHtml(h){
     '<div class="field" style="flex:1;"><label>Title</label><input id="f_title" type="text" placeholder="e.g. Drink water" value="'+escapeHtml(h.title)+'"></div>'+
     '</div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="f_desc">'+escapeHtml(h.description||"")+'</textarea></div>'+
-    '<div class="field"><label>Category</label><div class="chip-group" id="habitCatChips">'+allCategories().map(c=>'<div class="chip '+(h.category===c.v?"selected":"")+'" data-action="pickCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="habit">+ Custom</div></div></div>'+
+    '<div class="field"><label>Category — tap to select one or more</label><div class="chip-group" id="habitCatChips">'+allCategories().map(c=>'<div class="chip '+(formCats.includes(c.v)?"selected":"")+'" data-action="pickCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="habit">+ Custom</div></div></div>'+
     '<div class="field"><label>Frequency</label><div class="chip-group">'+
       ["daily","weekdays","weekly","custom"].map(f=>'<div class="chip '+(h.frequency===f?"selected":"")+'" data-action="pickFreq" data-v="'+f+'">'+f+'</div>').join("")+'</div></div>'+
     '<div class="field" id="customDaysField" style="'+(h.frequency==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+
@@ -3109,11 +3120,11 @@ function habitFormHtml(h){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveHabit" data-id="'+(h.id||"")+'" style="flex:1">Save</button></div>';
 }
-let formCat="other", formFreq="daily", formDays=[], formColor=COLORS[0];
+let formCats=[], formFreq="daily", formDays=[], formColor=COLORS[0];
 function openHabitForm(id, prefill){
   const base = {title:"",description:"",emoji:"✨",frequency:"daily",custom_days:[],category:"other",points_per_completion:10,color:COLORS[0]};
   const h = id ? state.habits.find(x=>x.id===id) : (prefill ? Object.assign({}, base, prefill) : null);
-  formCat = h ? h.category : "other";
+  formCats = h ? habitCategories(h) : [];
   formFreq = h ? h.frequency : "daily";
   formDays = h ? (h.custom_days||[]).slice() : [];
   formColor = h ? h.color : COLORS[0];
@@ -3157,12 +3168,12 @@ function renderGoals(){
   const goals = state.goals.slice().sort((a,b)=>order[a.status]-order[b.status]);
   html += goals.map(g=>{
     const pct = Math.max(0,Math.min(100,g.progress||0));
-    const c = catInfo(g.category);
+    const cats = goalCategories(g);
     const ms = g.milestones||[];
     return '<div class="card" style="margin-bottom:12px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div><div class="hc-title" style="font-size:16px;">'+(g.emoji||"🎯")+' '+escapeHtml(g.title)+(g.alarm_reminder_id?' 🔔':'')+'</div>'+
-      '<div class="hc-meta"><span class="tag">'+c.l+'</span><span class="tag">'+g.status+'</span>'+(g.target_date?'<span>due '+fmtDatePretty(g.target_date)+'</span>':'')+'</div></div>'+
+      '<div class="hc-meta">'+categoryTagsHtml(cats)+'<span class="tag">'+g.status+'</span>'+(g.target_date?'<span>due '+fmtDatePretty(g.target_date)+'</span>':'')+'</div></div>'+
       '<div style="display:flex;gap:6px;">'+(g.status==="completed"?'<button class="icon-btn" data-action="attachProof" data-kind="goal" data-id="'+g.id+'">'+(g.proof_photo_url?"🖼️":"📷")+'</button>':'')+
       '<button class="icon-btn" data-action="editGoal" data-id="'+g.id+'">✏️</button></div></div>'+
       (g.description?'<div style="font-size:13px;color:var(--text-muted);margin-top:8px;">'+escapeHtml(g.description)+'</div>':'')+
@@ -3188,7 +3199,7 @@ function goalFormHtml(g){
     '<div class="row-inline">'+
     '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'">'+emojiPickerHtml("g_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="g_title" type="text" placeholder="e.g. Run a 5K" value="'+escapeHtml(g.title)+'"></div></div>'+
-    '<div class="field"><label>Category</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(g.category===c.v?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
+    '<div class="field"><label>Category — tap to select one or more</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(goalFormCats.includes(c.v)?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
     '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);"><div style="font-weight:800;font-size:14px;margin-bottom:2px;">🎯 SMART Goal Framework</div>'+
     '<p class="hc-meta" style="margin-bottom:10px;">Optional, but a goal is easier to hit when it\'s Specific, Measurable, Achievable, Relevant, and Time-bound.</p>'+
     '<div class="field"><label>S — Specific: what exactly will you accomplish?</label><textarea id="g_smart_s" rows="2" placeholder="e.g. Run a full 5K (3.1 miles) without stopping">'+escapeHtml(g.smart_specific||"")+'</textarea></div>'+
@@ -3209,10 +3220,10 @@ function goalFormHtml(g){
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveGoal" data-id="'+(g.id||"")+'" style="flex:1">Save</button></div>';
 }
-let goalFormCat="other", goalFormColor=COLORS[1], goalFormMilestones=[];
+let goalFormCats=[], goalFormColor=COLORS[1], goalFormMilestones=[];
 function openGoalForm(id){
   const g = id ? state.goals.find(x=>x.id===id) : null;
-  goalFormCat = g ? g.category : "other";
+  goalFormCats = g ? goalCategories(g) : [];
   goalFormColor = g ? g.color : COLORS[1];
   goalFormMilestones = g ? (g.milestones||[]).slice() : [];
   const linkedReminder = g && g.alarm_reminder_id ? state.reminders.find(r=>r.id===g.alarm_reminder_id) : null;
@@ -4072,7 +4083,7 @@ function renderProgress(){
   else {
     html += state.habits.map(h=>{
       const s = computeStreaks(h);
-      const c = catInfo(h.category);
+      const c = catInfo(habitCategories(h)[0]||"other");
       return '<div class="habit-card"><div class="emoji-badge" style="background:'+h.color+'22">'+(h.emoji||c.e)+'</div>'+
         '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.title)+'</div>'+
         '<div class="hc-meta"><span>🔥 current: '+s.current+'</span><span>🏆 best: '+s.best+'</span><span>'+logsForHabit(h.id).length+' total</span></div></div></div>';
@@ -5673,7 +5684,7 @@ document.addEventListener("click", async function(e){
 
     case "openHabitForm": openHabitForm(null); break;
     case "editHabit": openHabitForm(id); break;
-    case "pickCat": formCat=v; refreshHabitFormSelections(); break;
+    case "pickCat": { const idx=formCats.indexOf(v); if(idx>=0) formCats.splice(idx,1); else formCats.push(v); refreshHabitFormSelections(); break; }
     case "addCustomCategory": {
       const prefix = t.getAttribute("data-prefix");
       const name = prompt("Name your new category:");
@@ -5683,9 +5694,9 @@ document.addEventListener("click", async function(e){
       state.customCategories = state.customCategories || [];
       state.customCategories.push(cat);
       saveState();
-      if(prefix==="habit"){ formCat = cat.v; insertCategoryChip("habitCatChips", cat, "pickCat"); }
+      if(prefix==="habit"){ formCats.push(cat.v); insertCategoryChip("habitCatChips", cat, "pickCat"); }
       else if(prefix==="task"){ taskFormCat = cat.v; insertCategoryChip("taskCatChips", cat, "pickTaskCat"); }
-      else { goalFormCat = cat.v; insertCategoryChip("goalCatChips", cat, "pickGCat"); }
+      else { goalFormCats.push(cat.v); insertCategoryChip("goalCatChips", cat, "pickGCat"); }
       toast("Category added — recolor it anytime from Settings");
       break;
     }
@@ -5948,7 +5959,7 @@ document.addEventListener("click", async function(e){
       const payload = {
         title, description: document.getElementById("f_desc").value.trim(),
         emoji: document.getElementById("f_emoji").value.trim() || "✨",
-        category: formCat, frequency: formFreq, custom_days: formDays.slice(),
+        category: formCats[0]||"other", categories: formCats.slice(), frequency: formFreq, custom_days: formDays.slice(),
         points_per_completion: Number(document.getElementById("f_points").value)||10,
         color: formColor, is_active:true
       };
@@ -5972,7 +5983,7 @@ document.addEventListener("click", async function(e){
 
     case "openGoalForm": openGoalForm(null); break;
     case "editGoal": openGoalForm(id); break;
-    case "pickGCat": goalFormCat=v; refreshGoalFormSelections(); break;
+    case "pickGCat": { const idx=goalFormCats.indexOf(v); if(idx>=0) goalFormCats.splice(idx,1); else goalFormCats.push(v); refreshGoalFormSelections(); break; }
     case "pickGColor": goalFormColor=v; refreshGoalFormSelections(); break;
     case "addMilestoneRow": { collectMilestonesFromDOM(); goalFormMilestones.push({title:"",completed:false}); rerenderMilestoneList(); break; }
     case "removeMilestoneRow": { collectMilestonesFromDOM(); goalFormMilestones.splice(Number(t.getAttribute("data-idx")),1); rerenderMilestoneList(); break; }
@@ -5987,7 +5998,7 @@ document.addEventListener("click", async function(e){
       const payload = {
         title, description: document.getElementById("g_desc").value.trim(),
         emoji: document.getElementById("g_emoji").value.trim() || "🎯",
-        category: goalFormCat, target_date: document.getElementById("g_date").value,
+        category: goalFormCats[0]||"other", categories: goalFormCats.slice(), target_date: document.getElementById("g_date").value,
         status: document.getElementById("g_status").value,
         color: goalFormColor, milestones, progress,
         smart_specific: (document.getElementById("g_smart_s").value||"").trim(),
@@ -6794,7 +6805,7 @@ document.addEventListener("click", async function(e){
       } else if(action.action==="create_habit"){
         const payload = {
           id: uid(), title: (action.title||"Untitled habit").trim(), description:"", emoji:"✨",
-          category: action.category || "other",
+          category: action.category || "other", categories: action.category ? [action.category] : [],
           frequency: ["daily","weekdays","weekly","custom"].includes(action.frequency) ? action.frequency : "daily",
           custom_days: Array.isArray(action.custom_days) ? action.custom_days.filter(d=>DAY_NAMES.includes(d)) : [],
           points_per_completion: 10, color: COLORS[state.habits.length % COLORS.length], is_active:true
@@ -6809,7 +6820,7 @@ document.addEventListener("click", async function(e){
       } else if(action.action==="create_goal"){
         const payload = {
           id: uid(), title: (action.title||"Untitled goal").trim(), description:"", emoji:"🎯",
-          category: action.category || "other", target_date: action.target_date || "",
+          category: action.category || "other", categories: action.category ? [action.category] : [], target_date: action.target_date || "",
           status:"active", color: COLORS[state.goals.length % COLORS.length], milestones:[], progress:0,
           smart_specific: action.smart_specific||"", smart_measurable: action.smart_measurable||"",
           smart_achievable: action.smart_achievable||"", smart_relevant: action.smart_relevant||""
@@ -7207,13 +7218,13 @@ document.addEventListener("change", function(e){
 });
 
 function refreshHabitFormSelections(){
-  document.querySelectorAll('[data-action="pickCat"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formCat));
+  document.querySelectorAll('[data-action="pickCat"]').forEach(c=>c.classList.toggle("selected", formCats.includes(c.getAttribute("data-v"))));
   document.querySelectorAll('[data-action="pickFreq"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formFreq));
   document.querySelectorAll('[data-action="pickDay"]').forEach(c=>c.classList.toggle("selected", formDays.includes(c.getAttribute("data-v"))));
   document.querySelectorAll('[data-action="pickColor"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===formColor));
 }
 function refreshGoalFormSelections(){
-  document.querySelectorAll('[data-action="pickGCat"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===goalFormCat));
+  document.querySelectorAll('[data-action="pickGCat"]').forEach(c=>c.classList.toggle("selected", goalFormCats.includes(c.getAttribute("data-v"))));
   document.querySelectorAll('[data-action="pickGColor"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===goalFormColor));
 }
 function refreshReminderFormSelections(){
