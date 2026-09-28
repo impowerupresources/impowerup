@@ -3094,7 +3094,7 @@ function habitFormHtml(h){
     '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="f_emoji" type="text" maxlength="4" value="'+escapeHtml(h.emoji)+'">'+emojiPickerHtml("f_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="f_title" type="text" placeholder="e.g. Drink water" value="'+escapeHtml(h.title)+'"></div>'+
     '</div>'+
-    '<div class="field"><label>Description (optional)</label><textarea id="f_desc">'+escapeHtml(h.description||"")+'</textarea></div>'+
+    '<div class="field"><label>Notes (optional)</label><textarea id="f_desc">'+escapeHtml(h.description||"")+'</textarea></div>'+
     '<div class="field"><label>Category</label><div class="chip-group" id="habitCatChips">'+allCategories().map(c=>'<div class="chip '+(h.category===c.v?"selected":"")+'" data-action="pickCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="habit">+ Custom</div></div></div>'+
     '<div class="field"><label>Frequency</label><div class="chip-group">'+
       ["daily","weekdays","weekly","custom"].map(f=>'<div class="chip '+(h.frequency===f?"selected":"")+'" data-action="pickFreq" data-v="'+f+'">'+f+'</div>').join("")+'</div></div>'+
@@ -3182,7 +3182,7 @@ function goalFormHtml(g){
     '<div class="row-inline">'+
     '<div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="g_emoji" type="text" maxlength="4" value="'+escapeHtml(g.emoji)+'">'+emojiPickerHtml("g_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="g_title" type="text" placeholder="e.g. Run a 5K" value="'+escapeHtml(g.title)+'"></div></div>'+
-    '<div class="field"><label>Description</label><textarea id="g_desc">'+escapeHtml(g.description||"")+'</textarea></div>'+
+    '<div class="field"><label>Notes (optional)</label><textarea id="g_desc">'+escapeHtml(g.description||"")+'</textarea></div>'+
     '<div class="field"><label>Category</label><div class="chip-group" id="goalCatChips">'+allCategories().map(c=>'<div class="chip '+(g.category===c.v?"selected":"")+'" data-action="pickGCat" data-v="'+c.v+'">'+c.e+' '+c.l+'</div>').join("")+'<div class="chip" data-action="addCustomCategory" data-prefix="goal">+ Custom</div></div></div>'+
     '<div class="row-inline">'+
     '<div class="field"><label>Target date</label><input id="g_date" type="date" value="'+(g.target_date||"")+'"></div>'+
@@ -4362,6 +4362,7 @@ function taskFormHtml(t){
     '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
+    '<div class="field"><label>Notes (optional)</label><textarea id="tsk_notes" placeholder="Any extra details">'+escapeHtml(t.description||"")+'</textarea></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
     '<div id="tsk_alarmBlock" style="'+(taskAlarmOn?"":"display:none;")+'"><div class="row-inline"><div class="field"><label>Time</label><input id="tsk_alarmTime" type="time" value="'+(t.alarm_time||"09:00")+'"></div>'+
@@ -5800,6 +5801,7 @@ document.addEventListener("click", async function(e){
       const taskDate = document.getElementById("tsk_date").value||"";
       if(taskAlarmOn && !taskDate){ toast("Add a date above to set a reminder"); return; }
       const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, date: taskDate, linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
+        description: (document.getElementById("tsk_notes")?document.getElementById("tsk_notes").value:"").trim(),
         alarm_enabled: taskAlarmOn,
         alarm_time: taskAlarmOn ? document.getElementById("tsk_alarmTime").value : "",
         alarm_level: taskAlarmOn ? document.getElementById("tsk_alarmLevel").value : "moderate",
