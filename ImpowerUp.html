@@ -2874,6 +2874,12 @@ function navSubsectionsFor(path){
   if(path==="toolkit") return [{id:"focus",label:"Focus",icon:"🧘"},{id:"alerts",label:"Alerts",icon:"⏰"}];
   if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
+  if(path==="planner") return [
+    {id:"calendar", label:"Calendar", icon:"📅"},
+    {id:"schedule", label:"Schedule", icon:"🎓"},
+    {id:"classes", label:"Classes", icon:"", indent:1, jumpTab:"schedule"},
+    {id:"templates", label:"Templates", icon:"🗂️"}
+  ];
   return null;
 }
 function navHtml(active){
@@ -2888,9 +2894,13 @@ function navHtml(active){
     const isExpanded = _navExpandedRoute===r.path;
     const subItems = subs.map(s=>{
       const usesJump = r.path==="impowerzone" || r.path==="progress";
-      const subHref = usesJump ? '#/'+r.path+'?jump='+s.id : '#/'+r.path+'?tab='+s.id;
-      const subActive = isActive && (usesJump ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits");
-      return '<a href="'+subHref+'" style="padding-left:38px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
+      let subHref;
+      if(usesJump) subHref = '#/'+r.path+'?jump='+s.id;
+      else if(s.jumpTab) subHref = '#/'+r.path+'?tab='+s.jumpTab+'&jump='+s.id;
+      else subHref = '#/'+r.path+'?tab='+s.id;
+      const subActive = isActive && (usesJump || s.jumpTab ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits") || (isActive && r.path==="planner" && !activeTab && s.id==="calendar");
+      const padLeft = 38 + (s.indent||0)*18;
+      return '<a href="'+subHref+'" style="padding-left:'+padLeft+'px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
     }).join("");
     return '<div class="nav-accordion-group">'+
       '<a href="javascript:void(0)" draggable="true" data-route="'+r.path+'" data-action="toggleNavAccordion" data-v="'+r.path+'" class="'+(isActive?"active":"")+'">'+
@@ -3007,6 +3017,15 @@ function render(){
       const sel = route==="impowerzone" ? '.izone-section-box[data-izone-id="'+jump+'"]' : '.progress-section-box[data-progress-id="'+jump+'"]';
       setTimeout(()=>{
         const el = document.querySelector(sel);
+        if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
+      }, 30);
+    }
+  }
+  if(route==="planner"){
+    const jump = currentQueryParam("jump");
+    if(jump){
+      setTimeout(()=>{
+        const el = document.querySelector('[data-planner-jump="'+jump+'"]');
         if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
       }, 30);
     }
@@ -3444,18 +3463,26 @@ let plannerDate = todayStr();
 let plannerViewMode = "day";
 let plannerMonthCursor = todayStr().slice(0,7);
 function renderPlanner(){
+  const tab = currentQueryParam("tab") || "calendar";
+  if(tab==="schedule") return renderPlannerSchedule();
+  if(tab==="templates") return renderPlannerTemplates();
   let html = topbarHtml("Planner","Plan your day, week, and month.");
-  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month","schedule"].map(v=>
-    '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div>'+
-    (plannerViewMode==="schedule"?"":'<div class="dropdown-btn" data-action="openManageTemplates">⚙️ Templates ⌄</div>')+'</div>';
+  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
+    '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div></div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
   else if(plannerViewMode==="week") html += renderPlannerWeek();
-  else if(plannerViewMode==="schedule") html += renderPlannerSchedule();
   else html += renderPlannerMonth();
   return html;
 }
 function renderPlannerSchedule(){
-  return scheduleSettingsCardHtml();
+  let html = topbarHtml("🎓 Schedule","Your class schedule, rotation, and holidays.");
+  html += scheduleSettingsCardHtml();
+  return html;
+}
+function renderPlannerTemplates(){
+  let html = topbarHtml("🗂️ Templates","Reusable daily schedules you can apply to any day.");
+  html += '<div class="card" style="margin-top:14px;">'+templateGalleryHtml()+'</div>';
+  return html;
 }
 function getWeekStartDow(){ return (state.profile.weekStartDay==="monday") ? 1 : 0; }
 function weekdayLabelsFromStart(){
@@ -3944,7 +3971,7 @@ function scheduleSettingsCardHtml(){
     '</div></div>';
   if(active){
     html += termsCardHtml(active);
-    html += classesCardHtml(active);
+    html += '<div data-planner-jump="classes">'+classesCardHtml(active)+'</div>';
   }
   html += plannerHolidaysCardHtml();
   return html;
