@@ -3781,7 +3781,10 @@ function renderClassSlotRows(sem, slots){
   const dayOpts = dayKeyOptions(sem);
   return slots.map((s,i)=>{
     let row = '<div class="card" style="margin-bottom:8px;padding:10px;" data-slotrow="'+i+'">';
-    row += '<div class="field"><label>'+(sem.scheduleType==="fixed"?"Day of week":(sem.scheduleType==="week_rotation"?"Week":"Day"))+'</label><div class="chip-group">'+dayOpts.map(o=>'<div class="chip '+(String(s.dayKey)===o.key?"selected":"")+'" data-action="pickClassSlotDayKey" data-idx="'+i+'" data-v="'+o.key+'">'+o.label+'</div>').join("")+'</div></div>';
+    const selDays = s.dayKeys || (s.dayKey!=null ? [String(s.dayKey)] : []);
+    row += '<div class="field"><label>'+(sem.scheduleType==="fixed"?"Day(s) of week":(sem.scheduleType==="week_rotation"?"Week(s)":"Day(s)"))+'</label>'+
+      '<p class="hc-meta" style="margin:0 0 6px;">Pick more than one if this class meets on multiple '+(sem.scheduleType==="fixed"?"days":(sem.scheduleType==="week_rotation"?"weeks":"days"))+' at this same time.</p>'+
+      '<div class="chip-group">'+dayOpts.map(o=>'<div class="chip '+(selDays.includes(o.key)?"selected":"")+'" data-action="pickClassSlotDayKey" data-idx="'+i+'" data-v="'+o.key+'">'+o.label+'</div>').join("")+'</div></div>';
     row += '<div class="row-inline"><div class="field" style="flex:0 0 118px;"><label>Time</label><input class="cs_time" type="time" data-idx="'+i+'" value="'+(s.time||"09:00")+'"></div>'+
       '<div class="field" style="flex:0 0 90px;"><label>Mins</label><input class="cs_dur" type="number" min="5" data-idx="'+i+'" value="'+(s.duration||50)+'"></div></div>';
     row += '<div class="field"><label>Dates</label><div class="chip-group">'+
@@ -3833,7 +3836,7 @@ function openClassForm(id){
   const sem = activeSemester();
   if(!sem){ toast("Set up a semester first"); return; }
   const cls = id ? (sem.classSubjects||[]).find(x=>x.id===id) : null;
-  classFormSlots = cls ? cls.slots.map(s=>Object.assign({},s)) : [];
+  classFormSlots = cls ? cls.slots.map(s=>Object.assign({},s,{dayKeys:[s.dayKey]})) : [];
   classFormColor = cls ? (cls.color||COLORS[0]) : COLORS[(sem.classSubjects||[]).length % COLORS.length];
   openModal(classFormHtml(sem, cls));
 }
@@ -6983,12 +6986,22 @@ document.addEventListener("click", async function(e){
       collectClassSlotsFromDOM();
       const sem = activeSemester();
       const opts = sem ? dayKeyOptions(sem) : [];
-      classFormSlots.push({id:uid(), dayKey: opts.length?opts[0].key:"A", time:"09:00", duration:50, dateRangeMode:"none", termId:null, startDate:null, endDate:null});
+      classFormSlots.push({id:uid(), dayKeys: opts.length?[opts[0].key]:["A"], time:"09:00", duration:50, dateRangeMode:"none", termId:null, startDate:null, endDate:null});
       rerenderClassSlotList();
       break;
     }
     case "removeClassSlotRow": { collectClassSlotsFromDOM(); classFormSlots.splice(Number(t.getAttribute("data-idx")),1); rerenderClassSlotList(); break; }
-    case "pickClassSlotDayKey": { collectClassSlotsFromDOM(); const idx=Number(t.getAttribute("data-idx")); if(classFormSlots[idx]) classFormSlots[idx].dayKey = v; rerenderClassSlotList(); break; }
+    case "pickClassSlotDayKey": {
+      collectClassSlotsFromDOM();
+      const idx=Number(t.getAttribute("data-idx"));
+      const row = classFormSlots[idx];
+      if(row){
+        const cur = row.dayKeys || (row.dayKey!=null ? [String(row.dayKey)] : []);
+        row.dayKeys = cur.includes(v) ? cur.filter(k=>k!==v) : cur.concat([v]);
+      }
+      rerenderClassSlotList();
+      break;
+    }
     case "pickClassSlotRangeMode": { collectClassSlotsFromDOM(); const idx=Number(t.getAttribute("data-idx")); if(classFormSlots[idx]) classFormSlots[idx].dateRangeMode = v; rerenderClassSlotList(); break; }
     case "pickClassColor": { classFormColor = v; document.querySelectorAll('[data-action="pickClassColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "saveClassSubject": {
@@ -6998,8 +7011,16 @@ document.addEventListener("click", async function(e){
       if(!name){ toast("Please enter a class name"); return; }
       collectClassSlotsFromDOM();
       if(classFormSlots.length===0){ toast("Add at least one time slot"); return; }
+      if(classFormSlots.some(s=>(s.dayKeys||(s.dayKey!=null?[s.dayKey]:[])).length===0)){ toast("Pick at least one day for each time slot"); return; }
       sem.classSubjects = sem.classSubjects || [];
-      const payload = { name, color: classFormColor, slots: classFormSlots.map(s=>({id:s.id||uid(), dayKey:s.dayKey, time:s.time||"09:00", duration:Number(s.duration)||50, dateRangeMode:s.dateRangeMode||"none", termId:s.termId||null, startDate:s.startDate||null, endDate:s.endDate||null})) };
+      const expandedSlots = [];
+      classFormSlots.forEach(s=>{
+        const keys = s.dayKeys || (s.dayKey!=null ? [String(s.dayKey)] : []);
+        keys.forEach(k=>{
+          expandedSlots.push({id:uid(), dayKey:k, time:s.time||"09:00", duration:Number(s.duration)||50, dateRangeMode:s.dateRangeMode||"none", termId:s.termId||null, startDate:s.startDate||null, endDate:s.endDate||null});
+        });
+      });
+      const payload = { name, color: classFormColor, slots: expandedSlots };
       if(id){ Object.assign(sem.classSubjects.find(x=>x.id===id), payload); } else { payload.id = uid(); sem.classSubjects.push(payload); }
       saveState(); closeModal(); render();
       toast("Class saved");
