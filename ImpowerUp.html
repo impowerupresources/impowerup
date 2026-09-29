@@ -2876,9 +2876,9 @@ function navSubsectionsFor(path){
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
   if(path==="planner") return [
     {id:"calendar", label:"Calendar", icon:"📅"},
-    {id:"schedule", label:"Schedule", icon:"🎓"},
+    {id:"schedule", label:"Schedule", icon:"📆"},
     {id:"classes", label:"Classes", icon:"", indent:1, jumpTab:"schedule"},
-    {id:"templates", label:"Templates", icon:"🗂️"}
+    {id:"templates", label:"Templates", icon:"", indent:1}
   ];
   return null;
 }
@@ -3475,12 +3475,12 @@ function renderPlanner(){
   return html;
 }
 function renderPlannerSchedule(){
-  let html = topbarHtml("🎓 Schedule","Your class schedule, rotation, and holidays.");
+  let html = topbarHtml("📆 Schedule","Your class schedule, rotation, and holidays.");
   html += scheduleSettingsCardHtml();
   return html;
 }
 function renderPlannerTemplates(){
-  let html = topbarHtml("🗂️ Templates","Reusable daily schedules you can apply to any day.");
+  let html = topbarHtml("Templates","Reusable daily schedules you can apply to any day.");
   html += '<div class="card" style="margin-top:14px;">'+templateGalleryHtml()+'</div>';
   return html;
 }
