@@ -82,8 +82,8 @@
   nav.sidebar a.nav-dragging{opacity:.35;}
   nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
   nav.sidebar .nav-accordion-group{display:flex;flex-direction:column;gap:1px;}
-  .ai-widget-compact{max-width:33%;}
-  @media(max-width:700px){.ai-widget-compact{max-width:100%;}}
+  .ai-widget-compact{width:300px;max-width:33%;}
+  @media(max-width:700px){.ai-widget-compact{max-width:100%;width:100%;}}
   #iai_input::placeholder{font-style:italic;}
   .dash-order-row{cursor:grab;}
   .dash-order-row.dash-dragging{opacity:.35;}
@@ -1298,7 +1298,7 @@ function impowerAiWidgetHtml(){
     '<span style="display:inline-block;max-width:90%;padding:6px 10px;border-radius:12px;font-size:12px;text-align:left;'+
     (m.role==="user"?"background:var(--accent);color:#fff;":"background:var(--surface);")+'">'+escapeHtml(m.content)+'</span></div>').join("");
   const showConfirm = _aiLastAction && _aiLastAction.action!=="clarify" && _aiLastAction.action!=="unsupported";
-  return '<div class="card ai-widget-compact" style="margin-top:10px;background:var(--surface-2);border:none;box-shadow:none;padding:10px 12px;">'+
+  return '<div class="card ai-widget-compact" style="margin:0;background:var(--surface-2);border:none;box-shadow:none;padding:10px 12px;flex-shrink:0;">'+
     '<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;"><span style="font-size:12.5px;font-weight:700;color:var(--text-muted);">⭐ ImpowerAI</span></div>'+
     (bubbles?'':'<p class="hc-meta" style="margin:0 0 6px;font-size:11.5px;">Add a task, habit, goal, or class — or move/complete something.</p>')+
     (bubbles?'<div style="max-height:160px;overflow-y:auto;margin-bottom:6px;">'+bubbles+'</div>':'')+
@@ -3133,9 +3133,10 @@ function renderHome(){
     '<button class="icon-btn" data-action="openDashboardEditor" title="Customize dashboard">🧩</button>'+
     '<a href="#/settings" class="icon-btn" style="text-decoration:none;" title="Settings">⚙️</a></div></div>';
 
-  html += impowerAiWidgetHtml();
-
-  html += '<div class="card" style="margin-bottom:16px;margin-top:12px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
+  html += '<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-top:12px;margin-bottom:16px;">'+
+    '<div class="card" style="flex:1;min-width:200px;margin:0;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>'+
+    impowerAiWidgetHtml()+
+    '</div>';
 
   const hidden = state.profile.dashboardHidden || [];
   getDashboardOrder().forEach(id=>{
