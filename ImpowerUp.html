@@ -586,8 +586,20 @@ function defaultState(){
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], grades:[], journalEntries:[]
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[]
   };
+}
+/* One-time migration: the old combined "checkIns" log (sleep + mood together) is split into
+   two independent logs. Existing history is preserved; new entries only ever go into
+   sleepLogs/moodLogs going forward. checkIns is left in place (untouched) as a backup. */
+function migrateCheckInsToSeparateLogs(s){
+  if((s.checkIns||[]).length && !(s.sleepLogs||[]).length && !(s.moodLogs||[]).length){
+    s.sleepLogs = s.checkIns.filter(c=>c.sleep_hours || c.sleep_quality).map(c=>(
+      {id:uid(), date:c.date, hours:c.sleep_hours||"", quality:c.sleep_quality||"", notes:"", created_at:c.created_at||new Date().toISOString()}));
+    s.moodLogs = s.checkIns.filter(c=>c.mood || (c.symptoms&&c.symptoms.length) || (c.distractions&&c.distractions.length) || (c.needs&&c.needs.length) || c.notes).map(c=>(
+      {id:uid(), date:c.date, mood:c.mood||"", symptoms:(c.symptoms||[]).slice(), distractions:(c.distractions||[]).slice(), needs:(c.needs||[]).slice(), notes:c.notes||"", created_at:c.created_at||new Date().toISOString()}));
+  }
+  return s;
 }
 let state = null;
 
@@ -605,6 +617,7 @@ function loadState(){
     const parsed = JSON.parse(raw);
     const merged = Object.assign(defaultState(), parsed);
     merged.profile = Object.assign(defaultState().profile, parsed.profile||{});
+    migrateCheckInsToSeparateLogs(merged);
     return merged;
   }catch(e){ return defaultState(); }
 }
@@ -1575,6 +1588,7 @@ async function openAsClient(clientId){
     const fresh = defaultState();
     state = snap ? Object.assign(fresh, snap) : fresh;
     state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+    migrateCheckInsToSeparateLogs(state);
     state.profile.onboarded = true;
     if(!state.profile.firstName && !state.profile.nickname) state.profile.firstName = clientName;
     // Keep browsing authenticated as the admin — this is a preview of the client's DATA, not their login.
@@ -2229,6 +2243,7 @@ async function completeCloudLogin(json, displayNameHint){
         const fresh = defaultState();
         state = Object.assign(fresh, snap);
         state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+        migrateCheckInsToSeparateLogs(state);
         state.profile.cloudSession = sess;
         state.profile.isCloudAdmin = isAdmin;
         state.profile.cloudSyncEnabled = true;
@@ -3092,7 +3107,8 @@ const DASHBOARD_WIDGETS = [
   {id:"stats", label:"Stats Grid", icon:"📊"},
   {id:"badges", label:"Badges", icon:"🏅"},
   {id:"bedtime", label:"Time Check", icon:"⏳"},
-  {id:"checkin", label:"Sleep & Mood Check-In", icon:"🌙"},
+  {id:"sleep", label:"Sleep Tracker", icon:"😴"},
+  {id:"mood", label:"Mood Tracker", icon:"🙂"},
   {id:"tasks", label:"Today's Tasks", icon:"📝"},
   {id:"habits", label:"Today's Habits", icon:"✅"},
   {id:"alerts", label:"Today's Alerts", icon:"⏰"},
@@ -3152,7 +3168,8 @@ function renderHome(){
     badges: earnedBadges.length ? '<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
       earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>' : "",
     bedtime: bedtimeWidgetHtml(),
-    checkin: checkInWidgetHtml(),
+    sleep: sleepWidgetHtml(),
+    mood: moodWidgetHtml(),
     tasks: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>'+
       (todaysTasks.length===0 ? emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.") : todaysTasks.map(t=>taskRow(t)).join(""))+'</div>',
     habits: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>'+
@@ -4362,7 +4379,8 @@ function gradesSectionHtml(){
 }
 /* ============ ImpowerZone (Sleep/Mood, Progress, Habit Heatmap, Success Matrix, Brain Dump) ============ */
 const IMPOWERZONE_SECTIONS = [
-  {id:"checkin", label:"Sleep & Mood"},
+  {id:"sleep", label:"Sleep Tracker"},
+  {id:"mood", label:"Mood Tracker"},
   {id:"braindump", label:"Brain Dump"},
   {id:"grades", label:"Grades"}
 ];
@@ -4452,8 +4470,10 @@ function renderImpowerZone(){
   html += '<p class="hc-meta" style="margin:-6px 0 12px;">Drag ⠿ to reorder these sections. Looking for stats, trends, or badges? Check <a href="#/progress">Progress</a>.</p>';
 
   const sectionHtml = {
-    checkin: '<div class="section-head" style="margin-top:0;"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>'+
-      '<div class="card">'+checkInTrendChartsHtml()+'</div>',
+    sleep: '<div class="section-head" style="margin-top:0;"><h2>😴 Sleep Tracker</h2><button class="btn ghost sm" data-action="openSleepForm">+ Log sleep</button></div>'+
+      '<div class="card">'+sleepTrendChartHtml()+'</div>',
+    mood: '<div class="section-head" style="margin-top:0;"><h2>🙂 Mood Tracker</h2><button class="btn ghost sm" data-action="openMoodForm">+ Log mood</button></div>'+
+      '<div class="card">'+moodTrendChartHtml()+'</div>',
     grades: '<div class="card"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+
       (((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length))
         ? gradesSectionHtml()
@@ -4969,61 +4989,94 @@ function renderTasks(){
   return html;
 }
 
-/* ============ Check-Ins (Sleep + Mood Tracker) ============ */
-let ciMood="", ciSleepQuality="", ciSymptoms=[], ciDistractions=[], ciNeeds=[], ciExtrasOpen=false;
+/* ============ Sleep Tracker ============ */
+let slQuality="", slExtrasOpen=false;
 function toggleArrVal(arr, val){ const i=arr.indexOf(val); if(i>=0) arr.splice(i,1); else arr.push(val); return arr; }
-function checkInForDate(dateStr){ return (state.checkIns||[]).find(c=>c.date===dateStr) || null; }
-function checkInDueDates(daysBack){
-  // Which of the last N days should have had a check-in, per the reminder-frequency setting.
-  const freq = state.profile.checkInFrequency || "daily";
-  const custom = state.profile.checkInCustomDays || [];
-  const out = [];
-  for(let i=daysBack-1;i>=0;i--){
-    const d = addDays(todayStr(), -i);
-    const dow = dayOfWeekName(d);
-    let due = false;
-    if(freq==="daily") due = true;
-    else if(freq==="3x_week") due = ["Mon","Wed","Fri"].includes(dow);
-    else if(freq==="custom") due = custom.includes(dow);
-    out.push({date:d, due});
-  }
-  return out;
-}
-function checkInStreakDays(){
+function sleepLogForDate(dateStr){ return (state.sleepLogs||[]).find(c=>c.date===dateStr) || null; }
+function sleepStreakDays(){
   let streak = 0;
   for(let i=0;i<365;i++){
     const d = addDays(todayStr(), -i);
-    if(checkInForDate(d)) streak++;
+    if(sleepLogForDate(d)) streak++;
     else if(i===0) continue; // allow "not logged today yet" without breaking the streak display
     else break;
   }
   return streak;
 }
-function checkInWidgetHtml(){
-  const todays = checkInForDate(todayStr());
+function sleepWidgetHtml(){
+  const todays = sleepLogForDate(todayStr());
+  const freqLabel = (CHECKIN_FREQUENCIES.find(f=>f.v===(state.profile.checkInFrequency||"daily"))||{}).l || "Daily";
+  if(todays){
+    return '<div class="card" style="margin-bottom:14px;"><h2>😴 Sleep Tracker</h2>'+
+      '<div class="hc-meta">Logged for today: '+(todays.hours?todays.hours+'h sleep':'')+(todays.quality?' · '+((SLEEP_QUALITY.find(s=>s.v===todays.quality)||{}).e||'')+' '+((SLEEP_QUALITY.find(s=>s.v===todays.quality)||{}).l||''):'')+'</div>'+
+      '<button class="btn ghost sm" style="margin-top:8px;" data-action="openSleepForm" data-id="'+todays.id+'">✏️ Edit today\'s sleep log</button>'+
+      '</div>';
+  }
+  return '<div class="card" style="margin-bottom:14px;background:var(--surface-2);"><h2>😴 Sleep Tracker</h2>'+
+    '<div class="hc-meta">You haven\'t logged sleep today yet. Reminder frequency: '+freqLabel+'.</div>'+
+    '<button class="btn ghost sm" style="margin-top:8px;" data-action="openSleepForm">📝 Log sleep</button>'+
+    '</div>';
+}
+function sleepFormHtml(c){
+  c = c || {date: todayStr(), hours:"", quality:"", notes:""};
+  slQuality = c.quality||"";
+  return '<h2>'+(c.id?"Edit Sleep Log":"Log Sleep")+'</h2>'+
+    '<div class="field"><label>Date</label><input id="sl_date" type="date" value="'+(c.date||todayStr())+'"></div>'+
+    '<div class="row-inline"><div class="field"><label>Hours of sleep</label><input id="sl_hours" type="number" min="0" max="24" step="0.5" placeholder="e.g. 7.5" value="'+(c.hours!=null&&c.hours!==""?c.hours:"")+'"></div></div>'+
+    '<div class="field"><label>Sleep quality</label><div class="chip-group" id="slQualityChips">'+SLEEP_QUALITY.map(s=>'<div class="chip '+(slQuality===s.v?"selected":"")+'" data-action="pickSlQuality" data-v="'+s.v+'">'+s.e+' '+s.l+'</div>').join("")+'</div></div>'+
+    '<div class="field"><label>Notes (optional)</label><textarea id="sl_notes" placeholder="Anything else about last night">'+escapeHtml(c.notes||"")+'</textarea></div>'+
+    '<div class="modal-actions">'+(c.id?'<button class="btn danger" data-action="deleteSleepLog" data-id="'+c.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveSleepLog" data-id="'+(c.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openSleepForm(id){
+  const c = id ? (state.sleepLogs||[]).find(x=>x.id===id) : sleepLogForDate(todayStr());
+  openModal(sleepFormHtml(c));
+}
+function sleepTrendChartHtml(){
+  const ins = (state.sleepLogs||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).slice(-14);
+  if(!ins.length) return '<p class="hc-meta">Log a few nights to see your sleep trend here.</p>';
+  const sleepDays = ins.map(c=>({label:fmtDatePretty(c.date).slice(0,6), value:Number(c.hours)||0}));
+  return '<div class="hc-meta" style="font-weight:700;margin-bottom:4px;">😴 Sleep (hours) — last '+ins.length+' logs</div>'+
+    renderLineChart(sleepDays, "#3B82F6");
+}
+
+/* ============ Mood Tracker ============ */
+let ciMood="", ciSymptoms=[], ciDistractions=[], ciNeeds=[], ciExtrasOpen=false;
+function moodLogForDate(dateStr){ return (state.moodLogs||[]).find(c=>c.date===dateStr) || null; }
+function moodStreakDays(){
+  let streak = 0;
+  for(let i=0;i<365;i++){
+    const d = addDays(todayStr(), -i);
+    if(moodLogForDate(d)) streak++;
+    else if(i===0) continue; // allow "not logged today yet" without breaking the streak display
+    else break;
+  }
+  return streak;
+}
+function moodWidgetHtml(){
+  const todays = moodLogForDate(todayStr());
   const freqLabel = (CHECKIN_FREQUENCIES.find(f=>f.v===(state.profile.checkInFrequency||"daily"))||{}).l || "Daily";
   if(todays){
     const mood = MOODS.find(m=>m.v===todays.mood);
-    return '<div class="card" style="margin-bottom:14px;"><h2>🌙 Sleep &amp; Mood Check-In</h2>'+
-      '<div class="hc-meta">Logged for today: '+(mood?mood.e+' '+mood.l:'')+(todays.sleep_hours?' · 😴 '+todays.sleep_hours+'h sleep':'')+'</div>'+
-      '<button class="btn ghost sm" style="margin-top:8px;" data-action="openCheckInForm" data-id="'+todays.id+'">✏️ Edit today\'s check-in</button>'+
+    return '<div class="card" style="margin-bottom:14px;"><h2>🙂 Mood Tracker</h2>'+
+      '<div class="hc-meta">Logged for today: '+(mood?mood.e+' '+mood.l:'')+'</div>'+
+      '<button class="btn ghost sm" style="margin-top:8px;" data-action="openMoodForm" data-id="'+todays.id+'">✏️ Edit today\'s mood log</button>'+
       '</div>';
   }
-  return '<div class="card" style="margin-bottom:14px;background:var(--surface-2);"><h2>🌙 Sleep &amp; Mood Check-In</h2>'+
-    '<div class="hc-meta">You haven\'t logged today yet. Reminder frequency: '+freqLabel+'.</div>'+
-    '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'+MOODS.map(m=>'<button class="btn secondary sm" data-action="quickCheckInMood" data-v="'+m.v+'">'+m.e+' '+m.l+'</button>').join("")+'</div>'+
-    '<button class="btn ghost sm" style="margin-top:8px;" data-action="openCheckInForm">📝 Full check-in</button>'+
+  return '<div class="card" style="margin-bottom:14px;background:var(--surface-2);"><h2>🙂 Mood Tracker</h2>'+
+    '<div class="hc-meta">You haven\'t logged your mood today yet. Reminder frequency: '+freqLabel+'.</div>'+
+    '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'+MOODS.map(m=>'<button class="btn secondary sm" data-action="quickLogMood" data-v="'+m.v+'">'+m.e+' '+m.l+'</button>').join("")+'</div>'+
+    '<button class="btn ghost sm" style="margin-top:8px;" data-action="openMoodForm">📝 Full mood log</button>'+
     '</div>';
 }
-function checkInFormHtml(c){
-  c = c || {date: todayStr(), sleep_hours:"", sleep_quality:"", mood:"", symptoms:[], distractions:[], needs:[], notes:""};
-  ciMood = c.mood||""; ciSleepQuality = c.sleep_quality||"";
+function moodFormHtml(c){
+  c = c || {date: todayStr(), mood:"", symptoms:[], distractions:[], needs:[], notes:""};
+  ciMood = c.mood||"";
   ciSymptoms = (c.symptoms||[]).slice(); ciDistractions = (c.distractions||[]).slice(); ciNeeds = (c.needs||[]).slice();
   ciExtrasOpen = !!(ciSymptoms.length || ciDistractions.length || ciNeeds.length);
-  return '<h2>'+(c.id?"Edit Check-In":"Daily Check-In")+'</h2>'+
+  return '<h2>'+(c.id?"Edit Mood Log":"Log Mood")+'</h2>'+
     '<div class="field"><label>Date</label><input id="ci_date" type="date" value="'+(c.date||todayStr())+'"></div>'+
-    '<div class="row-inline"><div class="field"><label>Hours of sleep</label><input id="ci_sleepHours" type="number" min="0" max="24" step="0.5" placeholder="e.g. 7.5" value="'+(c.sleep_hours!=null&&c.sleep_hours!==""?c.sleep_hours:"")+'"></div></div>'+
-    '<div class="field"><label>Sleep quality</label><div class="chip-group" id="ciSleepQualityChips">'+SLEEP_QUALITY.map(s=>'<div class="chip '+(ciSleepQuality===s.v?"selected":"")+'" data-action="pickCiSleepQuality" data-v="'+s.v+'">'+s.e+' '+s.l+'</div>').join("")+'</div></div>'+
     '<div class="field"><label>Mood</label><div class="chip-group" id="ciMoodChips">'+MOODS.map(m=>'<div class="chip '+(ciMood===m.v?"selected":"")+'" data-action="pickCiMood" data-v="'+m.v+'">'+m.e+' '+m.l+'</div>').join("")+'</div></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">➕ Symptoms, distractions &amp; support needed</div><div class="hc-meta" style="margin-top:2px;">Optional — track what\'s going on underneath the numbers.</div></div><div class="switch '+(ciExtrasOpen?"on":"")+'" data-action="toggleCiExtras"></div></div>'+
     '<div id="ciExtrasBlock" style="'+(ciExtrasOpen?"":"display:none;")+'">'+
@@ -5032,26 +5085,23 @@ function checkInFormHtml(c){
     '<div class="field"><label>Needs / support needed</label><div class="chip-group" id="ciNeedChips">'+NEED_OPTIONS.map(s=>'<div class="chip '+(ciNeeds.includes(s)?"selected":"")+'" data-action="pickCiNeed" data-v="'+s+'">'+s+'</div>').join("")+'</div></div>'+
     '</div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="ci_notes" placeholder="Anything else on your mind">'+escapeHtml(c.notes||"")+'</textarea></div>'+
-    '<div class="modal-actions">'+(c.id?'<button class="btn danger" data-action="deleteCheckIn" data-id="'+c.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(c.id?'<button class="btn danger" data-action="deleteMoodLog" data-id="'+c.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
-    '<button class="btn" data-action="saveCheckIn" data-id="'+(c.id||"")+'" style="flex:1">Save</button></div>';
+    '<button class="btn" data-action="saveMoodLog" data-id="'+(c.id||"")+'" style="flex:1">Save</button></div>';
 }
-function openCheckInForm(id){
-  const c = id ? (state.checkIns||[]).find(x=>x.id===id) : checkInForDate(todayStr());
-  openModal(checkInFormHtml(c));
+function openMoodForm(id){
+  const c = id ? (state.moodLogs||[]).find(x=>x.id===id) : moodLogForDate(todayStr());
+  openModal(moodFormHtml(c));
 }
-/* ---- Progress-tab visuals: sleep/mood trend, habit heatmap, success matrix, timeline ---- */
-function checkInTrendChartsHtml(){
-  const ins = (state.checkIns||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).slice(-14);
-  if(!ins.length) return '<p class="hc-meta">Log a few check-ins to see your sleep and mood trends here.</p>';
-  const sleepDays = ins.map(c=>({label:fmtDatePretty(c.date).slice(0,6), value:Number(c.sleep_hours)||0}));
+function moodTrendChartHtml(){
+  const ins = (state.moodLogs||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).slice(-14);
+  if(!ins.length) return '<p class="hc-meta">Log a few moods to see your trend here.</p>';
   const moodDays = ins.map(c=>({label:fmtDatePretty(c.date).slice(0,6), value:moodValueNum(c.mood)}));
-  return '<div style="margin-bottom:16px;"><div class="hc-meta" style="font-weight:700;margin-bottom:4px;">😴 Sleep (hours) — last '+ins.length+' check-ins</div>'+
-    renderLineChart(sleepDays, "#3B82F6")+'</div>'+
-    '<div><div class="hc-meta" style="font-weight:700;margin-bottom:4px;">🙂 Mood — last '+ins.length+' check-ins</div>'+
+  return '<div class="hc-meta" style="font-weight:700;margin-bottom:4px;">🙂 Mood — last '+ins.length+' logs</div>'+
     renderLineChart(moodDays, "#EC4899")+
-    '<div class="hc-meta" style="margin-top:2px;">😤 Struggled · 😐 Okay · 🙂 Good · 😄 Great</div></div>';
+    '<div class="hc-meta" style="margin-top:2px;">😤 Struggled · 😐 Okay · 🙂 Good · 😄 Great</div>';
 }
+/* ---- Progress-tab visuals: habit heatmap, success matrix, timeline (mood-linked) ---- */
 function lerpNum(a,b,t){ return a+(b-a)*t; }
 function mixWithWhite(rgb, amt){ return rgb.map(c=>Math.round(c + (255-c)*amt)); }
 // Heatmap color range: fixed solemn red at the low end (0 = tough/negative day),
@@ -5071,7 +5121,7 @@ function heatmapColorForScore(score){
 // Combines that day's logged mood (from a check-in) with habit-completion volume into one
 // 0 (solemn/low) .. 1 (bright/positive) score. Returns null when nothing was logged that day.
 function dayPositivityScore(d, counts, maxCount){
-  const ci = checkInForDate(d);
+  const ci = moodLogForDate(d);
   const moodScore = (ci && ci.mood) ? (moodValueNum(ci.mood)-1)/3 : null;
   const count = counts[d]||0;
   const completionScore = maxCount>0 ? Math.min(1, count/maxCount) : 0;
@@ -5098,7 +5148,7 @@ function habitHeatmapHtml(){
       const c = counts[d]||0;
       const score = future ? null : dayPositivityScore(d, counts, max);
       const color = heatmapColorForScore(score);
-      const ci = checkInForDate(d);
+      const ci = moodLogForDate(d);
       const mood = ci && ci.mood ? (MOODS.find(m=>m.v===ci.mood)||{}).l : null;
       const titleBits = [fmtDatePretty(d)];
       if(!future){ if(c) titleBits.push(c+' completion'+(c===1?'':'s')); if(mood) titleBits.push('Mood: '+mood); if(!c && !mood) titleBits.push('No data logged'); }
@@ -5120,19 +5170,19 @@ function habitHeatmapHtml(){
 function successMatrixHtml(){
   const last30 = [];
   for(let i=29;i>=0;i--) last30.push(addDays(todayStr(),-i));
-  const checkedInDays = last30.filter(d=>checkInForDate(d)).length;
+  const checkedInDays = last30.filter(d=>moodLogForDate(d)).length;
   const checkInPct = Math.round((checkedInDays/30)*100);
-  const habitCompletionsOnCheckinDays = last30.filter(d=>checkInForDate(d)).reduce((sum,d)=>sum+(state.habitLogs||[]).filter(l=>l.completed_date===d).length,0);
-  const habitCompletionsOnOtherDays = last30.filter(d=>!checkInForDate(d)).reduce((sum,d)=>sum+(state.habitLogs||[]).filter(l=>l.completed_date===d).length,0);
+  const habitCompletionsOnCheckinDays = last30.filter(d=>moodLogForDate(d)).reduce((sum,d)=>sum+(state.habitLogs||[]).filter(l=>l.completed_date===d).length,0);
+  const habitCompletionsOnOtherDays = last30.filter(d=>!moodLogForDate(d)).reduce((sum,d)=>sum+(state.habitLogs||[]).filter(l=>l.completed_date===d).length,0);
   const daysWithCheckin = checkedInDays||1;
   const daysWithout = (30-checkedInDays)||1;
   const avgOnCheckin = (habitCompletionsOnCheckinDays/daysWithCheckin).toFixed(1);
   const avgOnOther = (habitCompletionsOnOtherDays/daysWithout).toFixed(1);
   const avgMood = ins=>{ const withMood = ins.filter(c=>c.mood); if(!withMood.length) return null; return (withMood.reduce((s,c)=>s+moodValueNum(c.mood),0)/withMood.length).toFixed(1); };
-  const recentIns = (state.checkIns||[]).filter(c=>last30.includes(c.date));
+  const recentIns = (state.moodLogs||[]).filter(c=>last30.includes(c.date));
   const moodAvg = avgMood(recentIns);
-  return '<div class="grid cols-3">'+stat(checkInPct+"%","Check-in rate (30d)")+stat(checkInStreakDays(),"Day streak")+stat(moodAvg?moodAvg+"/4":"—","Avg mood")+'</div>'+
-    '<p class="hc-meta" style="margin-top:10px;">On days you check in, you complete <b>'+avgOnCheckin+'</b> habits on average, vs <b>'+avgOnOther+'</b> on days you don\'t'+(Number(avgOnCheckin)>Number(avgOnOther)?' — checking in seems to help! 🎉':'')+'.</p>';
+  return '<div class="grid cols-3">'+stat(checkInPct+"%","Mood log rate (30d)")+stat(moodStreakDays(),"Day streak")+stat(moodAvg?moodAvg+"/4":"—","Avg mood")+'</div>'+
+    '<p class="hc-meta" style="margin-top:10px;">On days you log your mood, you complete <b>'+avgOnCheckin+'</b> habits on average, vs <b>'+avgOnOther+'</b> on days you don\'t'+(Number(avgOnCheckin)>Number(avgOnOther)?' — checking in seems to help! 🎉':'')+'.</p>';
 }
 function habitGoalTimelineHtml(){
   const events = [];
@@ -5143,9 +5193,12 @@ function habitGoalTimelineHtml(){
   (state.goals||[]).forEach(g=>{
     if(g.target_date) events.push({date:g.target_date, icon:g.emoji||"🎯", label:(g.status==="completed"?"Goal completed: ":"Goal target: ")+g.title, color:g.color});
   });
-  (state.checkIns||[]).forEach(c=>{
+  (state.moodLogs||[]).forEach(c=>{
     const mood = MOODS.find(m=>m.v===c.mood);
-    events.push({date:c.date, icon: mood?mood.e:"📝", label:"Check-in logged"+(mood?" · "+mood.l:""), color:null});
+    events.push({date:c.date, icon: mood?mood.e:"📝", label:"Mood logged"+(mood?" · "+mood.l:""), color:null});
+  });
+  (state.sleepLogs||[]).forEach(c=>{
+    events.push({date:c.date, icon:"😴", label:"Sleep logged"+(c.hours?" · "+c.hours+"h":""), color:null});
   });
   events.sort((a,b)=>b.date.localeCompare(a.date));
   const recent = events.slice(0,25);
@@ -5371,8 +5424,8 @@ function renderSettings(){
 
   const ciFreq = state.profile.checkInFrequency || "daily";
   const ciCustomDays = state.profile.checkInCustomDays || [];
-  html += '<div class="card" style="margin-top:14px;"><h2>🌙 Sleep &amp; Mood Check-In Reminders</h2>'+
-    '<p class="hc-meta">How often should the dashboard encourage you to log a check-in?</p>'+
+  html += '<div class="card" style="margin-top:14px;"><h2>🌙 Sleep &amp; Mood Reminders</h2>'+
+    '<p class="hc-meta">How often should the dashboard encourage you to log your sleep and mood? Applies to both trackers.</p>'+
     '<div class="field" style="margin-top:8px;"><div class="chip-group">'+CHECKIN_FREQUENCIES.map(f=>'<div class="chip '+(ciFreq===f.v?"selected":"")+'" data-action="pickCheckInFrequency" data-v="'+f.v+'">'+f.l+'</div>').join("")+'</div></div>'+
     '<div class="field" id="ciCustomDaysField" style="'+(ciFreq==="custom"?"":"display:none")+'"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+(ciCustomDays.includes(d)?"selected":"")+'" data-action="pickCheckInCustomDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
     '</div>';
@@ -6492,7 +6545,8 @@ document.addEventListener("click", async function(e){
       break;
     }
 
-    case "openCheckInForm": openCheckInForm(id||null); break;
+    case "openSleepForm": openSleepForm(id||null); break;
+    case "openMoodForm": openMoodForm(id||null); break;
     case "setTrendsRange": _trendsRange = v; render(); break;
     case "applyTrendsCustomDays": {
       const inp = document.getElementById("trendsCustomDays");
@@ -6501,15 +6555,15 @@ document.addEventListener("click", async function(e){
       render();
       break;
     }
-    case "quickCheckInMood": {
-      const existing = checkInForDate(todayStr());
+    case "quickLogMood": {
+      const existing = moodLogForDate(todayStr());
       if(existing){ existing.mood = v; }
-      else { state.checkIns = state.checkIns||[]; state.checkIns.push({id:uid(), date:todayStr(), sleep_hours:"", sleep_quality:"", mood:v, symptoms:[], distractions:[], needs:[], notes:"", created_at:new Date().toISOString()}); }
+      else { state.moodLogs = state.moodLogs||[]; state.moodLogs.push({id:uid(), date:todayStr(), mood:v, symptoms:[], distractions:[], needs:[], notes:"", created_at:new Date().toISOString()}); }
       saveState(); render();
-      toast("Mood logged — tap 📝 Full check-in anytime to add more");
+      toast("Mood logged — tap 📝 Full mood log anytime to add more");
       break;
     }
-    case "pickCiSleepQuality": { ciSleepQuality = v; document.querySelectorAll('[data-action="pickCiSleepQuality"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
+    case "pickSlQuality": { slQuality = v; document.querySelectorAll('[data-action="pickSlQuality"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
     case "pickCiMood": { ciMood = v; document.querySelectorAll('[data-action="pickCiMood"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v)); break; }
     case "pickCiSymptom": { toggleArrVal(ciSymptoms, v); t.classList.toggle("selected"); break; }
     case "pickCiDistraction": { toggleArrVal(ciDistractions, v); t.classList.toggle("selected"); break; }
@@ -6520,26 +6574,44 @@ document.addEventListener("click", async function(e){
       if(block) block.style.display = isOn ? "" : "none";
       break;
     }
-    case "saveCheckIn": {
+    case "saveSleepLog": {
+      const payload = {
+        date: document.getElementById("sl_date").value || todayStr(),
+        hours: document.getElementById("sl_hours").value !== "" ? Number(document.getElementById("sl_hours").value) : "",
+        quality: slQuality,
+        notes: document.getElementById("sl_notes").value.trim()
+      };
+      state.sleepLogs = state.sleepLogs || [];
+      if(id){ Object.assign(state.sleepLogs.find(x=>x.id===id), payload); }
+      else {
+        const existingForDate = sleepLogForDate(payload.date);
+        if(existingForDate){ Object.assign(existingForDate, payload); }
+        else { payload.id = uid(); payload.created_at = new Date().toISOString(); state.sleepLogs.push(payload); }
+      }
+      saveState(); closeModal(); render();
+      toast("Sleep log saved");
+      break;
+    }
+    case "deleteSleepLog": { state.sleepLogs = (state.sleepLogs||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
+    case "saveMoodLog": {
       const payload = {
         date: document.getElementById("ci_date").value || todayStr(),
-        sleep_hours: document.getElementById("ci_sleepHours").value !== "" ? Number(document.getElementById("ci_sleepHours").value) : "",
-        sleep_quality: ciSleepQuality, mood: ciMood,
+        mood: ciMood,
         symptoms: ciSymptoms.slice(), distractions: ciDistractions.slice(), needs: ciNeeds.slice(),
         notes: document.getElementById("ci_notes").value.trim()
       };
-      state.checkIns = state.checkIns || [];
-      if(id){ Object.assign(state.checkIns.find(x=>x.id===id), payload); }
+      state.moodLogs = state.moodLogs || [];
+      if(id){ Object.assign(state.moodLogs.find(x=>x.id===id), payload); }
       else {
-        const existingForDate = checkInForDate(payload.date);
+        const existingForDate = moodLogForDate(payload.date);
         if(existingForDate){ Object.assign(existingForDate, payload); }
-        else { payload.id = uid(); payload.created_at = new Date().toISOString(); state.checkIns.push(payload); }
+        else { payload.id = uid(); payload.created_at = new Date().toISOString(); state.moodLogs.push(payload); }
       }
       saveState(); closeModal(); render();
-      toast("Check-in saved");
+      toast("Mood log saved");
       break;
     }
-    case "deleteCheckIn": { state.checkIns = (state.checkIns||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
+    case "deleteMoodLog": { state.moodLogs = (state.moodLogs||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
 
     case "openJournalForm": openJournalForm(id||null); break;
     case "pickJournalMood": { journalFormMood = v; document.querySelectorAll('[data-action="pickJournalMood"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
