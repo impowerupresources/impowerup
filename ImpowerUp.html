@@ -2157,8 +2157,8 @@ function renderLoginGate(){
 }
 function loginGateLoginFormHtml(){
   return '<h2>🔐 Log In</h2>'+
-    '<p class="hc-meta">Sign in as an admin or as an existing client — same form either way.</p>'+
-    '<div class="field"><label>Email</label><input id="lg_email" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off"></div>'+
+    '<p class="hc-meta">Sign in as an admin or as an existing client — same form either way. Some clients log in with just a username and password, no email needed.</p>'+
+    '<div class="field"><label>Username or email</label><input id="lg_email" type="text" placeholder="Your username (or email)" autocapitalize="off" autocorrect="off"></div>'+
     '<div class="field"><label>Password</label><div style="position:relative;">'+
     '<input id="lg_pw" type="password" placeholder="Your password" style="padding-right:42px;">'+
     '<span data-action="toggleLgPwVisibility" title="Show/hide password" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;">👁️</span>'+
@@ -7409,10 +7409,12 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "doCloudLoginFresh": {
-      const email = document.getElementById("lg_email").value.trim();
+      const identifier = document.getElementById("lg_email").value.trim();
       const pw = document.getElementById("lg_pw").value;
-      if(!email || !pw){ toast("Enter your email and password"); return; }
+      if(!identifier || !pw){ toast("Enter your username/email and password"); return; }
       try{
+        const email = identifier.includes("@") ? identifier : await resolveLoginEmail(identifier);
+        if(!email){ toast("No account found for that username"); return; }
         const json = await acctSignIn(email, pw);
         await completeCloudLogin(json);
       }catch(err){ toast(err.message); }
