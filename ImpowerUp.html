@@ -2970,7 +2970,7 @@ function render(){
   if(!state.profile.onboarded){ renderOnboarding(); return; }
   const route = currentRoute();
   if(OLD_ROUTE_REDIRECTS[route]){ location.hash = "#/"+OLD_ROUTE_REDIRECTS[route]; return; }
-  if(navSubsectionsFor(route) && _navExpandedRoute===null) _navExpandedRoute = route;
+  if(navSubsectionsFor(route) && _navExpandedRoute===null && route!==_lastRenderedRoute) _navExpandedRoute = route;
   const app = document.getElementById("app");
   let body = "";
   if(route==="home") body = renderHome();
@@ -6070,10 +6070,11 @@ document.addEventListener("click", async function(e){
     case "navigateAndCloseModal": { closeModal(); location.hash = "#/"+v; break; }
     case "toggleNavAccordion": {
       if(_navExpandedRoute===v){
-        if(currentRoute()===v) render(); else location.hash = "#/"+v;
+        _navExpandedRoute = null;
+        render();
       } else {
         _navExpandedRoute = v;
-        render();
+        if(currentRoute()!==v) location.hash = "#/"+v; else render();
       }
       break;
     }
