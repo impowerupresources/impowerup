@@ -81,6 +81,7 @@
   nav.sidebar a{cursor:grab;}
   nav.sidebar a.nav-dragging{opacity:.35;}
   nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
+  nav.sidebar .nav-accordion-group{display:flex;flex-direction:column;gap:1px;}
   .dash-order-row{cursor:grab;}
   .dash-order-row.dash-dragging{opacity:.35;}
   .dash-order-row.dash-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
@@ -477,7 +478,22 @@ function quoteOfTheDay(){
   return QUOTES[sum % QUOTES.length];
 }
 const DURATION_OPTIONS = [5,10,15,20,25,30,45,60,90];
-const LEVEL_TITLES = ["Newcomer","Rookie","Rising Star","Momentum Builder","Habit Hero","Consistency Champ","Streak Master","Goal Crusher","Unstoppable","Legend"];
+/* Light-Spectrum Progression: XP levels are framed as a light source growing from a
+   tiny filament into an unstoppable beam. Levels beyond the last named tier just keep
+   the "Hyperglow" title/emoji — it's the permanent peak state. */
+const LEVEL_TITLES = ["Spark","Flicker","Glow","Flare","Neon","Prism","Hyperglow"];
+const LEVEL_DESCRIPTIONS = [
+  "First sign of life — setting up your daily routine.",
+  "Building momentum — starting to show consistency.",
+  "Steady, reliable light — habits are locking in.",
+  "High-energy phase — crushing big goals and managing stress.",
+  "Bright, bold, and fully charged daily flow.",
+  "Mastery — bending every daily challenge into clear positive energy.",
+  "Peak legend status — total harmony between tasks and emotional health."
+];
+const LEVEL_EMOJI = ["✨","🕯️","🟡","🔥","💡","🌈","⚡"];
+function levelEmoji(level){ return LEVEL_EMOJI[Math.min(level-1, LEVEL_EMOJI.length-1)]; }
+function levelDescription(level){ return LEVEL_DESCRIPTIONS[Math.min(level-1, LEVEL_DESCRIPTIONS.length-1)]; }
 const ALARM_HELP = {
   gentle:"A soft chime that rings a few times, then stops. Easy to snooze.",
   moderate:"A steady tone that repeats until you dismiss it. One snooze allowed.",
@@ -531,7 +547,8 @@ function levelFromXp(xp){
   let level=1, xpNeeded=100, remaining=Math.max(0,xp||0);
   while(remaining>=xpNeeded){ remaining-=xpNeeded; level++; xpNeeded=Math.round(xpNeeded*1.25); }
   const title = LEVEL_TITLES[Math.min(level-1, LEVEL_TITLES.length-1)];
-  return {level, title, into:remaining, needed:xpNeeded, pct: Math.min(100, Math.round((remaining/xpNeeded)*100))};
+  return {level, title, into:remaining, needed:xpNeeded, pct: Math.min(100, Math.round((remaining/xpNeeded)*100)),
+    emoji: levelEmoji(level), desc: levelDescription(level)};
 }
 const BADGES = [
   {id:"first_step", emoji:"🌱", title:"First Step", desc:"Complete your first habit", check:s=>s.habitLogs.length>=1},
@@ -1269,6 +1286,26 @@ function quickAssistantFormHtml(){
       : ('<div class="field"><textarea id="qa_input" rows="2" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'"></textarea></div>'+
         '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Close</button>'+
         '<button class="btn" style="flex:1" data-action="sendQuickAssistantMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Send")+'</button></div>'));
+}
+/* Embedded ImpowerAI widget — same conversation/state as the Quick Assistant modal above,
+   but rendered inline on the Home dashboard with a plain text box so the person can type
+   straight into it without opening a modal first. */
+function impowerAiWidgetHtml(){
+  const bubbles = _aiConversation.map(m=>'<div style="margin:6px 0;'+(m.role==="user"?"text-align:right;":"")+'">'+
+    '<span style="display:inline-block;max-width:85%;padding:8px 12px;border-radius:14px;font-size:13.5px;text-align:left;'+
+    (m.role==="user"?"background:var(--accent);color:#fff;":"background:var(--surface-2);")+'">'+escapeHtml(m.content)+'</span></div>').join("");
+  const showConfirm = _aiLastAction && _aiLastAction.action!=="clarify" && _aiLastAction.action!=="unsupported";
+  return '<div class="card" style="margin-top:12px;">'+
+    '<div class="section-head" style="margin-top:0;"><h2>⭐ ImpowerAI</h2></div>'+
+    (bubbles?'':'<p class="hc-meta" style="margin-top:0;">Add a task, habit, goal, or class — or move/complete something. Just type below.</p>')+
+    (bubbles?'<div style="max-height:220px;overflow-y:auto;margin-bottom:8px;">'+bubbles+'</div>':'')+
+    (showConfirm
+      ? '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="cancelImpowerAiConversation">Cancel</button>'+
+        '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
+      : ('<div style="display:flex;gap:8px;">'+
+          '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;" '+
+          (_quickAssistantLoading?'disabled':'')+'/>'+
+          '<button class="btn" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Send")+'</button></div>'));
 }
 async function callAiCommandFn(messages){
   if(!(await ensureFreshSession())) throw new Error("Log in to use the Quick Assistant");
@@ -2707,10 +2744,12 @@ function getDayTimelineItems(dateStr){
 
 /* ============ Router / nav ============ */
 const ROUTES = [
+  {path:"home", label:"Home", icon:"🏠"},
   {path:"actionhub", label:"Action Hub", icon:"🚀"},
+  {path:"planner", label:"Planner", icon:"🗓️"},
   {path:"impowerzone", label:"ImpowerZone", icon:"🧠"},
   {path:"assessments", label:"Assessments", icon:"📋"},
-  {path:"toolkit", label:"Toolkit", icon:"🧰"},
+  {path:"toolkit", label:"Superboosts", icon:"⚡"},
   {path:"settings", label:"Settings", icon:"⚙️"}
 ];
 function currentRoute(){ return (location.hash.replace("#/","") || "home").split("?")[0]; }
@@ -2796,8 +2835,8 @@ function getOrderedRouteList(routeList){
 function navIconSvg(inner){ return '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>'; }
 const NAV_ICONS = {
   home: navIconSvg('<path d="M4 11l8-7 8 7"/><path d="M6 10v9h5v-5h2v5h5v-9"/>'),
-  actionhub: navIconSvg('<path d="M13 3c3 1 5.5 3.5 6.5 6.5L14 15l-4.5.5L10 11z"/><path d="M9.5 14.5L5 19l1.5-4.5"/><circle cx="15" cy="9" r="1.4" fill="currentColor"/>'),
-  toolkit: navIconSvg('<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M8 9V6a2 2 0 012-2h4a2 2 0 012 2v3"/><line x1="3" y1="13" x2="21" y2="13"/>'),
+  actionhub: navIconSvg('<rect x="5" y="3" width="12" height="18" rx="2"/><path d="M9 3V2a1 1 0 011-1h2a1 1 0 011 1v1"/><path d="M8.5 10.5l1.8 1.8L14 8.5"/><path d="M17 15l2.2-3.2h-2.6L19 8.5"/>'),
+  toolkit: navIconSvg('<path d="M13 2L4 14h6l-1 8 9-12h-6z"/>'),
   habits: navIconSvg('<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>'),
   goals: navIconSvg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>'),
   tasks: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="14" x2="15" y2="14"/>'),
@@ -2820,9 +2859,38 @@ function computeNavRouteList(active){
   return getOrderedRouteList(routeList);
 }
 const BOTTOM_NAV_PRIMARY_COUNT = 4;
+/* Sidebar "semi dropdown": hubs with sub-pages get an inline expandable list. First click
+   on the parent expands it (no navigation); a second click while already expanded navigates
+   to that hub's main page. Only one hub is expanded at a time. */
+let _navExpandedRoute = null;
+function navSubsectionsFor(path){
+  if(path==="actionhub") return [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"}];
+  if(path==="toolkit") return [{id:"focus",label:"Focus",icon:"🧘"},{id:"alerts",label:"Alerts",icon:"⏰"}];
+  if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
+  return null;
+}
 function navHtml(active){
   const routeList = computeNavRouteList(active);
-  const sidebarItems = routeList.map(r=>'<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
+  const activeTab = currentQueryParam("tab");
+  const sidebarItems = routeList.map(r=>{
+    const subs = navSubsectionsFor(r.path);
+    const isActive = r.path===active;
+    if(!subs){
+      return '<a href="#/'+r.path+'" draggable="true" data-route="'+r.path+'" class="'+(isActive?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>';
+    }
+    const isExpanded = _navExpandedRoute===r.path;
+    const subItems = subs.map(s=>{
+      const subHref = r.path==="impowerzone" ? '#/'+r.path+'?jump='+s.id : '#/'+r.path+'?tab='+s.id;
+      const subActive = isActive && (r.path==="impowerzone" ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits");
+      return '<a href="'+subHref+'" data-route="'+r.path+'" style="padding-left:38px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
+    }).join("");
+    return '<div class="nav-accordion-group">'+
+      '<a href="javascript:void(0)" draggable="true" data-route="'+r.path+'" data-action="toggleNavAccordion" data-v="'+r.path+'" class="'+(isActive?"active":"")+'">'+
+      '<span class="ic">'+navIconFor(r.path)+'</span><span style="flex:1;">'+r.label+'</span>'+
+      '<span style="font-size:10px;transition:transform .15s;transform:rotate('+(isExpanded?"90deg":"0deg")+');">▶</span></a>'+
+      (isExpanded ? subItems : '')+
+      '</div>';
+  }).join("");
   const primaryRoutes = routeList.slice(0, BOTTOM_NAV_PRIMARY_COUNT);
   const overflowRoutes = routeList.slice(BOTTOM_NAV_PRIMARY_COUNT);
   let bottomItems = primaryRoutes.map(r=>'<a href="#/'+r.path+'" class="'+(r.path===active?"active":"")+'"><span class="ic">'+navIconFor(r.path)+'</span><span>'+r.label+'</span></a>').join("");
@@ -2857,11 +2925,10 @@ function tabStripHtml(basePath, tabs, activeTab){
 }
 function renderActionHub(){
   const tab = currentQueryParam("tab") || "habits";
-  const tabs = [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"},{id:"planner",label:"Planner",icon:"🗓️"}];
+  const tabs = [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"}];
   let html = tabStripHtml("actionhub", tabs, tab);
   if(tab==="goals") html += renderGoals();
   else if(tab==="tasks") html += renderTasks();
-  else if(tab==="planner") html += renderPlanner();
   else html += renderHabits();
   return html;
 }
@@ -2879,7 +2946,7 @@ function renderToolkit(){
    scattered across the app (dashboard links, share buttons, etc.) has to be hunted down. */
 const OLD_ROUTE_REDIRECTS = {
   habits: "actionhub?tab=habits", goals: "actionhub?tab=goals",
-  tasks: "actionhub?tab=tasks", planner: "actionhub?tab=planner",
+  tasks: "actionhub?tab=tasks",
   reminders: "toolkit?tab=alerts", focus: "toolkit?tab=focus",
   sharing: "settings", progress: "impowerzone"
 };
@@ -2898,10 +2965,12 @@ function render(){
   if(!state.profile.onboarded){ renderOnboarding(); return; }
   const route = currentRoute();
   if(OLD_ROUTE_REDIRECTS[route]){ location.hash = "#/"+OLD_ROUTE_REDIRECTS[route]; return; }
+  if(navSubsectionsFor(route) && _navExpandedRoute===null) _navExpandedRoute = route;
   const app = document.getElementById("app");
   let body = "";
   if(route==="home") body = renderHome();
   else if(route==="actionhub") body = renderActionHub();
+  else if(route==="planner") body = renderPlanner();
   else if(route==="assessments") body = renderAssessments();
   else if(route==="impowerzone") body = renderImpowerZone();
   else if(route==="toolkit") body = renderToolkit();
@@ -2923,6 +2992,15 @@ function render(){
   }
   if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
   if((route==="actionhub" && subTab==="tasks") || route==="home") startTasksCountdownTicker();
+  if(route==="impowerzone"){
+    const jump = currentQueryParam("jump");
+    if(jump){
+      setTimeout(()=>{
+        const el = document.querySelector('.izone-section-box[data-izone-id="'+jump+'"]');
+        if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
+      }, 30);
+    }
+  }
 }
 
 /* ============ Onboarding ============ */
@@ -2953,9 +3031,10 @@ function levelRingSvg(pct, levelNum){
 function heroCardV2Html(lvl, xp, streakDays, doneCount, dueCount){
   return '<div class="hero-stat-grid">'+
     '<div class="hero-level-box">'+
-      '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy" style="width:34px;height:34px;font-size:16px;">🏆</div></div>'+
+      '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy" style="width:34px;height:34px;font-size:16px;">'+lvl.emoji+'</div></div>'+
       '<div>'+
         '<div class="hero-v2-xp" style="font-size:22px;margin-top:0;">⚡ '+xp+'</div>'+
+        '<div style="font-size:12px;color:var(--muted,#6b7280);margin-top:2px;font-style:italic;">'+lvl.desc+'</div>'+
         '<div class="hero-v2-progress-label" style="margin-top:8px;margin-bottom:5px;"><span>'+lvl.into+'/'+lvl.needed+'</span><span>'+lvl.pct+'%</span></div>'+
         '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
       '</div>'+
@@ -3023,7 +3102,7 @@ function renderHome(){
 
   const widgetHtml = {
     hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
-    quickLinks: dashboardQuickLinksHtml(["actionhub","impowerzone","toolkit","settings"]),
+    quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","toolkit","settings"]),
     stats: '<div class="grid cols-4">'+
       statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
       statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
@@ -3046,11 +3125,12 @@ function renderHome(){
 
   let html = '<div class="topbar"><div><h1>Hey there, '+escapeHtml(displayName())+'! '+themeEmoji("greet")+'</h1><p class="subtitle" style="margin:2px 0 0">'+todayLongDate()+'</p></div>'+
     '<div style="display:flex;align-items:center;gap:8px;"><div class="points-pill">⭐ '+totalPoints()+' XP</div>'+
-    '<button class="icon-btn" data-action="openQuickAssistant" title="Quick Assistant">✨</button>'+
     '<button class="icon-btn" data-action="openDashboardEditor" title="Customize dashboard">🧩</button>'+
     '<a href="#/settings" class="icon-btn" style="text-decoration:none;" title="Settings">⚙️</a></div></div>';
 
-  html += '<div class="card" style="margin-bottom:16px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
+  html += impowerAiWidgetHtml();
+
+  html += '<div class="card" style="margin-bottom:16px;margin-top:12px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
 
   const hidden = state.profile.dashboardHidden || [];
   getDashboardOrder().forEach(id=>{
@@ -5983,6 +6063,15 @@ document.addEventListener("click", async function(e){
     case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
     case "openMoreNav": openModal(moreNavModalHtml()); break;
     case "navigateAndCloseModal": { closeModal(); location.hash = "#/"+v; break; }
+    case "toggleNavAccordion": {
+      if(_navExpandedRoute===v){
+        if(currentRoute()===v) render(); else location.hash = "#/"+v;
+      } else {
+        _navExpandedRoute = v;
+        render();
+      }
+      break;
+    }
     case "toggleDashWidgetHidden": {
       state.profile.dashboardHidden = state.profile.dashboardHidden || [];
       const idx = state.profile.dashboardHidden.indexOf(id);
@@ -7090,6 +7179,7 @@ document.addEventListener("click", async function(e){
     }
     case "openQuickAssistant": _aiConversation = []; _aiLastAction = null; _quickAssistantLoading = false; openModal(quickAssistantFormHtml()); break;
     case "cancelAiConversation": { _aiLastAction = null; openModal(quickAssistantFormHtml()); break; }
+    case "cancelImpowerAiConversation": { _aiLastAction = null; render(); break; }
     case "sendQuickAssistantMessage": {
       const inp = document.getElementById("qa_input");
       const msg = inp ? (inp.value||"").trim() : "";
@@ -7103,6 +7193,21 @@ document.addEventListener("click", async function(e){
       }catch(err){ toast(err.message); _aiConversation.pop(); }
       _quickAssistantLoading = false;
       openModal(quickAssistantFormHtml());
+      break;
+    }
+    case "sendImpowerAiMessage": {
+      const inp = document.getElementById("iai_input");
+      const msg = inp ? (inp.value||"").trim() : "";
+      if(!msg){ toast("Type what you'd like to do"); return; }
+      _aiConversation.push({role:"user", content: msg});
+      _quickAssistantLoading = true; render();
+      try{
+        const action = await callAiCommandFn(_aiConversation);
+        _aiLastAction = action;
+        _aiConversation.push({role:"assistant", content: describeAiAction(action)});
+      }catch(err){ toast(err.message); _aiConversation.pop(); }
+      _quickAssistantLoading = false;
+      render();
       break;
     }
     case "confirmAiAction": {
@@ -7184,7 +7289,7 @@ document.addEventListener("click", async function(e){
         saveState(); closeModal(); render();
         toast("Class added: "+cls.name);
       } else {
-        closeModal();
+        closeModal(); render();
       }
       _aiLastAction = null; _aiConversation = [];
       break;
