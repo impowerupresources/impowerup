@@ -2480,6 +2480,10 @@ function getTemplateForDate(dateStr){
   if(rule) return state.scheduleTemplates.find(t=>t.id===rule.template_id) || null;
   return null;
 }
+function assignTemplateToDate(dateStr, templateId){
+  const existing = state.dayPlans.find(dp=>dp.date===dateStr);
+  if(existing) existing.template_id = templateId; else state.dayPlans.push({id:uid(), date:dateStr, template_id:templateId});
+}
 /* Recurring weekly rule (if any) that covers this date, respecting its optional start/end range. */
 function templateRuleForDate(dateStr){
   return (state.templateRules||[]).find(r=>{
@@ -2752,9 +2756,9 @@ const ROUTES = [
   {path:"actionhub", label:"Action Hub", icon:"🚀"},
   {path:"planner", label:"Planner", icon:"🗓️"},
   {path:"impowerzone", label:"ImpowerZone", icon:"🧠"},
+  {path:"toolkit", label:"Superboosts", icon:"⚡"},
   {path:"progress", label:"Progress", icon:"📈"},
   {path:"assessments", label:"Assessments", icon:"📋"},
-  {path:"toolkit", label:"Superboosts", icon:"⚡"},
   {path:"settings", label:"Settings", icon:"⚙️"}
 ];
 function currentRoute(){ return (location.hash.replace("#/","") || "home").split("?")[0]; }
@@ -3131,7 +3135,7 @@ function renderHome(){
 
   const widgetHtml = {
     hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
-    quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","progress","toolkit","settings"]),
+    quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","toolkit","progress","settings"]),
     stats: '<div class="grid cols-4">'+
       statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
       statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
@@ -3970,11 +3974,85 @@ function scheduleSettingsCardHtml(){
     '<button class="btn'+(active?" secondary":"")+'" style="flex:1" data-action="openSemesterForm">+ New Semester</button>'+
     '</div></div>';
   if(active){
+    html += '<div class="card" style="margin-top:14px;"><h2>📷 Import Schedule from a Photo</h2>'+
+      '<p class="hc-meta">Upload a photo of a printed or handwritten class calendar — the AI reads each day\'s code and applies your matching Schedule Templates automatically. You\'ll review everything before it\'s saved.</p>'+
+      '<button class="btn secondary sm" style="margin-top:8px;" data-action="openScheduleOcrImport">📷 Upload a photo</button></div>';
     html += termsCardHtml(active);
     html += '<div data-planner-jump="classes">'+classesCardHtml(active)+'</div>';
   }
   html += plannerHolidaysCardHtml();
   return html;
+}
+
+/* ---- Schedule photo import: upload a calendar photo, let Claude vision read each date's
+   schedule code, then map each unique code to an existing Schedule Template before applying
+   it — nothing is saved to any date until the person confirms on the review screen. ---- */
+let _ocrStep = "upload";
+let _ocrLoading = false;
+let _ocrDays = []; // [{date, code, note}]
+let _ocrCodeMap = {}; // code string -> template id ("" = skip / no school)
+function resetScheduleOcr(){ _ocrStep = "upload"; _ocrLoading = false; _ocrDays = []; _ocrCodeMap = {}; }
+function fileToBase64(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function callScheduleOcrFn(base64DataUrl, mimeType){
+  if(!(await ensureFreshSession())) throw new Error("Log in to use photo import");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/schedule-ocr", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({ image: base64DataUrl, mimeType, yearHint: String(new Date().getFullYear()) })
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't read that photo");
+  return json.days || [];
+}
+function uniqueOcrCodes(){
+  const seen = {}; const out = [];
+  _ocrDays.forEach(d=>{ const c = (d.code||"").trim(); if(c && !seen[c]){ seen[c]=true; out.push(c); } });
+  return out;
+}
+function scheduleOcrModalHtml(){
+  if(_ocrStep==="upload"){
+    return '<h2>📷 Import Schedule from a Photo</h2>'+
+      '<p class="hc-meta">Upload one photo of a printed or handwritten class calendar. Works best with a clear, well-lit shot showing the date grid and each day\'s code.</p>'+
+      '<div class="field" style="margin-top:10px;"><input type="file" id="ocr_file" accept="image/*"></div>'+
+      (_ocrDays.length ? '<p class="hc-meta" style="margin-top:6px;">Already have '+_ocrDays.length+' day'+(_ocrDays.length===1?"":"s")+' scanned — this photo will add to them.</p>' : "")+
+      '<div class="modal-actions" style="margin-top:10px;">'+
+      '<button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
+      '<button class="btn" style="flex:1" data-action="scanSchedulePhoto"'+(_ocrLoading?' disabled':'')+'>'+(_ocrLoading?"Reading photo…":"Scan Photo")+'</button></div>'+
+      (_ocrDays.length ? '<button class="btn ghost sm block" style="margin-top:8px;" data-action="finishScheduleOcrUpload">Skip — review what I have</button>' : "");
+  }
+  // review step
+  const codes = uniqueOcrCodes();
+  const tmpls = state.scheduleTemplates||[];
+  const codeMapHtml = codes.length ? codes.map(c=>{
+    const val = _ocrCodeMap[c]!==undefined ? _ocrCodeMap[c] : "";
+    return '<div class="row-inline" style="align-items:center;margin-bottom:6px;">'+
+      '<div style="flex:0 0 90px;font-weight:700;">'+escapeHtml(c)+'</div>'+
+      '<select class="ocrCodeSelect" data-code="'+escapeHtml(c)+'" style="flex:1;">'+
+      '<option value="">Skip (no school / not sure)</option>'+
+      tmpls.map(t=>'<option value="'+t.id+'" '+(val===t.id?"selected":"")+'>'+t.emoji+' '+escapeHtml(t.name)+'</option>').join("")+
+      '</select></div>';
+  }).join("") : '<p class="hc-meta">No schedule codes were found — try a clearer photo.</p>';
+  const rows = _ocrDays.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map((d,i)=>
+    '<div class="row-inline" style="align-items:center;margin-bottom:4px;font-size:12.5px;">'+
+    '<div style="flex:0 0 90px;">'+fmtDatePretty(d.date)+'</div>'+
+    '<input class="ocrDayCode" data-idx="'+i+'" type="text" value="'+escapeHtml(d.code||"")+'" style="flex:0 0 70px;padding:4px 8px;">'+
+    '<div style="flex:1;color:var(--text-muted);">'+escapeHtml(d.note||"")+'</div></div>'
+  ).join("");
+  return '<h2>Review Scanned Schedule</h2>'+
+    '<p class="hc-meta">Found '+_ocrDays.length+' day'+(_ocrDays.length===1?"":"s")+'. Fix any misread codes below, then map each code to a Schedule Template.</p>'+
+    '<button class="btn ghost sm" style="margin:6px 0 12px;" data-action="rescanSchedulePhoto">+ Scan another photo</button>'+
+    '<div class="field"><label>Map each code to a Schedule Template</label>'+codeMapHtml+'</div>'+
+    '<div class="field"><label>Days found (edit any misread code)</label><div style="max-height:220px;overflow-y:auto;">'+rows+'</div></div>'+
+    '<div class="modal-actions" style="margin-top:10px;">'+
+    '<button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
+    '<button class="btn" style="flex:1" data-action="confirmScheduleOcrImport">Apply Schedule</button></div>';
 }
 
 /* Schedule template CRUD */
@@ -4282,8 +4360,7 @@ const PROGRESS_SECTIONS = [
   {id:"stats", label:"Stats"},
   {id:"matrix", label:"Success Matrix"},
   {id:"heatmap", label:"Habit Heatmap"},
-  {id:"trends", label:"Trends"},
-  {id:"streaks", label:"Habit Streaks"},
+  {id:"trends", label:"Trends & Streaks"},
   {id:"timeline", label:"Timeline"},
   {id:"badges", label:"Badges"}
 ];
@@ -4303,43 +4380,62 @@ function getProgressOrder(){
   const missing = allIds.filter(id=>!filtered.includes(id));
   return filtered.concat(missing);
 }
+let _trendsRange = "week";
+let _trendsCustomDays = 30;
 function impowerZoneTrendsHtml(){
-  let html = '<div class="card"><h2>Last 7 Days</h2>';
-  const days7 = [];
-  for(let i=6;i>=0;i--) days7.push(addDays(todayStr(),-i));
-  const maxCount = Math.max(1, ...days7.map(d=>state.habitLogs.filter(l=>l.completed_date===d).length));
-  html += '<div class="weekbar">'+days7.map(d=>{
-    const count = state.habitLogs.filter(l=>l.completed_date===d).length;
-    const hgt = Math.round((count/maxCount)*90)+8;
-    const [y,m,dd]=d.split("-").map(Number);
-    return '<div class="col"><div class="bar" style="height:'+hgt+'px"></div><div class="lbl">'+DAY_NAMES[new Date(y,m-1,dd).getDay()]+'</div></div>';
-  }).join("")+'</div></div>';
-
-  html += '<div class="card" style="margin-top:14px;"><h2>Completion Trend (last 8 weeks)</h2>';
-  const weeks8 = [];
-  for(let i=7;i>=0;i--){
-    const wkStart = addDays(todayStr(), -(i*7+6));
-    let count = 0;
-    for(let d=0; d<7; d++){ count += state.habitLogs.filter(l=>l.completed_date===addDays(wkStart,d)).length; }
-    weeks8.push({label:fmtDatePretty(wkStart).slice(0,6), value:count});
+  const mode = _trendsRange;
+  const days = mode==="week" ? 7 : mode==="month" ? 30 : Math.max(2, Math.min(365, _trendsCustomDays||30));
+  let html = '<div class="card"><h2>📈 Trends</h2>'+
+    '<div class="chip-group" style="margin:8px 0 14px;">'+
+    [{id:"week",label:"Week"},{id:"month",label:"Month"},{id:"custom",label:"Custom"}].map(o=>
+      '<div class="chip '+(mode===o.id?"selected":"")+'" data-action="setTrendsRange" data-v="'+o.id+'">'+o.label+'</div>').join("")+
+    '</div>';
+  if(mode==="custom"){
+    html += '<div class="row-inline" style="align-items:flex-end;margin-bottom:12px;">'+
+      '<div class="field" style="flex:0 0 120px;"><label>Days back</label><input id="trendsCustomDays" type="number" min="2" max="365" value="'+(_trendsCustomDays||30)+'"></div>'+
+      '<button class="btn secondary sm" data-action="applyTrendsCustomDays">Apply</button></div>';
   }
-  html += renderLineChart(weeks8, "var(--accent)");
-  html += '<p class="hc-meta" style="margin-top:6px;">Total habit completions per week — watch this trend upward as habits stick.</p></div>';
+  const dayList = [];
+  for(let i=days-1;i>=0;i--) dayList.push(addDays(todayStr(),-i));
+  if(days<=14){
+    const maxCount = Math.max(1, ...dayList.map(d=>state.habitLogs.filter(l=>l.completed_date===d).length));
+    html += '<div class="weekbar">'+dayList.map(d=>{
+      const count = state.habitLogs.filter(l=>l.completed_date===d).length;
+      const hgt = Math.round((count/maxCount)*90)+8;
+      const [y,m,dd]=d.split("-").map(Number);
+      const lbl = days<=7 ? DAY_NAMES[new Date(y,m-1,dd).getDay()] : (m+"/"+dd);
+      return '<div class="col"><div class="bar" style="height:'+hgt+'px"></div><div class="lbl">'+lbl+'</div></div>';
+    }).join("")+'</div>';
+  } else {
+    const numWeeks = Math.ceil(days/7);
+    const weeks = [];
+    for(let i=numWeeks-1;i>=0;i--){
+      const wkStart = addDays(todayStr(), -(i*7+6));
+      let count = 0;
+      for(let d=0; d<7; d++){
+        const dd = addDays(wkStart,d);
+        if(dayList.includes(dd)) count += state.habitLogs.filter(l=>l.completed_date===dd).length;
+      }
+      weeks.push({label:fmtDatePretty(wkStart).slice(0,6), value:count});
+    }
+    html += renderLineChart(weeks, "var(--accent)");
+  }
+  const rangeLabel = mode==="week" ? "last 7 days" : mode==="month" ? "last 30 days" : ("last "+days+" days");
+  html += '<p class="hc-meta" style="margin-top:6px;">Habit completions over the selected range ('+rangeLabel+') — watch this trend upward as habits stick.</p>';
+  html += '<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px;">'+
+    '<h3 style="margin:0 0 8px;font-size:14px;">🔥 Habit Streaks</h3>'+impowerZoneStreaksHtml()+'</div>';
+  html += '</div>';
   return html;
 }
 function impowerZoneStreaksHtml(){
-  let html = '<div class="section-head" style="margin-top:0;"><h2>Habit Streaks</h2></div>';
-  if(state.habits.length===0){ html += emptyState("🔥","No habits yet","Create habits to start tracking streaks."); }
-  else {
-    html += state.habits.map(h=>{
-      const s = computeStreaks(h);
-      const c = catInfo(habitCategories(h)[0]||"other");
-      return '<div class="habit-card"><div class="emoji-badge" style="background:'+h.color+'22">'+(h.emoji||c.e)+'</div>'+
-        '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.title)+'</div>'+
-        '<div class="hc-meta"><span>🔥 current: '+s.current+'</span><span>🏆 best: '+s.best+'</span><span>'+logsForHabit(h.id).length+' total</span></div></div></div>';
-    }).join("");
-  }
-  return html;
+  if(state.habits.length===0){ return emptyState("🔥","No habits yet","Create habits to start tracking streaks."); }
+  return state.habits.map(h=>{
+    const s = computeStreaks(h);
+    const c = catInfo(habitCategories(h)[0]||"other");
+    return '<div class="habit-card"><div class="emoji-badge" style="background:'+h.color+'22">'+(h.emoji||c.e)+'</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(h.title)+'</div>'+
+      '<div class="hc-meta"><span>🔥 current: '+s.current+'</span><span>🏆 best: '+s.best+'</span><span>'+logsForHabit(h.id).length+' total</span></div></div></div>';
+  }).join("");
 }
 function renderImpowerZone(){
   let html = topbarHtml("🧠 ImpowerZone","Check in with your mind, and dump your thoughts.");
@@ -4376,7 +4472,6 @@ function renderProgress(){
     matrix: '<div class="card"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
     heatmap: '<div class="card"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
     trends: impowerZoneTrendsHtml(),
-    streaks: impowerZoneStreaksHtml(),
     timeline: '<div class="card"><h2>🗓️ Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
     badges: '<div class="section-head" style="margin-top:0;"><h2>Badges</h2></div><div class="grid cols-3">'+
       BADGES.map(b=>{ const earned = state.profile.badgesSeen.includes(b.id) || computeEarnedBadges().some(x=>x.id===b.id);
@@ -5254,6 +5349,10 @@ function renderSettings(){
     '<div class="field"><label>Primary color</label><input type="color" class="colorwheel-input" id="customAccentPicker" value="'+(state.profile.accent||"#2563EB")+'" title="Pick any color"></div>'+
     '<div class="field"><label>Secondary color</label><input type="color" class="colorwheel-input" id="customAccentPicker2" value="'+(state.profile.accent2||"#14B8A6")+'" title="Pick any color"></div>'+
     '</div></div>';
+
+  html += '<div class="card" style="margin-top:14px;"><h2>🧭 Sidebar Order</h2>'+
+    '<p class="hc-meta">Drag items in the sidebar to reorder them. If you\'ve customized it before, reset to the latest default order below.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="resetNavOrder">Reset to default order</button></div>';
 
   html += '<div class="card" style="margin-top:14px;"><h2>🌙 Bedtime</h2>'+
     '<p class="hc-meta">Used by the countdown on the Tasks tab to show how much time you have left tonight.</p>'+
@@ -6160,6 +6259,7 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openDashboardEditor": openModal(dashboardEditModalHtml()); break;
+    case "resetNavOrder": state.profile.navOrder = []; saveState(); render(); toast("Sidebar reset to default order"); break;
     case "openMoreNav": openModal(moreNavModalHtml()); break;
     case "navigateAndCloseModal": { closeModal(); location.hash = "#/"+v; break; }
     case "toggleNavAccordion": {
@@ -6383,6 +6483,14 @@ document.addEventListener("click", async function(e){
     }
 
     case "openCheckInForm": openCheckInForm(id||null); break;
+    case "setTrendsRange": _trendsRange = v; render(); break;
+    case "applyTrendsCustomDays": {
+      const inp = document.getElementById("trendsCustomDays");
+      const n = inp ? Number(inp.value) : NaN;
+      _trendsCustomDays = (n && n>=2) ? Math.min(365, Math.round(n)) : 30;
+      render();
+      break;
+    }
     case "quickCheckInMood": {
       const existing = checkInForDate(todayStr());
       if(existing){ existing.mood = v; }
@@ -6597,10 +6705,55 @@ document.addEventListener("click", async function(e){
     case "openApplyTemplateModal": openApplyTemplateModal(plannerDate); break;
     case "applyTemplate": {
       const date = t.getAttribute("data-date");
-      const existing = state.dayPlans.find(dp=>dp.date===date);
-      if(existing) existing.template_id = id; else state.dayPlans.push({id:uid(), date, template_id:id});
+      assignTemplateToDate(date, id);
       saveState(); closeModal(); render();
       toast("Schedule applied");
+      break;
+    }
+    case "openScheduleOcrImport": resetScheduleOcr(); openModal(scheduleOcrModalHtml()); break;
+    case "scanSchedulePhoto": {
+      const fileInp = document.getElementById("ocr_file");
+      const file = fileInp && fileInp.files && fileInp.files[0];
+      if(!file){ toast("Choose a photo first"); return; }
+      _ocrLoading = true; openModal(scheduleOcrModalHtml());
+      try{
+        const dataUrl = await fileToBase64(file);
+        const newDays = await callScheduleOcrFn(dataUrl, file.type||"image/jpeg");
+        const byDate = {}; _ocrDays.forEach(d=>{ byDate[d.date]=d; });
+        newDays.forEach(d=>{ if(d && d.date) byDate[d.date] = {date:d.date, code:d.code||"", note:d.note||""}; });
+        _ocrDays = Object.values(byDate);
+        if(!_ocrDays.length){ toast("Couldn't find any dates in that photo — try a clearer shot"); _ocrLoading=false; openModal(scheduleOcrModalHtml()); return; }
+        // Auto-suggest a template mapping when a code matches a template name exactly.
+        uniqueOcrCodes().forEach(c=>{
+          if(_ocrCodeMap[c]!==undefined) return;
+          const match = (state.scheduleTemplates||[]).find(tm=>tm.name.trim().toLowerCase()===c.trim().toLowerCase());
+          _ocrCodeMap[c] = match ? match.id : "";
+        });
+        _ocrStep = "review";
+      }catch(err){ toast(err.message); }
+      _ocrLoading = false;
+      openModal(scheduleOcrModalHtml());
+      break;
+    }
+    case "finishScheduleOcrUpload": { if(!_ocrDays.length){ toast("Scan a photo first"); return; } _ocrStep="review"; openModal(scheduleOcrModalHtml()); break; }
+    case "rescanSchedulePhoto": { _ocrStep = "upload"; openModal(scheduleOcrModalHtml()); break; }
+    case "confirmScheduleOcrImport": {
+      document.querySelectorAll(".ocrDayCode").forEach(inp=>{
+        const idx = Number(inp.getAttribute("data-idx"));
+        if(_ocrDays[idx]) _ocrDays[idx].code = inp.value.trim();
+      });
+      const codeMap = {};
+      document.querySelectorAll(".ocrCodeSelect").forEach(sel=>{ codeMap[sel.getAttribute("data-code")] = sel.value; });
+      let applied = 0, skipped = 0;
+      _ocrDays.forEach(d=>{
+        const code = (d.code||"").trim();
+        const templateId = code ? codeMap[code] : "";
+        if(templateId){ assignTemplateToDate(d.date, templateId); applied++; }
+        else skipped++;
+      });
+      saveState(); closeModal(); render();
+      resetScheduleOcr();
+      toast("Applied schedule to "+applied+" day"+(applied===1?"":"s")+(skipped?" ("+skipped+" skipped)":""));
       break;
     }
     case "clearTemplate": {
