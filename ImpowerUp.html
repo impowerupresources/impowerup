@@ -566,7 +566,7 @@ function defaultState(){
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], grades:[]
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], grades:[], journalEntries:[]
   };
 }
 let state = null;
@@ -1109,6 +1109,21 @@ async function adminConvertClientToEmail(userId, email, password){
   if(!res.ok) throw new Error(json.error || "Couldn't update that account");
   return json;
 }
+/* Admin-only: look up the sign-in email for a set of client ids (email lives in Supabase
+   Auth, not app_profiles, so this has to go through the service-role edge function). */
+async function adminListEmails(ids){
+  if(!(await ensureFreshSession())) return {};
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/admin-create-client", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+      body: JSON.stringify({mode:"list_emails", ids: ids||[]})
+    });
+    const json = await res.json();
+    if(!res.ok) return {};
+    return json.emails || {};
+  }catch(e){ return {}; }
+}
 /* Admin-only: create a real-email client account (already approved, no invite needed). */
 async function adminCreateClientByEmail(email, password, displayName){
   if(!(await ensureFreshSession())) throw new Error("Session expired — log in again");
@@ -1378,6 +1393,7 @@ window.addEventListener("pagehide", flushCloudSyncNow);
 /* ---- Admin: view/edit any client's cloud data using the same app screens ---- */
 let adminClientList = null;
 let adminPendingList = null;
+let adminEmailMap = null;
 let _adminOwnState = null, _adminOwnKey = null, _adminViewing = null;
 async function loadAdminClientList(){
   if(!(await ensureFreshSession())) return [];
@@ -1399,7 +1415,12 @@ function renderAdmin(){
   if(!state.profile.isCloudAdmin) return renderHome();
   if(adminClientList===null || adminPendingList===null){
     adminClientList = adminClientList || []; adminPendingList = adminPendingList || [];
-    Promise.all([loadAdminClientList(), loadAdminPendingList()]).then(([list,pending])=>{ adminClientList = list; adminPendingList = pending; render(); });
+    Promise.all([loadAdminClientList(), loadAdminPendingList()]).then(([list,pending])=>{
+      adminClientList = list; adminPendingList = pending; render();
+      const ids = list.map(c=>c.id);
+      if(ids.length){ adminListEmails(ids).then(map=>{ adminEmailMap = map; render(); }); }
+      else { adminEmailMap = {}; }
+    });
     return topbarHtml("🛡️ Admin","View or edit any client's data.")+'<div class="empty"><div class="big">⏳</div>Loading client list…</div>';
   }
   let html = topbarHtml("🛡️ Admin","View or edit any client's data.");
@@ -1416,15 +1437,19 @@ function renderAdmin(){
   html += '<button class="btn secondary block" style="margin-bottom:10px;" data-action="openNewClientForm">➕ New Client (username/password)</button>';
   html += '<button class="btn secondary block" style="margin-bottom:14px;" data-action="openGlobalConfigEditor">🧩 Edit Global Content</button>';
   if(!adminClientList.length){ html += emptyState("👥","No clients yet","Approve a pending request above, or use + New Client to set one up with a username and password."); return html; }
-  html += adminClientList.map(c=>'<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
+  html += adminClientList.map(c=>{
+    const email = adminEmailMap ? adminEmailMap[c.id] : null;
+    const emailIsSynthetic = !!(email && email.endsWith("@impowerup.local"));
+    return '<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
-    '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
+    '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+(email?('✉️ '+escapeHtml(email)+(emailIsSynthetic?' (no real email set)':'')+' · '):(adminEmailMap?'':'✉️ …'+' · '))+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
     (c.is_admin?'':'<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>'+
     '<button class="btn ghost sm" data-action="openAiClientInsights" data-id="'+c.id+'">✨ Insights</button>'+
     '<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username?("@"+c.username):(c.display_name||""))+'">🔑 Reset Password</button>'+
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
     '<button class="btn ghost sm" style="color:var(--danger);" data-action="adminDeleteClient" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🗑️ Delete</button>'+
-    '</div>')+'</div>').join("");
+    '</div>')+'</div>';
+  }).join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
   return html;
 }
@@ -2690,6 +2715,7 @@ const ROUTES = [
   {path:"assessments", label:"Assessments", icon:"📋"},
   {path:"reminders", label:"Alerts", icon:"⏰"},
   {path:"progress", label:"Progress", icon:"📈"},
+  {path:"impowerzone", label:"ImpowerZone", icon:"🧠"},
   {path:"focus", label:"Focus", icon:"🧘"},
   {path:"sharing", label:"Sharing", icon:"🔗"},
   {path:"settings", label:"Settings", icon:"⚙️"}
@@ -2784,6 +2810,7 @@ const NAV_ICONS = {
   assessments: navIconSvg('<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/><path d="M9 13l2 2 4-4"/>'),
   reminders: navIconSvg('<path d="M6 10a6 6 0 0112 0c0 4 1.5 5.5 1.5 5.5H4.5S6 14 6 10z"/><path d="M10 18a2 2 0 004 0"/>'),
   progress: navIconSvg('<line x1="5" y1="19" x2="5" y2="13"/><line x1="12" y1="19" x2="12" y2="9"/><line x1="19" y1="19" x2="19" y2="5"/>'),
+  impowerzone: navIconSvg('<path d="M9 3a4 4 0 00-4 4c0 1.2.5 2 1 2.6-1 .5-1.7 1.6-1.7 2.9 0 1 .5 1.9 1.2 2.4-.3.5-.5 1.1-.5 1.7A3.4 3.4 0 008.4 20c.3.6.9 1 1.6 1"/><path d="M15 3a4 4 0 014 4c0 1.2-.5 2-1 2.6 1 .5 1.7 1.6 1.7 2.9 0 1-.5 1.9-1.2 2.4.3.5.5 1.1.5 1.7A3.4 3.4 0 0115.6 20c-.3.6-.9 1-1.6 1"/><path d="M10 4v16M14 4v16"/>'),
   focus: navIconSvg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
   sharing: navIconSvg('<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><line x1="8.2" y1="10.8" x2="15.8" y2="7.2"/><line x1="8.2" y1="13.2" x2="15.8" y2="16.8"/>'),
   settings: navIconSvg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.2 6.2l1.4 1.4M18.4 16.4l1.4 1.4M3 12h2M19 12h2M4.2 17.8l1.4-1.4M18.4 7.6l1.4-1.4"/>'),
@@ -2847,6 +2874,7 @@ function render(){
   else if(route==="assessments") body = renderAssessments();
   else if(route==="reminders") body = renderReminders();
   else if(route==="progress") body = renderProgress();
+  else if(route==="impowerzone") body = renderImpowerZone();
   else if(route==="focus") body = renderFocus();
   else if(route==="sharing") body = renderSharing();
   else if(route==="settings") body = renderSettings();
@@ -4102,16 +4130,11 @@ function renderProgress(){
   let html = topbarHtml("Progress","See how far you've come.");
   html += '<div class="grid cols-3">'+stat(totalPoints(),"Total XP")+stat(state.habitLogs.length,"Completions")+stat(bestActiveStreak(),"Best streak")+'</div>';
 
-  html += '<div class="section-head"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>';
-  html += '<div class="card">'+checkInTrendChartsHtml()+'</div>';
+  html += '<div class="card" style="background:var(--surface-2);"><p class="hc-meta">🧠 Sleep &amp; Mood check-ins, your Habit Heatmap, and the Success Matrix now live over in <b>ImpowerZone</b>.</p><a href="#/impowerzone" class="btn secondary sm" style="margin-top:6px;display:inline-block;">Go to ImpowerZone ›</a></div>';
 
   if((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length)){
     html += '<div class="card" style="margin-top:14px;"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+gradesSectionHtml()+'</div>';
   }
-
-  html += '<div class="card" style="margin-top:14px;"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>';
-
-  html += '<div class="card" style="margin-top:14px;"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>';
 
   html += '<div class="card" style="margin-top:14px;"><h2>🗓️ Timeline</h2>'+habitGoalTimelineHtml()+'</div>';
 
@@ -4154,6 +4177,54 @@ function renderProgress(){
     }).join("");
   }
   return html;
+}
+
+/* ============ ImpowerZone (Sleep/Mood, Habit Heatmap, Success Matrix, Brain Dump) ============ */
+function renderImpowerZone(){
+  let html = topbarHtml("🧠 ImpowerZone","Check in with your mind, spot your patterns, and dump your thoughts.");
+
+  html += '<div class="section-head"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>';
+  html += '<div class="card">'+checkInTrendChartsHtml()+'</div>';
+
+  html += '<div class="card" style="margin-top:14px;"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>';
+
+  html += '<div class="card" style="margin-top:14px;"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>';
+
+  html += '<div class="section-head" style="margin-top:18px;"><h2>📓 Brain Dump</h2><button class="btn ghost sm" data-action="openJournalForm">+ New entry</button></div>';
+  html += '<div class="card"><p class="hc-meta">A judgment-free space to unload whatever\'s on your mind — no structure required.</p></div>';
+  html += brainDumpListHtml();
+
+  return html;
+}
+let journalFormMood = "";
+function journalFormHtml(j){
+  j = j || {text:"", mood:"", date:todayStr()};
+  return '<h2>'+(j.id?"Edit Entry":"Brain Dump")+'</h2>'+
+    '<div class="field"><label>What\'s on your mind?</label><textarea id="jr_text" rows="7" placeholder="Just start typing — no filter needed…">'+escapeHtml(j.text||"")+'</textarea></div>'+
+    '<div class="field"><label>Mood (optional)</label><div class="chip-group" id="journalMoodChips">'+
+      '<div class="chip '+(journalFormMood===""?"selected":"")+'" data-action="pickJournalMood" data-v="">Skip</div>'+
+      MOODS.map(m=>'<div class="chip '+(journalFormMood===m.v?"selected":"")+'" data-action="pickJournalMood" data-v="'+m.v+'">'+m.e+' '+m.l+'</div>').join("")+
+    '</div></div>'+
+    '<div class="modal-actions">'+(j.id?'<button class="btn danger" data-action="deleteJournalEntry" data-id="'+j.id+'">Delete</button>':'')+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveJournalEntry" data-id="'+(j.id||"")+'" style="flex:1">Save</button></div>';
+}
+function openJournalForm(id){
+  const j = id ? (state.journalEntries||[]).find(x=>x.id===id) : null;
+  journalFormMood = j ? (j.mood||"") : "";
+  openModal(journalFormHtml(j));
+}
+function brainDumpListHtml(){
+  const entries = (state.journalEntries||[]).slice().sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  if(!entries.length) return emptyState("📓","No entries yet","Tap + New entry above whenever you need to get something off your mind.");
+  return entries.slice(0,30).map(j=>{
+    const m = j.mood ? MOODS.find(x=>x.v===j.mood) : null;
+    const preview = j.text.length>220 ? j.text.slice(0,220)+"…" : j.text;
+    return '<div class="card" style="margin-bottom:10px;cursor:pointer;" data-action="openJournalForm" data-id="'+j.id+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="hc-meta">'+fmtDatePretty(j.date)+'</span>'+(m?'<span class="tag">'+m.e+' '+m.l+'</span>':'')+'</div>'+
+      '<p style="white-space:pre-wrap;margin-top:6px;font-size:13.5px;">'+escapeHtml(preview)+'</p>'+
+      '</div>';
+  }).join("");
 }
 
 /* ============ Focus (scripted body-doubling companion + Pomodoro) ============ */
@@ -4220,12 +4291,13 @@ function renderFocus(){
   }
   const history = state.focusSessions.filter(s=>s.status!=="active").slice().reverse();
   if(history.length){
-    html += '<div class="section-head"><h2>History</h2></div>';
+    html += '<div class="section-head"><h2>History</h2>'+(history.length>1?'<button class="btn ghost sm" style="color:var(--danger);" data-action="clearFocusHistory">🗑️ Clear all</button>':'')+'</div>';
     html += history.slice(0,10).map(s=>{
       const mood = MOODS.find(m=>m.v===s.mood) || MOODS[1];
       return '<div class="session-card"><div class="emoji-badge" style="background:var(--surface-2)">'+(s.mode==="pomodoro"?"🍅":mood.e)+'</div>'+
         '<div class="hc-body"><div class="hc-title">'+escapeHtml(s.intention)+'</div>'+
-        '<div class="hc-meta"><span>'+(s.mode==="pomodoro"?s.phases.reduce((a,p)=>a+p.minutes,0):s.duration_minutes)+' min total</span><span class="tag">'+s.status+'</span>'+(s.completion_note?'<span>"'+escapeHtml(s.completion_note)+'"</span>':"")+'</div></div></div>';
+        '<div class="hc-meta"><span>'+(s.mode==="pomodoro"?s.phases.reduce((a,p)=>a+p.minutes,0):s.duration_minutes)+' min total</span><span class="tag">'+s.status+'</span>'+(s.completion_note?'<span>"'+escapeHtml(s.completion_note)+'"</span>':"")+'</div></div>'+
+        '<button class="icon-btn" data-action="deleteFocusSession" data-id="'+s.id+'" title="Delete">🗑️</button></div>';
     }).join("");
   }
   return html;
@@ -6076,6 +6148,24 @@ document.addEventListener("click", async function(e){
     }
     case "deleteCheckIn": { state.checkIns = (state.checkIns||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
 
+    case "openJournalForm": openJournalForm(id||null); break;
+    case "pickJournalMood": { journalFormMood = v; document.querySelectorAll('[data-action="pickJournalMood"]').forEach(c=>c.classList.toggle("selected", (c.getAttribute("data-v")||"")===v)); break; }
+    case "saveJournalEntry": {
+      const text = document.getElementById("jr_text").value.trim();
+      if(!text){ toast("Write something first — or Cancel"); return; }
+      state.journalEntries = state.journalEntries || [];
+      if(id){
+        const existing = state.journalEntries.find(x=>x.id===id);
+        existing.text = text; existing.mood = journalFormMood;
+      } else {
+        state.journalEntries.push({id:uid(), text, mood:journalFormMood, date:todayStr(), created_at:new Date().toISOString()});
+      }
+      saveState(); closeModal(); render();
+      toast("Saved to Brain Dump");
+      break;
+    }
+    case "deleteJournalEntry": { state.journalEntries = (state.journalEntries||[]).filter(x=>x.id!==id); saveState(); closeModal(); render(); break; }
+
     case "pickFreq": {
       formFreq=v;
       const cdf = document.getElementById("customDaysField"); if(cdf) cdf.style.display = v==="custom"?"":"none";
@@ -6605,6 +6695,18 @@ document.addEventListener("click", async function(e){
       state.focusSessions.push(session);
       saveState(); render();
       startFocusTicker(session);
+      break;
+    }
+    case "deleteFocusSession": {
+      if(!confirm("Delete this focus session from your history?")) return;
+      state.focusSessions = state.focusSessions.filter(s=>s.id!==id);
+      saveState(); render();
+      break;
+    }
+    case "clearFocusHistory": {
+      if(!confirm("Clear all past focus sessions? Your active session (if any) won't be affected.")) return;
+      state.focusSessions = state.focusSessions.filter(s=>s.status==="active");
+      saveState(); render();
       break;
     }
     case "setFocusMode": { focusMode = v; render(); break; }
