@@ -1308,7 +1308,8 @@ function impowerAiWidgetHtml(){
       : ('<div style="display:flex;gap:6px;">'+
           '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;font-size:12px;padding:6px 10px;height:auto;" '+
           (_quickAssistantLoading?'disabled':'')+'/>'+
-          '<button class="btn sm" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"…":"Send")+'</button></div>'));
+          '<button class="btn sm" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"…":"Send")+'</button></div>'))+
+    '</div>';
 }
 async function callAiCommandFn(messages){
   if(!(await ensureFreshSession())) throw new Error("Log in to use the Quick Assistant");
@@ -2831,7 +2832,8 @@ if(window.matchMedia){
 function getOrderedRouteList(routeList){
   const ids = routeList.map(r=>r.path);
   const saved = (state && state.profile && state.profile.navOrder) || [];
-  const filtered = saved.filter(id=>ids.includes(id));
+  const seen = {};
+  const filtered = saved.filter(id=>{ if(!ids.includes(id) || seen[id]) return false; seen[id]=true; return true; });
   const missing = ids.filter(id=>!filtered.includes(id));
   return filtered.concat(missing).map(id=>routeList.find(r=>r.path===id));
 }
@@ -2885,7 +2887,7 @@ function navHtml(active){
     const subItems = subs.map(s=>{
       const subHref = r.path==="impowerzone" ? '#/'+r.path+'?jump='+s.id : '#/'+r.path+'?tab='+s.id;
       const subActive = isActive && (r.path==="impowerzone" ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits");
-      return '<a href="'+subHref+'" data-route="'+r.path+'" style="padding-left:38px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
+      return '<a href="'+subHref+'" style="padding-left:38px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
     }).join("");
     return '<div class="nav-accordion-group">'+
       '<a href="javascript:void(0)" draggable="true" data-route="'+r.path+'" data-action="toggleNavAccordion" data-v="'+r.path+'" class="'+(isActive?"active":"")+'">'+
