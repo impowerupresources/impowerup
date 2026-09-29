@@ -82,7 +82,7 @@
   nav.sidebar a.nav-dragging{opacity:.35;}
   nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
   nav.sidebar .nav-accordion-group{display:flex;flex-direction:column;gap:1px;}
-  .ai-widget-compact{width:40%;}
+  .ai-widget-compact{width:50%;}
   @media(max-width:700px){.ai-widget-compact{width:100%;}}
   #iai_input::placeholder{font-style:italic;}
   .dash-order-row{cursor:grab;}
@@ -582,7 +582,7 @@ function defaultState(){
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
       resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
-      dashboardOrder:[], dashboardHidden:[], impowerZoneOrder:[], defaultSnoozeMinutes:5,
+      dashboardOrder:[], dashboardHidden:[], impowerZoneOrder:[], progressOrder:[], defaultSnoozeMinutes:5,
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
@@ -1300,13 +1300,13 @@ function impowerAiWidgetHtml(){
   const showConfirm = _aiLastAction && _aiLastAction.action!=="clarify" && _aiLastAction.action!=="unsupported";
   return '<div class="card ai-widget-compact" style="margin:0;background:var(--surface-2);border:none;box-shadow:none;padding:10px 12px;flex-shrink:0;">'+
     '<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;"><span style="font-size:12.5px;font-weight:700;color:var(--text-muted);">⭐ ImpowerAI</span></div>'+
-    (bubbles?'':'<p class="hc-meta" style="margin:0 0 6px;font-size:11.5px;">Add a task, habit, goal, or class — or move/complete something.</p>')+
+    (bubbles?'':'<p class="hc-meta" style="margin:0 0 6px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Add a task, habit, goal, or class.</p>')+
     (bubbles?'<div style="max-height:160px;overflow-y:auto;margin-bottom:6px;">'+bubbles+'</div>':'')+
     (showConfirm
       ? '<div class="modal-actions" style="margin-top:4px;"><button class="btn secondary sm" style="flex:1" data-action="cancelImpowerAiConversation">Cancel</button>'+
         '<button class="btn sm" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
       : ('<div style="display:flex;gap:6px;">'+
-          '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;font-size:12px;padding:6px 10px;height:auto;" '+
+          '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;font-size:12px;padding:4px 10px;height:auto;border-radius:10px;" '+
           (_quickAssistantLoading?'disabled':'')+'/>'+
           '<button class="btn sm" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"…":"Send")+'</button></div>'))+
     '</div>';
@@ -2752,6 +2752,7 @@ const ROUTES = [
   {path:"actionhub", label:"Action Hub", icon:"🚀"},
   {path:"planner", label:"Planner", icon:"🗓️"},
   {path:"impowerzone", label:"ImpowerZone", icon:"🧠"},
+  {path:"progress", label:"Progress", icon:"📈"},
   {path:"assessments", label:"Assessments", icon:"📋"},
   {path:"toolkit", label:"Superboosts", icon:"⚡"},
   {path:"settings", label:"Settings", icon:"⚙️"}
@@ -2872,6 +2873,7 @@ function navSubsectionsFor(path){
   if(path==="actionhub") return [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"}];
   if(path==="toolkit") return [{id:"focus",label:"Focus",icon:"🧘"},{id:"alerts",label:"Alerts",icon:"⏰"}];
   if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
+  if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
   return null;
 }
 function navHtml(active){
@@ -2885,8 +2887,9 @@ function navHtml(active){
     }
     const isExpanded = _navExpandedRoute===r.path;
     const subItems = subs.map(s=>{
-      const subHref = r.path==="impowerzone" ? '#/'+r.path+'?jump='+s.id : '#/'+r.path+'?tab='+s.id;
-      const subActive = isActive && (r.path==="impowerzone" ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits");
+      const usesJump = r.path==="impowerzone" || r.path==="progress";
+      const subHref = usesJump ? '#/'+r.path+'?jump='+s.id : '#/'+r.path+'?tab='+s.id;
+      const subActive = isActive && (usesJump ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits");
       return '<a href="'+subHref+'" style="padding-left:38px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
     }).join("");
     return '<div class="nav-accordion-group">'+
@@ -2953,7 +2956,7 @@ const OLD_ROUTE_REDIRECTS = {
   habits: "actionhub?tab=habits", goals: "actionhub?tab=goals",
   tasks: "actionhub?tab=tasks",
   reminders: "toolkit?tab=alerts", focus: "toolkit?tab=focus",
-  sharing: "settings", progress: "impowerzone"
+  sharing: "settings"
 };
 function currentQueryParam(name){
   const hash = location.hash || "";
@@ -2978,6 +2981,7 @@ function render(){
   else if(route==="planner") body = renderPlanner();
   else if(route==="assessments") body = renderAssessments();
   else if(route==="impowerzone") body = renderImpowerZone();
+  else if(route==="progress") body = renderProgress();
   else if(route==="toolkit") body = renderToolkit();
   else if(route==="settings") body = renderSettings();
   else if(route==="admin") body = renderAdmin();
@@ -2997,11 +3001,12 @@ function render(){
   }
   if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
   if((route==="actionhub" && subTab==="tasks") || route==="home") startTasksCountdownTicker();
-  if(route==="impowerzone"){
+  if(route==="impowerzone" || route==="progress"){
     const jump = currentQueryParam("jump");
     if(jump){
+      const sel = route==="impowerzone" ? '.izone-section-box[data-izone-id="'+jump+'"]' : '.progress-section-box[data-progress-id="'+jump+'"]';
       setTimeout(()=>{
-        const el = document.querySelector('.izone-section-box[data-izone-id="'+jump+'"]');
+        const el = document.querySelector(sel);
         if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
       }, 30);
     }
@@ -3107,7 +3112,7 @@ function renderHome(){
 
   const widgetHtml = {
     hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
-    quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","toolkit","settings"]),
+    quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","progress","toolkit","settings"]),
     stats: '<div class="grid cols-4">'+
       statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
       statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
@@ -4242,20 +4247,30 @@ function gradesSectionHtml(){
 }
 /* ============ ImpowerZone (Sleep/Mood, Progress, Habit Heatmap, Success Matrix, Brain Dump) ============ */
 const IMPOWERZONE_SECTIONS = [
-  {id:"stats", label:"Stats"},
   {id:"checkin", label:"Sleep & Mood"},
   {id:"braindump", label:"Brain Dump"},
+  {id:"grades", label:"Grades"}
+];
+const PROGRESS_SECTIONS = [
+  {id:"stats", label:"Stats"},
   {id:"matrix", label:"Success Matrix"},
   {id:"heatmap", label:"Habit Heatmap"},
   {id:"trends", label:"Trends"},
   {id:"streaks", label:"Habit Streaks"},
   {id:"timeline", label:"Timeline"},
-  {id:"grades", label:"Grades"},
   {id:"badges", label:"Badges"}
 ];
 function getImpowerZoneOrder(){
   const allIds = IMPOWERZONE_SECTIONS.map(w=>w.id);
   const saved = state.profile.impowerZoneOrder;
+  if(!saved || !saved.length) return allIds.slice();
+  const filtered = saved.filter(id=>allIds.includes(id));
+  const missing = allIds.filter(id=>!filtered.includes(id));
+  return filtered.concat(missing);
+}
+function getProgressOrder(){
+  const allIds = PROGRESS_SECTIONS.map(w=>w.id);
+  const saved = state.profile.progressOrder;
   if(!saved || !saved.length) return allIds.slice();
   const filtered = saved.filter(id=>allIds.includes(id));
   const missing = allIds.filter(id=>!filtered.includes(id));
@@ -4300,24 +4315,14 @@ function impowerZoneStreaksHtml(){
   return html;
 }
 function renderImpowerZone(){
-  let html = topbarHtml("🧠 ImpowerZone","Check in with your mind, track your progress, and dump your thoughts.");
-  html += '<p class="hc-meta" style="margin:-6px 0 12px;">Drag ⠿ to reorder these sections.</p>';
+  let html = topbarHtml("🧠 ImpowerZone","Check in with your mind, and dump your thoughts.");
+  html += '<p class="hc-meta" style="margin:-6px 0 12px;">Drag ⠿ to reorder these sections. Looking for stats, trends, or badges? Check <a href="#/progress">Progress</a>.</p>';
 
   const sectionHtml = {
-    stats: '<div class="grid cols-3">'+stat(totalPoints(),"Total XP")+stat(state.habitLogs.length,"Completions")+stat(bestActiveStreak(),"Best streak")+'</div>',
     checkin: '<div class="section-head" style="margin-top:0;"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>'+
       '<div class="card">'+checkInTrendChartsHtml()+'</div>',
-    matrix: '<div class="card"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
-    heatmap: '<div class="card"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
-    trends: impowerZoneTrendsHtml(),
-    streaks: impowerZoneStreaksHtml(),
-    timeline: '<div class="card"><h2>🗓️ Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
     grades: ((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length)) ?
       '<div class="card"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+gradesSectionHtml()+'</div>' : "",
-    badges: '<div class="section-head" style="margin-top:0;"><h2>Badges</h2></div><div class="grid cols-3">'+
-      BADGES.map(b=>{ const earned = state.profile.badgesSeen.includes(b.id) || computeEarnedBadges().some(x=>x.id===b.id);
-        return '<div class="badge-card '+(earned?"":"locked")+'"><div class="be">'+b.emoji+'</div><div class="bt">'+escapeHtml(b.title)+'</div><div class="bd">'+escapeHtml(b.desc)+'</div></div>'; }).join("")+
-      '</div>',
     braindump: '<div class="section-head" style="margin-top:0;"><h2>📓 Brain Dump</h2><button class="btn ghost sm" data-action="openJournalForm">+ New entry</button></div>'+
       '<div class="card"><p class="hc-meta">A judgment-free space to unload whatever\'s on your mind — no structure required.</p></div>'+
       brainDumpListHtml()
@@ -4327,6 +4332,32 @@ function renderImpowerZone(){
     const chunk = sectionHtml[id];
     if(!chunk) return;
     html += '<div class="dash-widget-box izone-section-box" draggable="true" data-izone-id="'+id+'" style="margin-top:14px;">'+
+      '<div class="dash-drag-handle" title="Drag to reorder">⠿</div>'+chunk+'</div>';
+  });
+
+  return html;
+}
+function renderProgress(){
+  let html = topbarHtml("📈 Progress","Stats, trends, streaks, and badges from your habits and check-ins.");
+  html += '<p class="hc-meta" style="margin:-6px 0 12px;">Drag ⠿ to reorder these sections.</p>';
+
+  const sectionHtml = {
+    stats: '<div class="grid cols-3">'+stat(totalPoints(),"Total XP")+stat(state.habitLogs.length,"Completions")+stat(bestActiveStreak(),"Best streak")+'</div>',
+    matrix: '<div class="card"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
+    heatmap: '<div class="card"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
+    trends: impowerZoneTrendsHtml(),
+    streaks: impowerZoneStreaksHtml(),
+    timeline: '<div class="card"><h2>🗓️ Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
+    badges: '<div class="section-head" style="margin-top:0;"><h2>Badges</h2></div><div class="grid cols-3">'+
+      BADGES.map(b=>{ const earned = state.profile.badgesSeen.includes(b.id) || computeEarnedBadges().some(x=>x.id===b.id);
+        return '<div class="badge-card '+(earned?"":"locked")+'"><div class="be">'+b.emoji+'</div><div class="bt">'+escapeHtml(b.title)+'</div><div class="bd">'+escapeHtml(b.desc)+'</div></div>'; }).join("")+
+      '</div>'
+  };
+
+  getProgressOrder().forEach(id=>{
+    const chunk = sectionHtml[id];
+    if(!chunk) return;
+    html += '<div class="dash-widget-box progress-section-box" draggable="true" data-progress-id="'+id+'" style="margin-top:14px;">'+
       '<div class="dash-drag-handle" title="Drag to reorder">⠿</div>'+chunk+'</div>';
   });
 
@@ -5778,7 +5809,7 @@ function checkReminders(){
 }
 
 /* ============ Drag-and-drop reordering (sidebar nav + dashboard widgets + ImpowerZone sections) ============ */
-let _draggingNavRoute = null, _draggingWidgetId = null, _draggingIzoneId = null;
+let _draggingNavRoute = null, _draggingWidgetId = null, _draggingIzoneId = null, _draggingProgressId = null;
 document.addEventListener("dragstart", function(e){
   const navA = e.target.closest && e.target.closest(".sidebar a[data-route]");
   if(navA){
@@ -5792,6 +5823,13 @@ document.addEventListener("dragstart", function(e){
     _draggingIzoneId = izoneRow.getAttribute("data-izone-id");
     izoneRow.classList.add("dash-dragging");
     if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingIzoneId); }catch(err){} }
+    return;
+  }
+  const progressRow = e.target.closest && e.target.closest(".progress-section-box[data-progress-id]");
+  if(progressRow){
+    _draggingProgressId = progressRow.getAttribute("data-progress-id");
+    progressRow.classList.add("dash-dragging");
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed = "move"; try{ e.dataTransfer.setData("text/plain", _draggingProgressId); }catch(err){} }
     return;
   }
   const DASH_WIDGET_SEL = ".dash-order-row[data-widget-id], .dash-widget-box[data-widget-id]";
@@ -5810,6 +5848,17 @@ document.addEventListener("dragover", function(e){
     if(over){
       e.preventDefault();
       if(over.getAttribute("data-izone-id") !== _draggingIzoneId){
+        document.querySelectorAll(".dash-drag-over").forEach(el=>{ if(el!==over) el.classList.remove("dash-drag-over"); });
+        over.classList.add("dash-drag-over");
+      }
+    }
+    return;
+  }
+  if(_draggingProgressId && e.target.closest){
+    const over = e.target.closest(".progress-section-box[data-progress-id]");
+    if(over){
+      e.preventDefault();
+      if(over.getAttribute("data-progress-id") !== _draggingProgressId){
         document.querySelectorAll(".dash-drag-over").forEach(el=>{ if(el!==over) el.classList.remove("dash-drag-over"); });
         over.classList.add("dash-drag-over");
       }
@@ -5860,6 +5909,21 @@ document.addEventListener("drop", function(e){
     }
     return;
   }
+  const progressTarget = e.target.closest && e.target.closest(".progress-section-box[data-progress-id]");
+  if(_draggingProgressId && progressTarget){
+    e.preventDefault();
+    const targetId = progressTarget.getAttribute("data-progress-id");
+    if(targetId !== _draggingProgressId){
+      const order = getProgressOrder();
+      const from = order.indexOf(_draggingProgressId), to = order.indexOf(targetId);
+      if(from>=0 && to>=0){
+        order.splice(from,1); order.splice(to,0,_draggingProgressId);
+        state.profile.progressOrder = order;
+        saveState(); render();
+      }
+    }
+    return;
+  }
   const widgetTarget = e.target.closest && e.target.closest(DASH_WIDGET_SEL);
   if(_draggingWidgetId && widgetTarget){
     e.preventDefault();
@@ -5879,7 +5943,7 @@ document.addEventListener("dragend", function(){
   document.querySelectorAll(".nav-dragging").forEach(el=>el.classList.remove("nav-dragging"));
   document.querySelectorAll(".dash-dragging").forEach(el=>el.classList.remove("dash-dragging"));
   document.querySelectorAll(".dash-drag-over").forEach(el=>el.classList.remove("dash-drag-over"));
-  _draggingNavRoute = null; _draggingWidgetId = null; _draggingIzoneId = null;
+  _draggingNavRoute = null; _draggingWidgetId = null; _draggingIzoneId = null; _draggingProgressId = null;
 });
 
 /* ============ Event delegation ============ */
