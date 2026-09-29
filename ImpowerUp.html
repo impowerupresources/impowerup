@@ -82,6 +82,9 @@
   nav.sidebar a.nav-dragging{opacity:.35;}
   nav.sidebar a.nav-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
   nav.sidebar .nav-accordion-group{display:flex;flex-direction:column;gap:1px;}
+  .ai-widget-compact{max-width:33%;}
+  @media(max-width:700px){.ai-widget-compact{max-width:100%;}}
+  #iai_input::placeholder{font-style:italic;}
   .dash-order-row{cursor:grab;}
   .dash-order-row.dash-dragging{opacity:.35;}
   .dash-order-row.dash-drag-over{box-shadow:inset 0 2px 0 var(--accent);}
@@ -1291,21 +1294,21 @@ function quickAssistantFormHtml(){
    but rendered inline on the Home dashboard with a plain text box so the person can type
    straight into it without opening a modal first. */
 function impowerAiWidgetHtml(){
-  const bubbles = _aiConversation.map(m=>'<div style="margin:6px 0;'+(m.role==="user"?"text-align:right;":"")+'">'+
-    '<span style="display:inline-block;max-width:85%;padding:8px 12px;border-radius:14px;font-size:13.5px;text-align:left;'+
-    (m.role==="user"?"background:var(--accent);color:#fff;":"background:var(--surface-2);")+'">'+escapeHtml(m.content)+'</span></div>').join("");
+  const bubbles = _aiConversation.map(m=>'<div style="margin:4px 0;'+(m.role==="user"?"text-align:right;":"")+'">'+
+    '<span style="display:inline-block;max-width:90%;padding:6px 10px;border-radius:12px;font-size:12px;text-align:left;'+
+    (m.role==="user"?"background:var(--accent);color:#fff;":"background:var(--surface);")+'">'+escapeHtml(m.content)+'</span></div>').join("");
   const showConfirm = _aiLastAction && _aiLastAction.action!=="clarify" && _aiLastAction.action!=="unsupported";
-  return '<div class="card" style="margin-top:12px;">'+
-    '<div class="section-head" style="margin-top:0;"><h2>⭐ ImpowerAI</h2></div>'+
-    (bubbles?'':'<p class="hc-meta" style="margin-top:0;">Add a task, habit, goal, or class — or move/complete something. Just type below.</p>')+
-    (bubbles?'<div style="max-height:220px;overflow-y:auto;margin-bottom:8px;">'+bubbles+'</div>':'')+
+  return '<div class="card ai-widget-compact" style="margin-top:10px;background:var(--surface-2);border:none;box-shadow:none;padding:10px 12px;">'+
+    '<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;"><span style="font-size:12.5px;font-weight:700;color:var(--text-muted);">⭐ ImpowerAI</span></div>'+
+    (bubbles?'':'<p class="hc-meta" style="margin:0 0 6px;font-size:11.5px;">Add a task, habit, goal, or class — or move/complete something.</p>')+
+    (bubbles?'<div style="max-height:160px;overflow-y:auto;margin-bottom:6px;">'+bubbles+'</div>':'')+
     (showConfirm
-      ? '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="cancelImpowerAiConversation">Cancel</button>'+
-        '<button class="btn" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
-      : ('<div style="display:flex;gap:8px;">'+
-          '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;" '+
+      ? '<div class="modal-actions" style="margin-top:4px;"><button class="btn secondary sm" style="flex:1" data-action="cancelImpowerAiConversation">Cancel</button>'+
+        '<button class="btn sm" style="flex:1" data-action="confirmAiAction">Confirm</button></div>'
+      : ('<div style="display:flex;gap:6px;">'+
+          '<input type="text" id="iai_input" placeholder="'+(bubbles?"Your answer…":"e.g. Add a task to finish my essay")+'" style="flex:1;font-size:12px;padding:6px 10px;height:auto;" '+
           (_quickAssistantLoading?'disabled':'')+'/>'+
-          '<button class="btn" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"Thinking…":"Send")+'</button></div>'));
+          '<button class="btn sm" style="white-space:nowrap;" data-action="sendImpowerAiMessage"'+(_quickAssistantLoading?' disabled':'')+'>'+(_quickAssistantLoading?"…":"Send")+'</button></div>'));
 }
 async function callAiCommandFn(messages){
   if(!(await ensureFreshSession())) throw new Error("Log in to use the Quick Assistant");
@@ -4239,14 +4242,14 @@ function gradesSectionHtml(){
 const IMPOWERZONE_SECTIONS = [
   {id:"stats", label:"Stats"},
   {id:"checkin", label:"Sleep & Mood"},
+  {id:"braindump", label:"Brain Dump"},
   {id:"matrix", label:"Success Matrix"},
   {id:"heatmap", label:"Habit Heatmap"},
   {id:"trends", label:"Trends"},
   {id:"streaks", label:"Habit Streaks"},
   {id:"timeline", label:"Timeline"},
   {id:"grades", label:"Grades"},
-  {id:"badges", label:"Badges"},
-  {id:"braindump", label:"Brain Dump"}
+  {id:"badges", label:"Badges"}
 ];
 function getImpowerZoneOrder(){
   const allIds = IMPOWERZONE_SECTIONS.map(w=>w.id);
