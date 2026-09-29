@@ -4348,8 +4348,11 @@ function renderImpowerZone(){
   const sectionHtml = {
     checkin: '<div class="section-head" style="margin-top:0;"><h2>🌙 Sleep &amp; Mood</h2><button class="btn ghost sm" data-action="openCheckInForm">+ Log check-in</button></div>'+
       '<div class="card">'+checkInTrendChartsHtml()+'</div>',
-    grades: ((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length)) ?
-      '<div class="card"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+gradesSectionHtml()+'</div>' : "",
+    grades: '<div class="card"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+
+      (((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length))
+        ? gradesSectionHtml()
+        : emptyState("🎓","No classes yet","Add a class to start tracking grades here. <a href=\"#/planner?tab=schedule&jump=classes\">+ Add a class</a>"))+
+      '</div>',
     braindump: '<div class="section-head" style="margin-top:0;"><h2>📓 Brain Dump</h2><button class="btn ghost sm" data-action="openJournalForm">+ New entry</button></div>'+
       '<div class="card"><p class="hc-meta">A judgment-free space to unload whatever\'s on your mind — no structure required.</p></div>'+
       brainDumpListHtml()
