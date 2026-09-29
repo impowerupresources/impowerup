@@ -1610,6 +1610,13 @@ async function saveAndExitClientView(){
   }
   exitClientView(ok ? "Saved changes for "+_adminViewing.name : errMsg);
 }
+function discardExitConfirmHtml(){
+  const name = _adminViewing ? _adminViewing.name : "this client";
+  return '<h2>⚠️ Discard changes?</h2>'+
+    '<p class="hc-meta">This throws away everything you just did while viewing <b>'+escapeHtml(name)+'</b>\'s profile — nothing will be saved for them. This can\'t be undone.</p>'+
+    '<div class="modal-actions" style="margin-top:14px;"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel — go back</button>'+
+    '<button class="btn sm" style="flex:1;background:var(--danger);color:#fff;" data-action="discardExitClientView">Yes, discard it</button></div>';
+}
 function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
   state = _adminOwnState; STORE_KEY = _adminOwnKey;
@@ -3003,8 +3010,8 @@ function render(){
   const adminBanner = _adminViewing ?
     '<div style="position:sticky;top:0;z-index:60;background:var(--danger);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;font-size:13px;">'+
     '<div>🛡️ Viewing as <b>'+escapeHtml(_adminViewing.name)+'</b> — changes save to their account, not yours.</div>'+
-    '<div style="display:flex;gap:8px;"><button class="btn sm secondary" data-action="discardExitClientView">Discard &amp; Exit</button>'+
-    '<button class="btn sm" style="background:#fff;color:var(--danger);" data-action="saveExitClientView">Save &amp; Exit</button></div></div>' : "";
+    '<div style="display:flex;gap:8px;"><button class="btn sm" style="background:#fff;color:var(--danger);font-weight:800;" data-action="saveExitClientView">✅ Save &amp; Exit</button>'+
+    '<button class="btn sm" style="background:transparent;border:1px solid rgba(255,255,255,0.6);color:#fff;box-shadow:none;" data-action="confirmDiscardExitClientView">Discard changes…</button></div></div>' : "";
   app.innerHTML = adminBanner + navHtml(route) + '<div class="page">' + body + '</div>';
   if(route !== _lastRenderedRoute) window.scrollTo(0,0);
   _lastRenderedRoute = route;
@@ -3973,10 +3980,10 @@ function scheduleSettingsCardHtml(){
     (active?'<button class="btn secondary" style="flex:1" data-action="openSemesterForm" data-id="'+active.id+'">Edit Semester</button>':'')+
     '<button class="btn'+(active?" secondary":"")+'" style="flex:1" data-action="openSemesterForm">+ New Semester</button>'+
     '</div></div>';
+  html += '<div class="card" style="margin-top:14px;"><h2>📷 Import Schedule from a Photo</h2>'+
+    '<p class="hc-meta">Upload a photo of a printed or handwritten class calendar — the AI reads each day\'s code and applies your matching Schedule Templates automatically. You\'ll review everything before it\'s saved.</p>'+
+    '<button class="btn secondary sm" style="margin-top:8px;" data-action="openScheduleOcrImport">📷 Upload a photo</button></div>';
   if(active){
-    html += '<div class="card" style="margin-top:14px;"><h2>📷 Import Schedule from a Photo</h2>'+
-      '<p class="hc-meta">Upload a photo of a printed or handwritten class calendar — the AI reads each day\'s code and applies your matching Schedule Templates automatically. You\'ll review everything before it\'s saved.</p>'+
-      '<button class="btn secondary sm" style="margin-top:8px;" data-action="openScheduleOcrImport">📷 Upload a photo</button></div>';
     html += termsCardHtml(active);
     html += '<div data-planner-jump="classes">'+classesCardHtml(active)+'</div>';
   }
@@ -7664,7 +7671,8 @@ document.addEventListener("click", async function(e){
     }
     case "openAsClient": await openAsClient(id); break;
     case "saveExitClientView": await saveAndExitClientView(); break;
-    case "discardExitClientView": exitClientView("Discarded changes"); break;
+    case "confirmDiscardExitClientView": openModal(discardExitConfirmHtml()); break;
+    case "discardExitClientView": { const n=_adminViewing?_adminViewing.name:""; closeModal(); exitClientView("Discarded — nothing was saved for "+n); break; }
 
     case "assessOpenTake": openAssessmentTake(id); break;
     case "assessBackToList": assessBackToList(); break;
