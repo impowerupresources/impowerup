@@ -252,8 +252,11 @@
   .badge-card .bt{font-size:11px;font-weight:800;margin-top:6px;}
   .badge-card .bd{font-size:9.5px;color:var(--text-muted);margin-top:2px;}
 
-  .focus-ring{width:220px;height:220px;border-radius:50%;border:10px solid var(--surface-2);display:flex;align-items:center;justify-content:center;margin:20px auto;position:relative;}
-  .focus-ring .time{font-size:38px;font-weight:900;}
+  .focus-ring{width:220px;height:220px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:20px auto;position:relative;}
+  .focus-ring .time{font-size:38px;font-weight:900;position:relative;z-index:1;}
+  .focus-ring-svg{position:absolute;top:0;left:0;width:100%;height:100%;transform:rotate(-90deg);}
+  .focus-ring-track{fill:none;stroke:var(--surface-2);stroke-width:10;}
+  .focus-ring-progress{fill:none;stroke:var(--accent);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset 1s linear;}
 
   textarea#shareOutput,textarea#shareCodeBox{width:100%;min-height:90px;border-radius:12px;border:1px solid var(--border);padding:10px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;}
 
@@ -397,6 +400,26 @@ let CATEGORIES = [
   {v:"fitness",l:"Fitness",e:"💪"},{v:"other",l:"Other",e:"✨"}
 ];
 const DEFAULT_CATEGORIES = JSON.parse(JSON.stringify(CATEGORIES));
+/* Section/nav icons — admin-editable via Global Content ("Global Content" modal). Keyed by
+   subsection id, used wherever that section's icon is shown (sidebar accordion, in-page tab
+   strips). See SECTION_ICON_META below for the editable key list + friendly labels. */
+let SECTION_ICONS = {
+  habits:"✅", goals:"🎯", tasks:"📝",
+  focus:"🧘", alerts:"⏰", timeblind:"⏳",
+  calendar:"📅", schedule:"📆", classes:"📚", templates:"🗂️",
+  sleep:"😴", mood:"🙂", braindump:"📓", grades:"🎓",
+  stats:"📊", matrix:"✨", heatmap:"🔥", trends:"📈", timeline:"🗓️", badges:"🏅"
+};
+const DEFAULT_SECTION_ICONS = JSON.parse(JSON.stringify(SECTION_ICONS));
+const SECTION_ICON_META = [
+  {key:"habits",label:"Habits"},{key:"goals",label:"Goals"},{key:"tasks",label:"Tasks"},
+  {key:"focus",label:"Focus"},{key:"alerts",label:"Alerts"},{key:"timeblind",label:"Time Blindness"},
+  {key:"calendar",label:"Calendar"},{key:"schedule",label:"Schedule"},{key:"classes",label:"Classes"},{key:"templates",label:"Templates"},
+  {key:"sleep",label:"Sleep Tracker"},{key:"mood",label:"Mood Tracker"},{key:"braindump",label:"Brain Dump"},{key:"grades",label:"Grades"},
+  {key:"stats",label:"Stats"},{key:"matrix",label:"Success Matrix"},{key:"heatmap",label:"Habit Heatmap"},
+  {key:"trends",label:"Trends & Streaks"},{key:"timeline",label:"Timeline"},{key:"badges",label:"Badges"}
+];
+function sectionIcon(key){ return (SECTION_ICONS && SECTION_ICONS[key]!==undefined) ? SECTION_ICONS[key] : ""; }
 const COLORS = ["#2563EB","#14B8A6","#FB923C","#EC4899","#3B82F6","#F43F5E","#10B981","#EAB308"];
 const PRIORITY_LEVELS = [
   {v:"low",l:"Low",e:"🟢",c:"#10B981"},
@@ -586,7 +609,7 @@ function defaultState(){
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[]
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[], timeBlindnessLogs:[]
   };
 }
 /* One-time migration: the old combined "checkIns" log (sleep + mood together) is split into
@@ -1257,6 +1280,7 @@ function applyGlobalConfig(cfg){
   if(Array.isArray(cfg.symptomOptions) && cfg.symptomOptions.length) SYMPTOM_OPTIONS = cfg.symptomOptions;
   if(Array.isArray(cfg.distractionOptions) && cfg.distractionOptions.length) DISTRACTION_OPTIONS = cfg.distractionOptions;
   if(Array.isArray(cfg.needOptions) && cfg.needOptions.length) NEED_OPTIONS = cfg.needOptions;
+  if(cfg.sectionIcons && typeof cfg.sectionIcons==="object") SECTION_ICONS = Object.assign({}, DEFAULT_SECTION_ICONS, cfg.sectionIcons);
 }
 async function loadGlobalConfig(){
   try{
@@ -1398,6 +1422,16 @@ function globalConfigEditorHtml(){
     '<div class="field"><label>Symptom options — one per line</label><textarea id="gc_symptoms" rows="4">'+escapeHtml(SYMPTOM_OPTIONS.join("\n"))+'</textarea></div>'+
     '<div class="field"><label>Distraction options — one per line</label><textarea id="gc_distractions" rows="4">'+escapeHtml(DISTRACTION_OPTIONS.join("\n"))+'</textarea></div>'+
     '<div class="field"><label>Need / support options — one per line</label><textarea id="gc_needs" rows="4">'+escapeHtml(NEED_OPTIONS.join("\n"))+'</textarea></div>'+
+    '<div class="field"><label>Section Icons — shown in the sidebar and tab navigation</label>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-top:6px;">'+
+    SECTION_ICON_META.map(m=>
+      '<div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);border-radius:10px;padding:6px 8px;">'+
+      '<input type="text" id="gcsi_'+m.key+'" value="'+escapeHtml(SECTION_ICONS[m.key]||"")+'" maxlength="4" style="width:38px;text-align:center;font-size:16px;padding:4px;flex-shrink:0;">'+
+      emojiPickerHtml("gcsi_"+m.key)+
+      '<span style="font-size:12.5px;font-weight:600;">'+m.label+'</span>'+
+      '</div>'
+    ).join("")+
+    '</div></div>'+
     '<p class="hc-meta">Tip: adding new lines at the end is always safe. Reordering or deleting from the middle of the top three lists can shift which item already-logged data points to — worth double-checking after a big reshuffle.</p>'+
     '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="resetGlobalConfigDefaults">Reset to Defaults</button>'+
     '<button class="btn" style="flex:1" data-action="saveGlobalConfig">Save for Everyone</button></div>'+
@@ -2646,18 +2680,24 @@ function dayKeyOptions(sem){
   if(sem.scheduleType==="fixed"){
     return [1,2,3,4,5,6,0].filter(wd=>(sem.activeWeekdays||[1,2,3,4,5]).includes(wd)).map(wd=>({key:String(wd), label:WEEKDAY_KEY_NAMES[wd]}));
   }
+  if(sem.scheduleType==="custom"){
+    const labels = (sem.customDayLabels&&sem.customDayLabels.length) ? sem.customDayLabels : ["Day 1","Day 2"];
+    return labels.map((lbl,i)=>({key:String(i), label:lbl||("Day "+(i+1))}));
+  }
   const n = sem.rotationLength||4;
   return Array.from({length:n},(_,i)=>{ const l = String.fromCharCode(65+i); return {key:l, label:l}; });
 }
 function dayKeyLabel(sem, dayKey){
   if(dayKey==null) return null;
   if(sem.scheduleType==="fixed") return WEEKDAY_KEY_NAMES[Number(dayKey)]||dayKey;
+  if(sem.scheduleType==="custom") return (sem.customDayLabels||[])[Number(dayKey)] || dayKey;
   if(sem.scheduleType==="week_rotation") return dayKey+" Week";
   return dayKey+" Day";
 }
 function scheduleTypeHint(type){
   if(type==="fixed") return "Same schedule every week — classes are tied to a day of the week, no rotation.";
   if(type==="week_rotation") return "Whole weeks alternate (e.g. \"A Week\", \"B Week\") — classes are tied to which week it is. Holidays don't consume a week.";
+  if(type==="custom") return "Same rotation math as Day Rotation, but with your own day names instead of A/B/C/D. Weekends and holidays don't consume a day.";
   return "Classes rotate day by day (A, B, C, D…) — classes are tied to the rotation day. Weekends and holidays don't consume a day.";
 }
 function mondayOf(dateStr){ const dow = weekdayIndexOf(dateStr); const offset = dow===0 ? -6 : (1-dow); return addDays(dateStr, offset); }
@@ -2667,16 +2707,26 @@ function weekHasSchoolDay(sem, mondayDateStr){
 }
 function getScheduleDayKey(sem, dateStr){
   if(sem.scheduleType==="fixed") return String(weekdayIndexOf(dateStr));
-  const n = sem.rotationLength||4;
   if(sem.scheduleType==="week_rotation"){
+    const n = sem.rotationLength||4;
     const startWeekMonday = mondayOf(sem.startDate), dateWeekMonday = mondayOf(dateStr);
     let count = 0, cur = startWeekMonday;
     while(cur < dateWeekMonday){ if(weekHasSchoolDay(sem, cur)) count++; cur = addDays(cur, 7); }
     const idx = ((sem.startLetterIndex||0) + count) % n;
     return String.fromCharCode(65+idx);
   }
+  if(sem.scheduleType==="custom"){
+    // Same skip-holidays day-count logic as Day Rotation, but the cycle length comes from
+    // however many custom day names were defined, and the key is the label's index (not a letter).
+    const n = (sem.customDayLabels&&sem.customDayLabels.length) || 1;
+    let count = 0, cur = sem.startDate;
+    while(cur < dateStr){ if(isSchoolWeekday(sem, cur) && !isHolidayDate(sem, cur)) count++; cur = addDays(cur, 1); }
+    const idx = ((sem.startLetterIndex||0) + count) % n;
+    return String(idx);
+  }
   // day_rotation — holidays are skipped entirely from the count, so the letter sequence "bumps" forward
   // onto the next real school day instead of being consumed by the day off.
+  const n = sem.rotationLength||4;
   let count = 0, cur = sem.startDate;
   while(cur < dateStr){ if(isSchoolWeekday(sem, cur) && !isHolidayDate(sem, cur)) count++; cur = addDays(cur, 1); }
   const idx = ((sem.startLetterIndex||0) + count) % n;
@@ -2896,15 +2946,15 @@ const BOTTOM_NAV_PRIMARY_COUNT = 4;
    to that hub's main page. Only one hub is expanded at a time. */
 let _navExpandedRoute = null;
 function navSubsectionsFor(path){
-  if(path==="actionhub") return [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"}];
-  if(path==="toolkit") return [{id:"focus",label:"Focus",icon:"🧘"},{id:"alerts",label:"Alerts",icon:"⏰"}];
-  if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
-  if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:""}));
+  if(path==="actionhub") return [{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")},{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")}];
+  if(path==="toolkit") return [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
+  if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
+  if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="planner") return [
-    {id:"calendar", label:"Calendar", icon:"📅"},
-    {id:"schedule", label:"Schedule", icon:"📆"},
-    {id:"classes", label:"Classes", icon:"", indent:1, jumpTab:"schedule"},
-    {id:"templates", label:"Templates", icon:"", indent:1}
+    {id:"calendar", label:"Calendar", icon:sectionIcon("calendar")},
+    {id:"schedule", label:"Schedule", icon:sectionIcon("schedule")},
+    {id:"classes", label:"Classes", icon:sectionIcon("classes"), indent:1, jumpTab:"schedule"},
+    {id:"templates", label:"Templates", icon:sectionIcon("templates"), indent:1}
   ];
   return null;
 }
@@ -2969,7 +3019,7 @@ function tabStripHtml(basePath, tabs, activeTab){
 }
 function renderActionHub(){
   const tab = currentQueryParam("tab") || "habits";
-  const tabs = [{id:"habits",label:"Habits",icon:"✅"},{id:"goals",label:"Goals",icon:"🎯"},{id:"tasks",label:"Tasks",icon:"📝"}];
+  const tabs = [{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")},{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")}];
   let html = tabStripHtml("actionhub", tabs, tab);
   if(tab==="goals") html += renderGoals();
   else if(tab==="tasks") html += renderTasks();
@@ -2978,9 +3028,10 @@ function renderActionHub(){
 }
 function renderToolkit(){
   const tab = currentQueryParam("tab") || "focus";
-  const tabs = [{id:"focus",label:"Focus",icon:"🧘"},{id:"alerts",label:"Alerts",icon:"⏰"}];
+  const tabs = [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
   let html = tabStripHtml("toolkit", tabs, tab);
   if(tab==="alerts") html += renderReminders();
+  else if(tab==="timeblind") html += renderTimeBlindness();
   else html += renderFocus();
   return html;
 }
@@ -3764,24 +3815,50 @@ function updateEventRepeatUI(){
 /* ============ Block/Rotation Class Schedule — Settings UI ============ */
 let semFormWeekdays = [1,2,3,4,5];
 let semFormScheduleType = "day_rotation";
+let semFormCustomLabels = [];
+function renderSemCustomLabelRows(){
+  return semFormCustomLabels.map((lbl,i)=>
+    '<div class="row-inline" style="margin-bottom:6px;align-items:center;">'+
+    '<input type="text" class="semCustomLabelInput" data-idx="'+i+'" value="'+escapeHtml(lbl)+'" placeholder="e.g. Red Day" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);">'+
+    (semFormCustomLabels.length>1?'<button class="icon-btn" type="button" data-action="removeSemCustomLabel" data-idx="'+i+'">✕</button>':"")+
+    '</div>'
+  ).join("");
+}
+function collectSemCustomLabelsFromDOM(){
+  document.querySelectorAll("#semCustomLabelList .semCustomLabelInput").forEach((inp,i)=>{ if(semFormCustomLabels[i]!==undefined) semFormCustomLabels[i]=inp.value; });
+}
+function semRotationBlockHtml(type, sem){
+  const rotLenOpts = [2,3,4,5,6,7,8];
+  const letterOpts = Array.from({length:10},(_,i)=>String.fromCharCode(65+i));
+  if(type==="custom"){
+    if(!semFormCustomLabels.length) semFormCustomLabels = (sem&&sem.customDayLabels&&sem.customDayLabels.length) ? sem.customDayLabels.slice() : ["Day 1","Day 2"];
+    const startIdx = (sem&&sem.scheduleType==="custom") ? (sem.startLetterIndex||0) : 0;
+    return '<label style="display:block;font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-muted);">Your day names (in cycle order)</label>'+
+      '<div id="semCustomLabelList">'+renderSemCustomLabelRows()+'</div>'+
+      '<button class="btn secondary sm" type="button" data-action="addSemCustomLabel">+ Add day</button>'+
+      '<div class="field" style="margin-top:10px;"><label>Starts on…</label><select id="sem_startLetter">'+semFormCustomLabels.map((lbl,i)=>'<option value="'+i+'" '+(startIdx===i?"selected":"")+'>'+escapeHtml(lbl||("Day "+(i+1)))+'</option>').join("")+'</select></div>';
+  }
+  const rotLen = (sem&&sem.scheduleType===type) ? (sem.rotationLength||4) : 4;
+  const startIdx = (sem&&sem.scheduleType===type) ? (sem.startLetterIndex||0) : 0;
+  return '<div class="row-inline"><div class="field"><label>Rotation length</label><select id="sem_rotLen">'+rotLenOpts.map(n=>'<option value="'+n+'" '+(rotLen===n?"selected":"")+'>'+n+' (A–'+String.fromCharCode(65+n-1)+')</option>').join("")+'</select></div>'+
+    '<div class="field"><label>Starts on…</label><select id="sem_startLetter">'+letterOpts.map((l,i)=>'<option value="'+i+'" '+(startIdx===i?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>';
+}
 function semesterFormHtml(sem){
   sem = sem || {name:"", startDate:todayStr(), endDate:addDays(todayStr(),120), scheduleType:"day_rotation", rotationLength:4, startLetterIndex:0, activeWeekdays:[1,2,3,4,5]};
   semFormWeekdays = (sem.activeWeekdays||[1,2,3,4,5]).slice();
   semFormScheduleType = sem.scheduleType || "day_rotation";
+  semFormCustomLabels = (sem.customDayLabels&&sem.customDayLabels.length) ? sem.customDayLabels.slice() : ["Day 1","Day 2"];
   const weekdayOpts = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
-  const rotLenOpts = [2,3,4,5,6,7,8];
-  const letterOpts = Array.from({length:10},(_,i)=>String.fromCharCode(65+i));
   let html = '<h2>'+(sem.id?"Edit Semester":"New Semester")+'</h2>'+
     '<div class="field"><label>Name</label><input id="sem_name" type="text" placeholder="e.g. Fall 2026" value="'+escapeHtml(sem.name)+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Start date</label><input id="sem_start" type="date" value="'+sem.startDate+'"></div>'+
     '<div class="field"><label>End date</label><input id="sem_end" type="date" value="'+sem.endDate+'"></div></div>'+
     '<div class="field"><label>Schedule type</label><div class="chip-group">'+
-    [["fixed","📌 Fixed"],["week_rotation","🔁 Week Rotation"],["day_rotation","🔀 Day Rotation"]].map(o=>'<div class="chip '+(semFormScheduleType===o[0]?"selected":"")+'" data-action="pickSemScheduleType" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
+    [["fixed","📌 Fixed"],["week_rotation","🔁 Week Rotation"],["day_rotation","🔀 Day Rotation"],["custom","🎨 Custom"]].map(o=>'<div class="chip '+(semFormScheduleType===o[0]?"selected":"")+'" data-action="pickSemScheduleType" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
     '</div><p class="hc-meta" id="sem_schedTypeHint" style="margin-top:6px;">'+scheduleTypeHint(semFormScheduleType)+'</p></div>'+
     '<div class="field"><label>School days</label><div class="chip-group">'+weekdayOpts.map(w=>'<div class="chip '+(semFormWeekdays.includes(w[0])?"selected":"")+'" data-action="pickSemWeekday" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div>'+
     '<div id="sem_rotationBlock" style="display:'+(semFormScheduleType==="fixed"?"none":"")+';">'+
-    '<div class="row-inline"><div class="field"><label>Rotation length</label><select id="sem_rotLen">'+rotLenOpts.map(n=>'<option value="'+n+'" '+((sem.rotationLength||4)===n?"selected":"")+'>'+n+' (A–'+String.fromCharCode(65+n-1)+')</option>').join("")+'</select></div>'+
-    '<div class="field"><label>Starts on…</label><select id="sem_startLetter">'+letterOpts.map((l,i)=>'<option value="'+i+'" '+((sem.startLetterIndex||0)===i?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
+    semRotationBlockHtml(semFormScheduleType, sem)+
     '</div>'+
     '<div class="modal-actions">'+(sem.id?'<button class="btn danger" data-action="deleteSemester" data-id="'+sem.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
@@ -4624,6 +4701,52 @@ function renderFocus(){
   }
   return html;
 }
+
+/* ============ Time Blindness Tracker ============
+   A quick, no-judgment log for the gaps where time slips away — between tasks, mid-scroll,
+   staring into space. The point isn't precision (time blindness often means you genuinely
+   don't know how long it was) so the minutes field is optional and there's an explicit
+   "not sure" option rather than forcing a guess. */
+let tbFormMinutes = "";
+let tbFormNotSure = false;
+function timeBlindGapFormHtml(linkedTaskTitle){
+  tbFormMinutes = ""; tbFormNotSure = false;
+  return '<h2>⏳ Log a Time Gap</h2>'+
+    '<p class="hc-meta">No judgment — just noticing where time went.'+(linkedTaskTitle?' Logged right before starting "'+escapeHtml(linkedTaskTitle)+'".':'')+'</p>'+
+    '<div class="field"><label>What happened? (optional)</label><input id="tb_note" type="text" placeholder="e.g. Fell into a YouTube hole, lost track scrolling, just spaced out"></div>'+
+    '<div class="field"><label>About how long? (optional)</label><input id="tb_minutes" type="number" min="0" placeholder="minutes" '+(tbFormNotSure?"disabled":"")+'></div>'+
+    '<div class="toggle-row" style="padding:4px 0;"><div style="font-weight:700;font-size:13px;">🤷 Not sure how long</div><div class="switch" data-action="toggleTbNotSure"></div></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="saveTimeBlindLog" style="flex:1">Log it</button></div>';
+}
+function openTimeBlindForm(linkedTaskTitle){ openModal(timeBlindGapFormHtml(linkedTaskTitle||"")); }
+function timeBlindStatsHtml(){
+  const cutoff = addDays(todayStr(), -6);
+  const recent = (state.timeBlindnessLogs||[]).filter(l=>(l.at||"").slice(0,10)>=cutoff);
+  const withMinutes = recent.filter(l=>l.minutesLost!=null);
+  const totalMinutes = withMinutes.reduce((s,l)=>s+l.minutesLost,0);
+  return '<div class="grid cols-2">'+stat(recent.length,"Gaps logged (7d)")+stat(totalMinutes?fmtMinutesDuration(totalMinutes):"—","Estimated time lost (7d)")+'</div>';
+}
+function timeBlindListHtml(){
+  const logs = (state.timeBlindnessLogs||[]).slice().sort((a,b)=>(b.at||"").localeCompare(a.at||""));
+  if(!logs.length) return emptyState("⏳","No gaps logged yet","Tap \"Log a Time Gap\" whenever you notice time slipped away — it helps spot patterns over time.");
+  return logs.slice(0,30).map(l=>{
+    const task = l.taskId ? (state.tasks||[]).find(t=>t.id===l.taskId) : null;
+    const when = new Date(l.at);
+    return '<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2)">⏳</div>'+
+      '<div class="hc-body"><div class="hc-title">'+(l.note?escapeHtml(l.note):'<span style="color:var(--text-muted);font-style:italic;">No note</span>')+'</div>'+
+      '<div class="hc-meta"><span>'+(l.minutesLost!=null?fmtMinutesDuration(l.minutesLost):"Not sure how long")+'</span><span>'+when.toLocaleDateString()+' '+when.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})+'</span>'+(task?'<span>before "'+escapeHtml(task.title)+'"</span>':'')+'</div></div>'+
+      '<button class="icon-btn" data-action="deleteTimeBlindLog" data-id="'+l.id+'" title="Delete">🗑️</button></div>';
+  }).join("");
+}
+function renderTimeBlindness(){
+  let html = topbarHtml("Time Blindness Tracker","Log the moments where time got away from you — no judgment, just data you can look back on.");
+  html += '<button class="btn block" style="margin-bottom:14px;" data-action="openTimeBlindForm">⏳ Log a Time Gap</button>';
+  html += '<div class="card">'+timeBlindStatsHtml()+'</div>';
+  html += '<div class="section-head"><h2>Recent Gaps</h2></div>';
+  html += timeBlindListHtml();
+  return html;
+}
 function pomodoroDotsHtml(session){
   return '<div style="display:flex;gap:5px;justify-content:center;margin:10px 0;flex-wrap:wrap;">'+session.phases.map((p,i)=>{
     const state2 = i<session.phaseIndex ? "done" : (i===session.phaseIndex ? "active" : "future");
@@ -4631,6 +4754,14 @@ function pomodoroDotsHtml(session){
     const size = p.type==="work" ? "10px" : "7px";
     return '<div title="'+(p.type==="work"?"Work "+p.minutes+"m":(p.long?"Long break ":"Break ")+p.minutes+"m")+'" style="width:'+size+';height:'+size+';border-radius:50%;background:'+bg+';'+(state2==="active"?"box-shadow:0 0 0 3px rgba(var(--accent-rgb),.25);":"")+'"></div>';
   }).join("")+'</div>';
+}
+const FOCUS_RING_R = 100;
+const FOCUS_RING_CIRC = 2 * Math.PI * FOCUS_RING_R;
+function focusRingSvgHtml(){
+  return '<svg class="focus-ring-svg" viewBox="0 0 220 220">'+
+    '<circle class="focus-ring-track" cx="110" cy="110" r="'+FOCUS_RING_R+'"></circle>'+
+    '<circle class="focus-ring-progress" id="focusRingProgress" cx="110" cy="110" r="'+FOCUS_RING_R+'" stroke-dasharray="'+FOCUS_RING_CIRC+'" stroke-dashoffset="0"></circle>'+
+    '</svg>';
 }
 function renderActiveFocus(session){
   if(session.mode==="pomodoro"){
@@ -4640,7 +4771,7 @@ function renderActiveFocus(session){
       '<div class="hc-meta" style="justify-content:center;">Focusing with '+session.partner_name+'</div>'+
       '<div style="font-style:italic;color:var(--text-muted);margin:6px 0 0;font-size:13px;">"'+escapeHtml(session.partner_greeting)+'"</div>'+
       '<div style="font-weight:800;margin-top:12px;color:var(--accent);">'+phaseLabel+'</div>'+
-      '<div class="focus-ring"><div class="time" id="focusTimeDisplay">--:--</div></div>'+
+      '<div class="focus-ring">'+focusRingSvgHtml()+'<div class="time" id="focusTimeDisplay">--:--</div></div>'+
       pomodoroDotsHtml(session)+
       '<div style="font-weight:800;">'+escapeHtml(session.intention)+'</div>'+
       '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;">'+escapeHtml(session.lastCheckinMsg||"")+'</div>'+
@@ -4653,7 +4784,7 @@ function renderActiveFocus(session){
   return '<div class="card" style="text-align:center;">'+
     '<div class="hc-meta" style="justify-content:center;">Focusing with '+session.partner_name+'</div>'+
     '<div style="font-style:italic;color:var(--text-muted);margin:6px 0 0;font-size:13px;">"'+escapeHtml(session.partner_greeting)+'"</div>'+
-    '<div class="focus-ring"><div class="time" id="focusTimeDisplay">--:--</div></div>'+
+    '<div class="focus-ring">'+focusRingSvgHtml()+'<div class="time" id="focusTimeDisplay">--:--</div></div>'+
     '<div style="font-weight:800;">'+escapeHtml(session.intention)+'</div>'+
     '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;"></div>'+
     '<div class="modal-actions" style="justify-content:center;">'+
@@ -4678,6 +4809,12 @@ function checkBrainInterrupt(session){
 function startFocusTicker(session){
   if(focusTimer) clearInterval(focusTimer);
   let checkinShown = false;
+  function setRingProgress(remain, totalMs){
+    const ring = document.getElementById("focusRingProgress");
+    if(!ring) return;
+    const remainFrac = totalMs>0 ? Math.max(0, Math.min(1, remain/totalMs)) : 0;
+    ring.setAttribute("stroke-dashoffset", String(FOCUS_RING_CIRC * (1 - remainFrac)));
+  }
   function tick(){
     const el = document.getElementById("focusTimeDisplay");
     if(!el) { clearInterval(focusTimer); return; }
@@ -4691,6 +4828,7 @@ function startFocusTicker(session){
       const mm = String(Math.floor(remain/60000)).padStart(2,"0");
       const ss = String(Math.floor((remain%60000)/1000)).padStart(2,"0");
       el.textContent = mm+":"+ss;
+      setRingProgress(remain, totalMs);
       if(remain<=0){
         advancePomodoroPhase(session);
       }
@@ -4702,6 +4840,7 @@ function startFocusTicker(session){
     const mm = String(Math.floor(remain/60000)).padStart(2,"0");
     const ss = String(Math.floor((remain%60000)/1000)).padStart(2,"0");
     el.textContent = mm+":"+ss;
+    setRingProgress(remain, totalMs);
     if(!checkinShown && remain <= totalMs/2 && remain > 0){
       checkinShown = true;
       const msgEl = document.getElementById("focusCheckinMsg");
@@ -4843,9 +4982,15 @@ function taskLinkBadgeHtml(t){
   return '<span class="tag" style="'+(link.color?"background:"+link.color+"22;":"")+'margin-left:6px;">'+link.emoji+' '+escapeHtml(link.label)+'</span>';
 }
 function taskFormHtml(t){
-  t = t || {title:"", planned_minutes:30, category:"", date:""};
+  t = t || {title:"", planned_minutes:30, category:"", date:todayStr()};
   const linkValue = (t.linked_type && t.linked_id) ? (t.linked_type+":"+t.linked_id) : "";
   return '<h2>'+(t.id?"Edit Task":"New Task")+'</h2>'+
+    (!t.id ? '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⏳ Anything pull you off track before this?</div><div class="hc-meta" style="margin-top:2px;">Optional — logs a quick Time Blindness entry alongside this task.</div></div><div class="switch" data-action="toggleTskGapBlock"></div></div>'+
+      '<div id="tsk_gapBlock" style="display:none;">'+
+      '<div class="field"><label>What happened?</label><input id="tsk_gapNote" type="text" placeholder="e.g. Lost track scrolling, wandered off"></div>'+
+      '<div class="row-inline"><div class="field" style="flex:1;"><label>About how long? (minutes)</label><input id="tsk_gapMinutes" type="number" min="0" placeholder="minutes"></div></div>'+
+      '<div class="toggle-row" style="padding:4px 0;"><div style="font-weight:700;font-size:13px;">🤷 Not sure how long</div><div class="switch" data-action="toggleTbGapNotSure"></div></div>'+
+      '</div>' : '')+
     '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
     '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
@@ -4871,6 +5016,7 @@ function taskFormHtml(t){
     '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
 }
 let taskAlarmOn = false;
+let tskGapNotSure = false;
 let taskFormPriority = "medium";
 let taskGradedOn = false;
 let taskFormSubtasks = [];
@@ -4898,6 +5044,7 @@ function openTaskForm(id, prefillDate){
   taskGradedOn = !!(t && t.is_graded);
   taskFormSubtasks = t ? (t.subtasks||[]).map(s=>Object.assign({},s)) : [];
   taskAlarmOn = !!(t && t.alarm_enabled);
+  tskGapNotSure = false;
   notifyEmailOn = !!(t && t.notify_email);
   notifySmsOn = !!(t && t.notify_sms);
   openModal(taskFormHtml(t));
@@ -6448,6 +6595,12 @@ document.addEventListener("click", async function(e){
       if(block) block.style.display = isOn ? "" : "none";
       break;
     }
+    case "toggleTskGapBlock": {
+      const isOn = t.classList.toggle("on");
+      const block = document.getElementById("tsk_gapBlock");
+      if(block) block.style.display = isOn ? "" : "none";
+      break;
+    }
     case "saveTask": {
       const title = document.getElementById("tsk_title").value.trim();
       if(!title){ toast("Please enter a task"); return; }
@@ -6477,6 +6630,17 @@ document.addEventListener("click", async function(e){
         payload.distraction = ""; payload.helped = ""; payload.follow_up_needed = false;
         payload.follow_up_date = ""; payload.follow_up_notes = ""; payload.created_at = new Date().toISOString(); payload.completed_at = null;
         state.tasks.push(payload);
+        const gapNoteEl = document.getElementById("tsk_gapNote");
+        const gapMinutesEl = document.getElementById("tsk_gapMinutes");
+        if(gapNoteEl){
+          const gapNote = gapNoteEl.value.trim();
+          const gapMinutesRaw = gapMinutesEl ? gapMinutesEl.value : "";
+          const gapMinutesLost = (!tskGapNotSure && gapMinutesRaw!=="") ? Math.max(0, Number(gapMinutesRaw)||0) : null;
+          if(gapNote || gapMinutesLost!=null || tskGapNotSure){
+            state.timeBlindnessLogs = state.timeBlindnessLogs || [];
+            state.timeBlindnessLogs.push({id:uid(), at:new Date().toISOString(), note:gapNote, minutesLost:gapMinutesLost, taskId:payload.id});
+          }
+        }
       }
       saveState(); closeModal(); render();
       toast("Task saved");
@@ -6990,12 +7154,25 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "pickSemScheduleType": {
+      const prevType = semFormScheduleType;
       semFormScheduleType = v;
       document.querySelectorAll('[data-action="pickSemScheduleType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
       const block = document.getElementById("sem_rotationBlock");
-      if(block) block.style.display = v==="fixed" ? "none" : "";
+      if(block){
+        block.style.display = v==="fixed" ? "none" : "";
+        if(v==="custom" || prevType==="custom"){ block.innerHTML = semRotationBlockHtml(v); }
+      }
       const hint = document.getElementById("sem_schedTypeHint");
       if(hint) hint.textContent = scheduleTypeHint(v);
+      break;
+    }
+    case "addSemCustomLabel": { collectSemCustomLabelsFromDOM(); semFormCustomLabels.push("Day "+(semFormCustomLabels.length+1)); const list=document.getElementById("semCustomLabelList"); if(list) list.innerHTML = renderSemCustomLabelRows(); break; }
+    case "removeSemCustomLabel": {
+      collectSemCustomLabelsFromDOM();
+      const idx = Number(t.getAttribute("data-idx"));
+      if(semFormCustomLabels.length>1) semFormCustomLabels.splice(idx,1);
+      const list = document.getElementById("semCustomLabelList");
+      if(list) list.innerHTML = renderSemCustomLabelRows();
       break;
     }
     case "saveSemester": {
@@ -7006,7 +7183,14 @@ document.addEventListener("click", async function(e){
       if(!startDate || !endDate || endDate<startDate){ toast("Check the start/end dates"); return; }
       const scheduleType = semFormScheduleType || "day_rotation";
       const payload = { name, startDate, endDate, scheduleType, activeWeekdays: semFormWeekdays.slice().sort() };
-      if(scheduleType!=="fixed"){
+      if(scheduleType==="custom"){
+        collectSemCustomLabelsFromDOM();
+        const labels = semFormCustomLabels.map(l=>l.trim()).filter(l=>l!=="");
+        if(labels.length<2){ toast("Add at least 2 day names"); return; }
+        payload.customDayLabels = labels;
+        payload.rotationLength = labels.length;
+        payload.startLetterIndex = Number(document.getElementById("sem_startLetter").value)%labels.length;
+      } else if(scheduleType!=="fixed"){
         const rotationLength = Number(document.getElementById("sem_rotLen").value)||4;
         payload.rotationLength = rotationLength;
         payload.startLetterIndex = Number(document.getElementById("sem_startLetter").value)%rotationLength;
@@ -7238,6 +7422,32 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "setFocusMode": { focusMode = v; render(); break; }
+    case "openTimeBlindForm": openTimeBlindForm(); break;
+    case "toggleTbNotSure": {
+      const isOn = t.classList.toggle("on");
+      tbFormNotSure = isOn;
+      const mEl = document.getElementById("tb_minutes");
+      if(mEl){ mEl.disabled = isOn; if(isOn) mEl.value = ""; }
+      break;
+    }
+    case "saveTimeBlindLog": {
+      const note = document.getElementById("tb_note").value.trim();
+      const minutesRaw = document.getElementById("tb_minutes").value;
+      const minutesLost = (!tbFormNotSure && minutesRaw!=="") ? Math.max(0, Number(minutesRaw)||0) : null;
+      state.timeBlindnessLogs = state.timeBlindnessLogs || [];
+      state.timeBlindnessLogs.push({id:uid(), at:new Date().toISOString(), note, minutesLost, taskId:null});
+      saveState(); closeModal(); render();
+      toast("Logged");
+      break;
+    }
+    case "deleteTimeBlindLog": { state.timeBlindnessLogs = (state.timeBlindnessLogs||[]).filter(x=>x.id!==id); saveState(); render(); break; }
+    case "toggleTbGapNotSure": {
+      const isOn = t.classList.toggle("on");
+      tskGapNotSure = isOn;
+      const mEl = document.getElementById("tsk_gapMinutes");
+      if(mEl){ mEl.disabled = isOn; if(isOn) mEl.value = ""; }
+      break;
+    }
     case "toggleBrainInterrupt": {
       const isOn = t.classList.toggle("on");
       state.profile.brainInterruptEnabled = isOn;
@@ -7657,6 +7867,7 @@ document.addEventListener("click", async function(e){
       SYMPTOM_OPTIONS = DEFAULT_SYMPTOM_OPTIONS.slice();
       DISTRACTION_OPTIONS = DEFAULT_DISTRACTION_OPTIONS.slice();
       NEED_OPTIONS = DEFAULT_NEED_OPTIONS.slice();
+      SECTION_ICONS = JSON.parse(JSON.stringify(DEFAULT_SECTION_ICONS));
       openModal(globalConfigEditorHtml());
       toast("Reset in this editor — tap Save for Everyone to make it permanent");
       break;
@@ -7668,7 +7879,8 @@ document.addEventListener("click", async function(e){
         sleepQuality: parseEmojiLabelLines(document.getElementById("gc_sleep").value, SLEEP_QUALITY),
         symptomOptions: parseGcLines(document.getElementById("gc_symptoms").value),
         distractionOptions: parseGcLines(document.getElementById("gc_distractions").value),
-        needOptions: parseGcLines(document.getElementById("gc_needs").value)
+        needOptions: parseGcLines(document.getElementById("gc_needs").value),
+        sectionIcons: (function(){ const out={}; SECTION_ICON_META.forEach(m=>{ const el=document.getElementById("gcsi_"+m.key); out[m.key] = el ? (el.value||"").trim() : (SECTION_ICONS[m.key]||""); }); return out; })()
       };
       if(!cfg.categories.length || !cfg.moods.length || !cfg.sleepQuality.length){ toast("Categories, moods, and sleep quality can't be empty"); return; }
       try{
