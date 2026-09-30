@@ -3393,7 +3393,7 @@ function habitFormHtml(h){
     '<div class="field"><label>Color</label><div class="swatch-group" style="margin-top:8px;">'+COLORS.map(c=>'<div class="swatch '+(h.color===c?"selected":"")+'" style="background:'+c+'" data-action="pickColor" data-v="'+c+'"></div>').join("")+'</div></div>'+
     '</div>'+
     alarmSettingsBlockHtml("habit", h.id ? state.reminders.find(r=>r.id===h.alarm_reminder_id) : null)+
-    '<div class="modal-actions">'+(h.id?'<button class="btn danger" data-action="deleteHabit" data-id="'+h.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(h.id?'<button class="btn secondary" data-action="duplicateHabit" data-id="'+h.id+'">Duplicate</button>':'')+(h.id?'<button class="btn danger" data-action="deleteHabit" data-id="'+h.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveHabit" data-id="'+(h.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -3495,7 +3495,7 @@ function goalFormHtml(g){
       '</div><button class="btn secondary sm" type="button" data-action="addMilestoneRow">+ Add milestone</button></div>'+
     (g.milestones && g.milestones.length ? "" : '<div class="field"><label>Manual progress: <span id="progVal">'+(g.progress||0)+'</span>%</label><input id="g_progress" type="range" min="0" max="100" value="'+(g.progress||0)+'" oninput="document.getElementById(\'progVal\').textContent=this.value" style="width:100%"></div>')+
     alarmSettingsBlockHtml("goal", g.id ? state.reminders.find(r=>r.id===g.alarm_reminder_id) : null)+
-    '<div class="modal-actions">'+(g.id?'<button class="btn danger" data-action="deleteGoal" data-id="'+g.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(g.id?'<button class="btn secondary" data-action="duplicateGoal" data-id="'+g.id+'">Duplicate</button>':'')+(g.id?'<button class="btn danger" data-action="deleteGoal" data-id="'+g.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveGoal" data-id="'+(g.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -3541,11 +3541,25 @@ function syncGoalAlarm(goal){
 let plannerDate = todayStr();
 let plannerViewMode = "day";
 let plannerMonthCursor = todayStr().slice(0,7);
+/* Quick-jump chips shown at the top of each Planner subpage so you can hop between
+   Calendar/Schedule/Templates/Classes without going back through the sidebar. */
+function plannerShortcutsHtml(current){
+  const items = [
+    {id:"calendar", href:"#/planner", label:"Calendar", icon:sectionIcon("calendar")},
+    {id:"schedule", href:"#/planner?tab=schedule", label:"Schedule", icon:sectionIcon("schedule")},
+    {id:"classes", href:"#/planner?tab=schedule&jump=classes", label:"Classes", icon:sectionIcon("classes")},
+    {id:"templates", href:"#/planner?tab=templates", label:"Templates", icon:sectionIcon("templates")}
+  ];
+  return '<div class="chip-group" style="margin-bottom:12px;">'+items.map(it=>
+    '<a href="'+it.href+'" class="chip '+(current===it.id?"selected":"")+'" style="text-decoration:none;">'+it.icon+' '+it.label+'</a>'
+  ).join("")+'</div>';
+}
 function renderPlanner(){
   const tab = currentQueryParam("tab") || "calendar";
   if(tab==="schedule") return renderPlannerSchedule();
   if(tab==="templates") return renderPlannerTemplates();
   let html = topbarHtml(sectionIcon("calendar")+" Planner","Plan your day, week, and month.");
+  html += plannerShortcutsHtml("calendar");
   html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
     '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div></div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
@@ -3555,11 +3569,13 @@ function renderPlanner(){
 }
 function renderPlannerSchedule(){
   let html = topbarHtml(sectionIcon("schedule")+" Schedule","Your class schedule, rotation, and holidays.");
+  html += plannerShortcutsHtml("schedule");
   html += scheduleSettingsCardHtml();
   return html;
 }
 function renderPlannerTemplates(){
   let html = topbarHtml(sectionIcon("templates")+" Templates","Reusable daily schedules you can apply to any day.");
+  html += plannerShortcutsHtml("templates");
   html += '<div class="card" style="margin-top:14px;">'+templateGalleryHtml()+'</div>';
   return html;
 }
@@ -3794,7 +3810,7 @@ function customEventFormHtml(dateStr, ev){
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
     '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+notifyChannelChipsHtml()+'</div>'+
-    '<div class="modal-actions">'+(ev.id?'<button class="btn danger" data-action="deleteCustomEvent" data-id="'+ev.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(ev.id?'<button class="btn secondary" data-action="duplicateCustomEvent" data-id="'+ev.id+'">Duplicate</button>':'')+(ev.id?'<button class="btn danger" data-action="deleteCustomEvent" data-id="'+ev.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveCustomEvent" data-id="'+(ev.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -3922,7 +3938,7 @@ function classFormHtml(sem, cls){
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(classFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickClassColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="cls_colorWheel" value="'+classFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Time slots</label><div id="classSlotList">'+renderClassSlotRows(sem, classFormSlots)+'</div>'+
     '<button class="btn secondary sm" type="button" data-action="addClassSlotRow">+ Add time slot</button></div>'+
-    '<div class="modal-actions">'+(cls.id?'<button class="btn danger" data-action="deleteClassSubject" data-id="'+cls.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(cls.id?'<button class="btn secondary" data-action="duplicateClassSubject" data-id="'+cls.id+'">Duplicate</button>':'')+(cls.id?'<button class="btn danger" data-action="deleteClassSubject" data-id="'+cls.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveClassSubject" data-id="'+(cls.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -4403,7 +4419,7 @@ function reminderFormHtml(r){
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(reminderFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickRColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="r_colorWheel" value="'+reminderFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Motivational message</label><input id="r_msg" type="text" value="'+escapeHtml(r.message||"")+'"></div>'+
     notifyChannelChipsHtml()+
-    '<div class="modal-actions">'+(r.id?'<button class="btn danger" data-action="deleteReminder" data-id="'+r.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(r.id?'<button class="btn secondary" data-action="duplicateReminder" data-id="'+r.id+'">Duplicate</button>':'')+(r.id?'<button class="btn danger" data-action="deleteReminder" data-id="'+r.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveReminder" data-id="'+(r.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -5011,7 +5027,7 @@ function taskFormHtml(t){
       '<div class="chip" data-action="addCustomCategory" data-prefix="task">+ Custom</div>'+
     '</div></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(taskFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickTaskColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="tsk_colorWheel" value="'+taskFormColor+'" title="Pick any color"></div></div>'+
-    '<div class="modal-actions">'+(t.id?'<button class="btn danger" data-action="deleteTask" data-id="'+t.id+'">Delete</button>':'')+
+    '<div class="modal-actions">'+(t.id?'<button class="btn secondary" data-action="duplicateTask" data-id="'+t.id+'">Duplicate</button>':'')+(t.id?'<button class="btn danger" data-action="deleteTask" data-id="'+t.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveTask" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
 }
@@ -6646,6 +6662,20 @@ document.addEventListener("click", async function(e){
       toast("Task saved");
       break;
     }
+    case "duplicateTask": {
+      const src = (state.tasks||[]).find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that task"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.title = (src.title||"Task") + " (Copy)";
+      copy.status = "pending";
+      copy.subtasks = (copy.subtasks||[]).map(s=>Object.assign({},s,{id:uid(), done:false}));
+      state.tasks = state.tasks || [];
+      state.tasks.push(copy);
+      saveState(); closeModal(); render();
+      toast("Task duplicated");
+      break;
+    }
     case "deleteTask": { state.tasks = (state.tasks||[]).filter(x=>x.id!==id); state.grades = (state.grades||[]).filter(g=>g.task_id!==id); saveState(); closeModal(); render(); break; }
     case "openTaskCompleteForm": openTaskCompleteForm(id); break;
     case "toggleTaskFollowUp": {
@@ -6839,6 +6869,18 @@ document.addEventListener("click", async function(e){
       toast("Habit saved");
       break;
     }
+    case "duplicateHabit": {
+      const src = state.habits.find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that habit"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.title = (src.title||"Habit") + " (Copy)";
+      copy.alarm_reminder_id = null;
+      state.habits.push(copy);
+      saveState(); closeModal(); render();
+      toast("Habit duplicated");
+      break;
+    }
     case "deleteHabit": {
       const h = state.habits.find(x=>x.id===id);
       state.habits = state.habits.filter(x=>x.id!==id);
@@ -6884,6 +6926,20 @@ document.addEventListener("click", async function(e){
       toast("Goal saved");
       checkNewBadges();
       if(goalObj.status==="completed" && !wasCompleted) promptMentorNotify("Goal Complete: "+goalObj.title);
+      break;
+    }
+    case "duplicateGoal": {
+      const src = state.goals.find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that goal"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.title = (src.title||"Goal") + " (Copy)";
+      copy.alarm_reminder_id = null;
+      copy.status = "active";
+      copy.progress = 0;
+      state.goals.push(copy);
+      saveState(); closeModal(); render();
+      toast("Goal duplicated");
       break;
     }
     case "deleteGoal": {
@@ -7139,6 +7195,18 @@ document.addEventListener("click", async function(e){
       toast("Event saved");
       break;
     }
+    case "duplicateCustomEvent": {
+      const src = (state.customEvents||[]).find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that event"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.title = (src.title||"Event") + " (Copy)";
+      state.customEvents = state.customEvents || [];
+      state.customEvents.push(copy);
+      saveState(); closeModal(); render();
+      toast("Event duplicated");
+      break;
+    }
     case "deleteCustomEvent": {
       state.customEvents = (state.customEvents||[]).filter(x=>x.id!==id);
       saveState(); closeModal(); render();
@@ -7282,6 +7350,20 @@ document.addEventListener("click", async function(e){
       toast("Class saved");
       break;
     }
+    case "duplicateClassSubject": {
+      const sem = activeSemester();
+      const src = sem && (sem.classSubjects||[]).find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that class"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.name = (src.name||"Class") + " (Copy)";
+      copy.slots = (copy.slots||[]).map(s=>Object.assign({}, s, {id:uid()}));
+      sem.classSubjects = sem.classSubjects || [];
+      sem.classSubjects.push(copy);
+      saveState(); closeModal(); render();
+      toast("Class duplicated");
+      break;
+    }
     case "deleteClassSubject": {
       const sem = activeSemester();
       if(sem) sem.classSubjects = (sem.classSubjects||[]).filter(x=>x.id!==id);
@@ -7379,6 +7461,18 @@ document.addEventListener("click", async function(e){
       if(id){ Object.assign(state.reminders.find(x=>x.id===id), payload); } else { payload.id = uid(); state.reminders.push(payload); }
       saveState(); closeModal(); render();
       toast("Reminder saved");
+      break;
+    }
+    case "duplicateReminder": {
+      const src = state.reminders.find(x=>x.id===id);
+      if(!src){ toast("Couldn't find that reminder"); return; }
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.title = (src.title||"Reminder") + " (Copy)";
+      delete copy.habit_id; delete copy.goal_id;
+      state.reminders.push(copy);
+      saveState(); closeModal(); render();
+      toast("Reminder duplicated");
       break;
     }
     case "deleteReminder": { state.reminders = state.reminders.filter(r=>r.id!==id); saveState(); closeModal(); render(); break; }
