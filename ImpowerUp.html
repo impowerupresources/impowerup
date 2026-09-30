@@ -407,7 +407,7 @@ let SECTION_ICONS = {
   habits:"✅", goals:"🎯", tasks:"📝",
   focus:"🧘", alerts:"⏰", timeblind:"⏳",
   calendar:"📅", schedule:"📆", classes:"📚", templates:"🗂️",
-  sleep:"😴", mood:"🙂", braindump:"📓", grades:"🎓",
+  sleep:"😴", mood:"🙂", braindump:"📓", grades:"📊",
   stats:"📊", matrix:"✨", heatmap:"🔥", trends:"📈", timeline:"🗓️", badges:"🏅"
 };
 const DEFAULT_SECTION_ICONS = JSON.parse(JSON.stringify(SECTION_ICONS));
@@ -3545,7 +3545,7 @@ function renderPlanner(){
   const tab = currentQueryParam("tab") || "calendar";
   if(tab==="schedule") return renderPlannerSchedule();
   if(tab==="templates") return renderPlannerTemplates();
-  let html = topbarHtml("Planner","Plan your day, week, and month.");
+  let html = topbarHtml(sectionIcon("calendar")+" Planner","Plan your day, week, and month.");
   html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
     '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div></div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
@@ -3554,12 +3554,12 @@ function renderPlanner(){
   return html;
 }
 function renderPlannerSchedule(){
-  let html = topbarHtml("📆 Schedule","Your class schedule, rotation, and holidays.");
+  let html = topbarHtml(sectionIcon("schedule")+" Schedule","Your class schedule, rotation, and holidays.");
   html += scheduleSettingsCardHtml();
   return html;
 }
 function renderPlannerTemplates(){
-  let html = topbarHtml("Templates","Reusable daily schedules you can apply to any day.");
+  let html = topbarHtml(sectionIcon("templates")+" Templates","Reusable daily schedules you can apply to any day.");
   html += '<div class="card" style="margin-top:14px;">'+templateGalleryHtml()+'</div>';
   return html;
 }
@@ -3936,7 +3936,7 @@ function openClassForm(id){
 }
 function classesCardHtml(sem){
   const classes = (sem.classSubjects||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-  let html = '<div class="card" style="margin-top:14px;"><h2>📚 Classes</h2>'+
+  let html = '<div class="card" style="margin-top:14px;"><h2>'+sectionIcon("classes")+' Classes</h2>'+
     '<p class="hc-meta">Add each class once, then give it one or more time slots — each tied to a '+(sem.scheduleType==="fixed"?"day of the week":(sem.scheduleType==="week_rotation"?"rotation week":"rotation day"))+' and time. A class can meet at different times on different days.</p>'+
     '<button class="btn secondary sm" style="margin:8px 0;" data-action="openClassForm">+ Add Class</button>';
   if(!classes.length){ html += '<p class="hc-meta">No classes yet.</p></div>'; return html; }
@@ -4490,7 +4490,7 @@ let _trendsCustomDays = 30;
 function impowerZoneTrendsHtml(){
   const mode = _trendsRange;
   const days = mode==="week" ? 7 : mode==="month" ? 30 : Math.max(2, Math.min(365, _trendsCustomDays||30));
-  let html = '<div class="card"><h2>📈 Trends</h2>'+
+  let html = '<div class="card"><h2>'+sectionIcon("trends")+' Trends</h2>'+
     '<div class="chip-group" style="margin:8px 0 14px;">'+
     [{id:"week",label:"Week"},{id:"month",label:"Month"},{id:"custom",label:"Custom"}].map(o=>
       '<div class="chip '+(mode===o.id?"selected":"")+'" data-action="setTrendsRange" data-v="'+o.id+'">'+o.label+'</div>').join("")+
@@ -4547,16 +4547,16 @@ function renderImpowerZone(){
   html += '<p class="hc-meta" style="margin:-6px 0 12px;">Drag ⠿ to reorder these sections. Looking for stats, trends, or badges? Check <a href="#/progress">Progress</a>.</p>';
 
   const sectionHtml = {
-    sleep: '<div class="section-head" style="margin-top:0;"><h2>😴 Sleep Tracker</h2><button class="btn ghost sm" data-action="openSleepForm">+ Log sleep</button></div>'+
+    sleep: '<div class="section-head" style="margin-top:0;"><h2>'+sectionIcon("sleep")+' Sleep Tracker</h2><button class="btn ghost sm" data-action="openSleepForm">+ Log sleep</button></div>'+
       '<div class="card">'+sleepTrendChartHtml()+'</div>',
-    mood: '<div class="section-head" style="margin-top:0;"><h2>🙂 Mood Tracker</h2><button class="btn ghost sm" data-action="openMoodForm">+ Log mood</button></div>'+
+    mood: '<div class="section-head" style="margin-top:0;"><h2>'+sectionIcon("mood")+' Mood Tracker</h2><button class="btn ghost sm" data-action="openMoodForm">+ Log mood</button></div>'+
       '<div class="card">'+moodTrendChartHtml()+'</div>',
-    grades: '<div class="card"><h2>📊 Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+
+    grades: '<div class="card"><h2>'+sectionIcon("grades")+' Grades</h2><p class="hc-meta">Grades logged from homework/graded tasks, tracked per class over time.</p>'+
       (((state.grades||[]).length || (activeSemester() && (activeSemester().classSubjects||[]).length))
         ? gradesSectionHtml()
         : emptyState("🎓","No classes yet","Add a class to start tracking grades here. <a href=\"#/planner?tab=schedule&jump=classes\">+ Add a class</a>"))+
       '</div>',
-    braindump: '<div class="section-head" style="margin-top:0;"><h2>📓 Brain Dump</h2><button class="btn ghost sm" data-action="openJournalForm">+ New entry</button></div>'+
+    braindump: '<div class="section-head" style="margin-top:0;"><h2>'+sectionIcon("braindump")+' Brain Dump</h2><button class="btn ghost sm" data-action="openJournalForm">+ New entry</button></div>'+
       '<div class="card"><p class="hc-meta">A judgment-free space to unload whatever\'s on your mind — no structure required.</p></div>'+
       brainDumpListHtml()
   };
@@ -4576,11 +4576,11 @@ function renderProgress(){
 
   const sectionHtml = {
     stats: '<div class="grid cols-3">'+stat(totalPoints(),"Total XP")+stat(state.habitLogs.length,"Completions")+stat(bestActiveStreak(),"Best streak")+'</div>',
-    matrix: '<div class="card"><h2>✨ Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
-    heatmap: '<div class="card"><h2>🔥 Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
+    matrix: '<div class="card"><h2>'+sectionIcon("matrix")+' Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
+    heatmap: '<div class="card"><h2>'+sectionIcon("heatmap")+' Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
     trends: impowerZoneTrendsHtml(),
-    timeline: '<div class="card"><h2>🗓️ Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
-    badges: '<div class="section-head" style="margin-top:0;"><h2>Badges</h2></div><div class="grid cols-3">'+
+    timeline: '<div class="card"><h2>'+sectionIcon("timeline")+' Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
+    badges: '<div class="section-head" style="margin-top:0;"><h2>'+sectionIcon("badges")+' Badges</h2></div><div class="grid cols-3">'+
       BADGES.map(b=>{ const earned = state.profile.badgesSeen.includes(b.id) || computeEarnedBadges().some(x=>x.id===b.id);
         return '<div class="badge-card '+(earned?"":"locked")+'"><div class="be">'+b.emoji+'</div><div class="bt">'+escapeHtml(b.title)+'</div><div class="bd">'+escapeHtml(b.desc)+'</div></div>'; }).join("")+
       '</div>'
