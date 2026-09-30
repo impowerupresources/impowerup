@@ -597,18 +597,16 @@ function defaultState(){
   return {
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
-      mentorName:"", mentorEmail:"", mentorPhone:"", notifyMentorOnProof:false,
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
-      username:"", email:"", supabaseUrl:"", supabaseAnonKey:"", pushEnabled:false,
+      username:"", email:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
-      resendApiKey:"", resendFromEmail:"", twilioAccountSid:"", twilioAuthToken:"", twilioFromNumber:"",
       dashboardOrder:[], dashboardHidden:[], impowerZoneOrder:[], progressOrder:[], defaultSnoozeMinutes:5,
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
       navOrder:[] },
-    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], mentorMessages:[], customCategories:[],
+    habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[], timeBlindnessLogs:[]
   };
 }
@@ -681,7 +679,6 @@ function seedDemoState(){
   s.profile.onboarded = true;
   s.profile.theme = "auto";
   s.profile.accent = "#2563EB";
-  s.profile.mentorName = "Ms. Patel";
 
   const T = todayStr();
   function d(n){ return addDays(T, -n); }
@@ -813,7 +810,9 @@ function notifyIfPermitted(title, body){
 
 /* ============ Background push (Supabase) ============ */
 function pushBackendConfigured(){
-  return !!(state && state.profile && state.profile.supabaseUrl && state.profile.supabaseAnonKey);
+  // Background push always runs through ImpowerUp's own shared Supabase backend
+  // (SB_ACCOUNTS_URL/SB_ACCOUNTS_KEY, already hardcoded above) — nothing for the user to paste in.
+  return true;
 }
 function urlBase64ToUint8Array(base64String){
   const padding = "=".repeat((4 - base64String.length % 4) % 4);
@@ -824,13 +823,12 @@ function urlBase64ToUint8Array(base64String){
   return arr;
 }
 function sbHeaders(){
-  return { apikey: state.profile.supabaseAnonKey, Authorization: "Bearer "+state.profile.supabaseAnonKey, "Content-Type":"application/json" };
+  return { apikey: SB_ACCOUNTS_KEY, Authorization: "Bearer "+SB_ACCOUNTS_KEY, "Content-Type":"application/json" };
 }
 function sbRest(path, opts){
-  return fetch(state.profile.supabaseUrl.replace(/\/$/,"")+"/rest/v1/"+path, Object.assign({headers: sbHeaders()}, opts||{}));
+  return fetch(SB_ACCOUNTS_URL+"/rest/v1/"+path, Object.assign({headers: sbHeaders()}, opts||{}));
 }
 async function subscribeToPush(){
-  if(!pushBackendConfigured()){ toast("Add your Supabase URL + anon key in Settings first"); return false; }
   if(!("serviceWorker" in navigator) || !("PushManager" in window)){ toast("This browser doesn't support push"); return false; }
   try{
     const reg = await navigator.serviceWorker.ready;
@@ -844,7 +842,7 @@ async function subscribeToPush(){
       headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
       body: JSON.stringify({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth })
     });
-    if(!res.ok){ toast("Couldn't save push subscription — check your Supabase URL/key"); return false; }
+    if(!res.ok){ toast("Couldn't save push subscription — try again in a moment"); return false; }
     window._pushEndpoint = json.endpoint;
     state.profile.pushEnabled = true; saveState();
     return true;
@@ -877,11 +875,11 @@ function getOneOffPushItems(){
   const items = [];
   (state.customEvents||[]).filter(e=>e.alarm_enabled && e.time && e.date && (!e.repeat || e.repeat==="none")).forEach(e=>{
     const fireAt = computeOneOffFireAt(e.date, e.time);
-    if(fireAt) items.push({id:"cevt_"+e.id, title:e.label||"Event", body:e.description||"", fireAt});
+    if(fireAt) items.push({id:"cevt_"+e.id, title:e.label||"Event", body:e.description||"", fireAt, notify_email:!!e.notify_email, notify_sms:!!e.notify_sms});
   });
   (state.tasks||[]).filter(t=>t.alarm_enabled && t.alarm_time && t.date && t.status!=="done").forEach(t=>{
     const fireAt = computeOneOffFireAt(t.date, t.alarm_time);
-    if(fireAt) items.push({id:"tsk_"+t.id, title:"Task: "+t.title, body:"", fireAt});
+    if(fireAt) items.push({id:"tsk_"+t.id, title:"Task: "+t.title, body:"", fireAt, notify_email:!!t.notify_email, notify_sms:!!t.notify_sms});
   });
   return items;
 }
@@ -1057,13 +1055,17 @@ async function syncAllAlertsToServer(force){
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     if(!sub) return;
     const endpoint = sub.toJSON().endpoint;
+    const p = state.profile;
+    const toEmail = (p.emailNotifyEnabled && p.notifyEmail) ? p.notifyEmail : null;
+    const toPhone = (p.smsNotifyEnabled && p.notifyPhone) ? p.notifyPhone : null;
     const active = state.reminders.filter(r=>r.is_active!==false && r.time && (r.days||[]).length);
     for(const r of active){
       const next = computeNextFireAt(r.time, r.days);
       await sbRest("scheduled_alerts?on_conflict=id", {
         method:"POST",
         headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ id:r.id, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString() })
+        body: JSON.stringify({ id:r.id, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString(),
+          notify_email: !!(r.notify_email && toEmail), notify_sms: !!(r.notify_sms && toPhone), to_email: r.notify_email ? toEmail : null, to_phone: r.notify_sms ? toPhone : null })
       });
     }
     const oneOffItems = getOneOffPushItems();
@@ -1071,7 +1073,8 @@ async function syncAllAlertsToServer(force){
       await sbRest("scheduled_alerts?on_conflict=id", {
         method:"POST",
         headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ id:item.id, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString() })
+        body: JSON.stringify({ id:item.id, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString(),
+          notify_email: !!(item.notify_email && toEmail), notify_sms: !!(item.notify_sms && toPhone), to_email: item.notify_email ? toEmail : null, to_phone: item.notify_sms ? toPhone : null })
       });
     }
     // Reconcile deletions: remove any server-side alerts that no longer exist locally.
@@ -1636,27 +1639,41 @@ async function openAsClient(clientId){
     toast("Now viewing "+clientName+"'s data");
   }catch(e){ toast("Couldn't open that client"); }
 }
+async function saveClientStateToCloud(){
+  if(!_adminViewing) return {ok:false, errMsg:"Not viewing a client"};
+  if(!(await ensureFreshSession())){
+    return {ok:false, errMsg:"Your session expired — log back in and try again"};
+  }
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify({ user_id: _adminViewing.id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
+    });
+    if(!res.ok){
+      let detail = "";
+      try{ const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); }catch(e){ try{ detail = await res.text(); }catch(e2){} }
+      return {ok:false, errMsg:"Couldn't save (status "+res.status+")"+(detail?": "+detail.slice(0,140):"")};
+    }
+    return {ok:true, errMsg:""};
+  }catch(e){
+    return {ok:false, errMsg:"Couldn't save — "+((e && (e.name||"")+": "+(e.message||"")) || "unknown error")};
+  }
+}
+let _adminSaving = false;
+async function saveClientViewChanges(){
+  if(!_adminViewing || _adminSaving) return;
+  _adminSaving = true; render();
+  const {ok, errMsg} = await saveClientStateToCloud();
+  _adminSaving = false;
+  toast(ok ? "Saved changes for "+_adminViewing.name+" — still viewing their profile" : errMsg);
+  render();
+}
 async function saveAndExitClientView(){
   if(!_adminViewing) return;
-  let ok = false, errMsg = "";
-  if(!(await ensureFreshSession())){
-    errMsg = "Your session expired — log back in and try again";
-  } else {
-    try{
-      const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
-        method:"POST",
-        headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ user_id: _adminViewing.id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
-      });
-      ok = res.ok;
-      if(!ok){
-        let detail = "";
-        try{ const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); }catch(e){ try{ detail = await res.text(); }catch(e2){} }
-        errMsg = "Couldn't save (status "+res.status+")"+(detail?": "+detail.slice(0,140):"");
-      }
-    }catch(e){ ok = false; errMsg = "Couldn't save — "+((e && (e.name||"")+": "+(e.message||"")) || "unknown error"); }
-  }
-  exitClientView(ok ? "Saved changes for "+_adminViewing.name : errMsg);
+  const name = _adminViewing.name;
+  const {ok, errMsg} = await saveClientStateToCloud();
+  exitClientView(ok ? "Saved changes for "+name : errMsg);
 }
 function discardExitConfirmHtml(){
   const name = _adminViewing ? _adminViewing.name : "this client";
@@ -2257,7 +2274,7 @@ async function completeCloudLogin(json, displayNameHint){
   let profiles = loadProfiles();
   let p = profiles.find(x=>x.cloudUserId===userId);
   if(!p){
-    p = { id: uid(), firstName: displayNameHint || displayLoginIdentifier(userEmail), lastName:"", nickname:"", emoji:"🙂", pin:null, cloudUserId:userId };
+    p = { id: uid(), firstName: displayNameHint || displayLoginIdentifier(userEmail), lastName:"", nickname:"", emoji:"🙂", cloudUserId:userId };
     profiles.push(p); saveProfiles(profiles);
   }
   activateProfile(p.id);
@@ -2368,7 +2385,37 @@ function newProfileFormHtml(saveAction){
     '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
     '<button class="btn" style="flex:1" data-action="'+saveAction+'">Create Profile</button></div>';
 }
+/* For a cloud admin, "All Profiles" in Settings shows the real client list (same data as the
+   Admin panel) instead of the legacy local-device-only profile switcher, since a cloud admin's
+   actual "everyone" is their client accounts, not other profiles on this one device. */
+function renderAllProfilesSectionAdmin(){
+  if(adminClientList===null){
+    adminClientList = adminClientList || [];
+    Promise.all([loadAdminClientList(), loadAdminPendingList()]).then(([list,pending])=>{
+      adminClientList = list; adminPendingList = pending; render();
+      const ids = list.map(c=>c.id);
+      if(ids.length){ adminListEmails(ids).then(map=>{ adminEmailMap = map; render(); }); }
+      else { adminEmailMap = {}; }
+    });
+    return '<div class="card" style="margin-top:14px;"><h2>📊 All Profiles</h2><p class="hc-meta">Loading your clients…</p></div>';
+  }
+  const clients = (adminClientList||[]).filter(c=>!c.is_admin);
+  let html = '<div class="card" style="margin-top:14px;"><h2>📊 All Profiles</h2>'+
+    '<p class="hc-meta">Your real client accounts — same list as the <a href="#/admin">Admin panel</a>.</p>';
+  if(!clients.length){ html += '<p class="hc-meta">No clients yet — add one from the Admin panel.</p></div>'; return html; }
+  html += clients.map(c=>{
+    const email = adminEmailMap ? adminEmailMap[c.id] : null;
+    const emailIsSynthetic = !!(email && email.endsWith("@impowerup.local"));
+    return '<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">👤</div>'+
+      '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+'</div>'+
+      '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+(email?('✉️ '+escapeHtml(email)+(emailIsSynthetic?' (no real email set)':'')):'')+'</div>'+
+      '<div class="hc-meta">Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div>'+
+      '<button class="btn ghost sm" style="padding:6px 0;" data-action="openAsClient" data-id="'+c.id+'">View full profile →</button></div></div>';
+  }).join("")+'</div>';
+  return html;
+}
 function renderAllProfilesSection(){
+  if(state.profile.isCloudAdmin) return renderAllProfilesSectionAdmin();
   const profiles = loadProfiles();
   const rows = profiles.map(p=>({profile:p, summary:computeProfileSummary(p.id)}));
   let html = '<div class="card" style="margin-top:14px;"><h2>📊 All Profiles</h2><p class="hc-meta">See everyone\'s progress on this device side by side, and add new profiles for them.</p>'+
@@ -2497,19 +2544,18 @@ function checkNewBadges(){
     state.profile.badgesSeen = Array.from(new Set(seen.concat(newOnes.map(b=>b.id))));
     saveState();
     newOnes.forEach(b=>{
-      if(b.major) promptMentorNotify("Milestone Unlocked: "+b.title);
+      if(b.major) promptShareUpdate("Milestone Unlocked: "+b.title);
       else toast("🏅 Badge unlocked: "+b.title);
     });
   }
 }
-function promptMentorNotify(eventTitle){
-  const mentor = state.profile.mentorName ? state.profile.mentorName : "your mentor";
+function promptShareUpdate(eventTitle){
   const code = encodeShareCode(generateShareSnapshot());
   window._lastShareCode = code;
   openModal('<div style="text-align:center;"><div style="font-size:50px;">🎉</div><h2>'+escapeHtml(eventTitle)+'</h2>'+
-    '<p class="hc-meta">Let '+escapeHtml(mentor)+' know! Copy an instant update link to send them (text, email, however you like) — automatic sending isn\'t available offline, but this takes one tap.</p>'+
+    '<p class="hc-meta">Share the moment! Copy an instant update link to send to whoever\'s supporting you — text, email, however you like.</p>'+
     '<div class="modal-actions"><button class="btn secondary" style="flex:1" data-action="closeModal">Later</button>'+
-    '<button class="btn" style="flex:1" data-action="notifyMentorNow">Copy Update Link</button></div></div>');
+    '<button class="btn" style="flex:1" data-action="copyUpdateLink">Copy Update Link</button></div></div>');
 }
 function checkLevelUp(prevXp){
   const newXp = totalPoints();
@@ -3076,7 +3122,9 @@ function render(){
   const adminBanner = _adminViewing ?
     '<div style="position:sticky;top:0;z-index:60;background:var(--danger);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;font-size:13px;">'+
     '<div>🛡️ Viewing as <b>'+escapeHtml(_adminViewing.name)+'</b> — changes save to their account, not yours.</div>'+
-    '<div style="display:flex;gap:8px;"><button class="btn sm" style="background:#fff;color:var(--danger);font-weight:800;" data-action="saveExitClientView">✅ Save &amp; Exit</button>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+    '<button class="btn sm" style="background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.6);color:#fff;box-shadow:none;" data-action="saveClientViewChanges"'+(_adminSaving?' disabled':'')+'>'+(_adminSaving?"Saving…":"💾 Save Changes")+'</button>'+
+    '<button class="btn sm" style="background:#fff;color:var(--danger);font-weight:800;" data-action="saveExitClientView">✅ Save &amp; Exit</button>'+
     '<button class="btn sm" style="background:transparent;border:1px solid rgba(255,255,255,0.6);color:#fff;box-shadow:none;" data-action="confirmDiscardExitClientView">Discard changes…</button></div></div>' : "";
   app.innerHTML = adminBanner + navHtml(route) + '<div class="page">' + body + '</div>';
   if(route !== _lastRenderedRoute) window.scrollTo(0,0);
@@ -3117,7 +3165,7 @@ function renderOnboarding(){
     '<div class="card" style="max-width:420px;width:100%;text-align:center;">'+
     '<div style="width:110px;height:110px;border-radius:24px;overflow:hidden;margin:0 auto 12px;box-shadow:var(--shadow);">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>'+
     '<h1>Welcome to ImpowerUp</h1>'+
-    '<p class="subtitle">Build habits, hit goals, and stay on track — all stored right here on your device.</p>'+
+    '<p class="subtitle">Build habits, hit goals, and stay on track — works fully offline, with an optional account to sync across devices and share with a coach.</p>'+
     '<div class="row-inline" style="text-align:left;"><div class="field"><label>First name</label><input id="onFirst" type="text" placeholder="First name"></div>'+
     '<div class="field"><label>Last name</label><input id="onLast" type="text" placeholder="Last name"></div></div>'+
     '<div class="field" style="text-align:left;"><label>Nickname (optional)</label><input id="onNick" type="text" placeholder="What should we call you?"></div>'+
@@ -5382,19 +5430,8 @@ function generateShareSnapshot(){
     habits: state.habits.filter(h=>h.is_active!==false).map(h=>{ const s=computeStreaks(h); return {title:h.title, emoji:h.emoji, currentStreak:s.current, bestStreak:s.best}; }),
     goals: state.goals.filter(g=>g.status!=="completed").map(g=>({title:g.title, emoji:g.emoji, progress:g.progress||0})),
     proofCount: state.habitLogs.filter(l=>l.proof_photo_url).length + state.goals.filter(g=>g.proof_photo_url).length,
-    messages: (state.mentorMessages||[]).map(m=>({id:m.id, sender:m.sender, text:m.text, at:m.at})),
     generatedAt: new Date().toISOString()
   };
-}
-function mentorMessageThreadHtml(){
-  const msgs = state.mentorMessages||[];
-  if(!msgs.length) return '<p class="hc-meta">No messages yet — write one below, then generate a link to send it.</p>';
-  return msgs.slice().sort((a,b)=>(a.at||"").localeCompare(b.at||"")).map(m=>{
-    const mine = m.sender==="me";
-    return '<div style="display:flex;'+(mine?"justify-content:flex-end;":"justify-content:flex-start;")+'margin-bottom:8px;">'+
-      '<div style="max-width:78%;padding:8px 12px;border-radius:14px;font-size:13px;'+(mine?"background:var(--accent);color:#fff;border-bottom-right-radius:4px;":"background:var(--surface-2);border-bottom-left-radius:4px;")+'">'+
-      escapeHtml(m.text)+'<div style="font-size:10px;opacity:.7;margin-top:3px;">'+(mine?"You":"Mentor")+' · '+fmtDatePretty((m.at||"").slice(0,10))+'</div></div></div>';
-  }).join("");
 }
 function encodeShareCode(snap){ return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(snap))))); }
 function decodeShareCode(code){ try{ return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(code))))); }catch(e){ return null; } }
@@ -5412,29 +5449,13 @@ function renderSharing(embedded){
     '<div class="field"><textarea id="pasteShareCode" placeholder="Paste share code here"></textarea></div>'+
     '<button class="btn secondary block" data-action="previewShareCode">View Shared Progress</button></div>';
 
-  html += '<div class="card" style="margin-top:14px;"><h2>💬 Messages</h2>'+
-    '<p class="hc-meta">Not real-time — this app has no server. Write a note, generate a link above to send it, and when your mentor replies with a reply code, paste it below to see their message here.</p>'+
-    '<div style="margin:10px 0;">'+mentorMessageThreadHtml()+'</div>'+
-    '<div class="field"><textarea id="newMentorMsg" placeholder="Write a note to your mentor…"></textarea></div>'+
-    '<button class="btn secondary sm" data-action="sendMentorMessage">Add Message</button>'+
-    '<div class="field" style="margin-top:14px;"><label>Paste a reply code from your mentor</label><textarea id="pasteReplyCode" placeholder="Paste reply code here"></textarea></div>'+
-    '<button class="btn secondary block" data-action="importMentorReply">Import Reply</button></div>';
-
   const proofItems = [];
   state.habitLogs.filter(l=>l.proof_photo_url).forEach(l=>{ const h=state.habits.find(x=>x.id===l.habit_id); proofItems.push({url:l.proof_photo_url, label:(h?h.title:"Habit")+" · "+fmtDatePretty(l.completed_date)}); });
   state.goals.filter(g=>g.proof_photo_url).forEach(g=>proofItems.push({url:g.proof_photo_url, label:g.title+" · Goal"}));
-  html += '<div class="card" style="margin-top:14px;"><h2>Proof Photo Gallery</h2><p class="hc-meta">Photos live only on this device — a mentor viewing in person can review them here.</p>';
+  html += '<div class="card" style="margin-top:14px;"><h2>Proof Photo Gallery</h2><p class="hc-meta">Photos live only on this device — anyone viewing in person can review them here.</p>';
   if(proofItems.length===0) html += '<div class="empty"><div class="big">📸</div>No proof photos yet.</div>';
   else html += '<div class="proof-grid">'+proofItems.map(p=>'<div class="proof-thumb"><img src="'+p.url+'"><div class="cap">'+escapeHtml(p.label)+'</div></div>').join("")+'</div>';
   html += '</div>';
-
-  html += '<div class="card" style="margin-top:14px;"><h2>Mentor Contact (optional)</h2><p class="hc-meta">Saved locally for your reference. Automatic text/email sending isn\'t available in this offline version — instead, the app prompts you to copy a fresh update link at the right moments.</p>'+
-    '<div class="field"><label>Name</label><input id="mentorName" type="text" value="'+escapeHtml(state.profile.mentorName||"")+'"></div>'+
-    '<div class="row-inline"><div class="field"><label>Email</label><input id="mentorEmail" type="email" value="'+escapeHtml(state.profile.mentorEmail||"")+'"></div>'+
-    '<div class="field"><label>Phone</label><input id="mentorPhone" type="tel" value="'+escapeHtml(state.profile.mentorPhone||"")+'"></div></div>'+
-    '<div class="toggle-row"><div><div style="font-weight:700;font-size:13.5px;">🔔 Prompt to notify on proof photos</div><div class="hc-meta">Also ask to notify your mentor whenever you add a "Prove it" photo, not just for goals/badges.</div></div>'+
-    '<div class="switch '+(state.profile.notifyMentorOnProof?"on":"")+'" data-action="toggleNotifyMentorOnProof"></div></div>'+
-    '<button class="btn secondary sm" style="margin-top:8px;" data-action="saveMentorInfo">Save</button></div>';
   return html;
 }
 
@@ -5499,34 +5520,21 @@ function installAppCardHtml(){
     (window._deferredInstallPrompt?'':'<p class="hc-meta" style="margin-top:6px;">Your browser hasn\'t offered an install prompt yet — try reloading this page, or use your browser\'s menu → "Install app" / "Add to Home screen".</p>')+
     '</div>';
 }
-let notifyAdvancedOpen = false;
 function notificationsCardHtml(){
   const p = state.profile;
   const emailOn = !!p.emailNotifyEnabled;
   const smsOn = !!p.smsNotifyEnabled;
-  const emailConnected = !!p.resendApiKey;
-  const smsConnected = !!(p.twilioAccountSid && p.twilioAuthToken && p.twilioFromNumber);
+  const emailConnected = !!p.notifyEmail;
+  const smsConnected = !!p.notifyPhone;
   let html = '<div class="card" style="margin-top:14px;"><h2>🔔 Notifications</h2>';
 
   html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Email &amp; Text</p>'+
-    '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device.</p>'+
+    '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device. Delivery runs through ImpowerUp\'s shared email/text provider, so there\'s nothing for you to connect — just add your contact info below.</p>'+
     '<div class="row-inline" style="margin-top:10px;"><div class="field"><label>Notification email</label><input id="set_notifyEmail" type="email" placeholder="you@example.com" value="'+escapeHtml(p.notifyEmail||"")+'"></div>'+
     '<div class="field"><label>Notification phone</label><input id="set_notifyPhone" type="tel" placeholder="+1 555 123 4567" value="'+escapeHtml(p.notifyPhone||"")+'"></div></div>'+
     '<button class="btn secondary sm" data-action="saveNotifyContact" style="margin-top:4px;">Save contact info</button>'+
-    '<div class="toggle-row" style="padding:10px 0 4px;"><div><div style="font-weight:700;font-size:13px;">✉️ Email notifications</div><div class="hc-meta" style="margin-top:2px;">'+(emailConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(emailOn?"on":"")+'" data-action="toggleEmailNotify"></div></div>'+
-    '<div class="toggle-row" style="padding:4px 0 4px;"><div><div style="font-weight:700;font-size:13px;">📱 Text notifications</div><div class="hc-meta" style="margin-top:2px;">'+(smsConnected?"Ready to send":"Requires a connected provider below")+'</div></div><div class="switch '+(smsOn?"on":"")+'" data-action="toggleSmsNotify"></div></div>'+
-    '<button class="btn ghost sm" style="margin-top:8px;" data-action="toggleNotifyAdvanced">'+(notifyAdvancedOpen?"▲ Hide provider setup":"▼ Provider setup (advanced)")+'</button>'+
-    '<div id="notifyAdvancedBlock" style="'+(notifyAdvancedOpen?"":"display:none;")+'margin-top:10px;">'+
-      '<div class="hc-meta" style="margin-bottom:8px;">These keys stay on this device (and your optional cloud sync) — never shared elsewhere. Paste them in once you\'ve signed up with a provider and sending becomes fully automatic, no rebuild needed.</div>'+
-      '<p class="hc-meta" style="font-weight:700;">Email — Resend (resend.com)</p>'+
-      '<div class="field"><label>API key</label><input id="set_resendKey" type="password" placeholder="re_xxxxxxxx" value="'+escapeHtml(p.resendApiKey||"")+'"></div>'+
-      '<div class="field"><label>From address</label><input id="set_resendFrom" type="email" placeholder="alerts@yourdomain.com" value="'+escapeHtml(p.resendFromEmail||"")+'"></div>'+
-      '<p class="hc-meta" style="font-weight:700;margin-top:10px;">Text — Twilio (twilio.com)</p>'+
-      '<div class="field"><label>Account SID</label><input id="set_twilioSid" type="password" placeholder="ACxxxxxxxx" value="'+escapeHtml(p.twilioAccountSid||"")+'"></div>'+
-      '<div class="field"><label>Auth token</label><input id="set_twilioToken" type="password" value="'+escapeHtml(p.twilioAuthToken||"")+'"></div>'+
-      '<div class="field"><label>From number</label><input id="set_twilioFrom" type="tel" placeholder="+15551234567" value="'+escapeHtml(p.twilioFromNumber||"")+'"></div>'+
-      '<button class="btn secondary sm" data-action="saveNotifyProviders">Save provider keys</button>'+
-    '</div>';
+    '<div class="toggle-row" style="padding:10px 0 4px;"><div><div style="font-weight:700;font-size:13px;">✉️ Email notifications</div><div class="hc-meta" style="margin-top:2px;">'+(emailConnected?"Ready to send":"Add a notification email above first")+'</div></div><div class="switch '+(emailOn?"on":"")+'" data-action="toggleEmailNotify"></div></div>'+
+    '<div class="toggle-row" style="padding:4px 0 4px;"><div><div style="font-weight:700;font-size:13px;">📱 Text notifications</div><div class="hc-meta" style="margin-top:2px;">'+(smsConnected?"Ready to send":"Add a notification phone above first")+'</div></div><div class="switch '+(smsOn?"on":"")+'" data-action="toggleSmsNotify"></div></div>';
 
   const notifSupported = ("Notification" in window);
   const notifPerm = notifSupported ? Notification.permission : "unsupported";
@@ -5539,13 +5547,10 @@ function notificationsCardHtml(){
       (notifPerm!=="granted" ? '<button class="btn secondary block" data-action="requestNotificationPermission">Enable Phone Notifications</button>' : ''));
 
   html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
-  html += '<p class="hc-meta" style="font-weight:700;">🔁 Background Push (optional)</p>'+
-    '<p class="hc-meta">Deliver alerts even when the app is fully closed. Needs a small free Supabase backend — see supabase-schema.sql and send-scheduled-alerts.ts. Paste your project\'s URL and anon key here once it\'s deployed.</p>'+
-    '<div class="field"><label>Supabase Project URL</label><input id="set_sbUrl" type="text" placeholder="https://xxxx.supabase.co" value="'+escapeHtml(state.profile.supabaseUrl||"")+'"></div>'+
-    '<div class="field"><label>Supabase anon key</label><input id="set_sbKey" type="text" placeholder="eyJhbGciOi..." value="'+escapeHtml(state.profile.supabaseAnonKey||"")+'"></div>'+
-    '<button class="btn secondary sm" data-action="saveSupabaseConfig">Save</button> '+
-    (state.profile.pushEnabled ? '<span class="tag" style="margin-left:8px;">Background push connected ✅</span>' :
-      '<button class="btn sm" style="margin-left:8px;" data-action="requestNotificationPermission">Connect</button>');
+  html += '<p class="hc-meta" style="font-weight:700;">🔁 Background Push</p>'+
+    '<p class="hc-meta">Deliver alerts even when the app is fully closed — runs automatically through ImpowerUp\'s backend once you enable Phone Notifications above, nothing to set up.</p>'+
+    (state.profile.pushEnabled ? '<span class="tag">Background push connected ✅</span>' :
+      '<button class="btn sm" data-action="requestNotificationPermission">Connect</button>');
 
   html += '</div>';
   return html;
@@ -6521,17 +6526,6 @@ document.addEventListener("click", async function(e){
     }
     case "toggleEmailNotify": { state.profile.emailNotifyEnabled = !state.profile.emailNotifyEnabled; saveState(); render(); break; }
     case "toggleSmsNotify": { state.profile.smsNotifyEnabled = !state.profile.smsNotifyEnabled; saveState(); render(); break; }
-    case "toggleNotifyAdvanced": { notifyAdvancedOpen = !notifyAdvancedOpen; render(); break; }
-    case "saveNotifyProviders": {
-      state.profile.resendApiKey = document.getElementById("set_resendKey").value.trim();
-      state.profile.resendFromEmail = document.getElementById("set_resendFrom").value.trim();
-      state.profile.twilioAccountSid = document.getElementById("set_twilioSid").value.trim();
-      state.profile.twilioAuthToken = document.getElementById("set_twilioToken").value.trim();
-      state.profile.twilioFromNumber = document.getElementById("set_twilioFrom").value.trim();
-      saveState(); render();
-      toast("Provider keys saved");
-      break;
-    }
     case "connectGoogleCalendar": {
       const key = ensureGoogleSyncKey();
       location.href = GOOGLE_CONNECT_URL + "?key=" + encodeURIComponent(key);
@@ -6925,7 +6919,7 @@ document.addEventListener("click", async function(e){
       saveState(); closeModal(); render();
       toast("Goal saved");
       checkNewBadges();
-      if(goalObj.status==="completed" && !wasCompleted) promptMentorNotify("Goal Complete: "+goalObj.title);
+      if(goalObj.status==="completed" && !wasCompleted) promptShareUpdate("Goal Complete: "+goalObj.title);
       break;
     }
     case "duplicateGoal": {
@@ -6960,7 +6954,7 @@ document.addEventListener("click", async function(e){
       if(g.progress===100) g.status = "completed";
       saveState(); render();
       checkNewBadges();
-      if(g.status==="completed" && !wasCompleted) promptMentorNotify("Goal Complete: "+g.title);
+      if(g.status==="completed" && !wasCompleted) promptShareUpdate("Goal Complete: "+g.title);
       break;
     }
 
@@ -7643,71 +7637,15 @@ document.addEventListener("click", async function(e){
       location.hash = "#share="+code;
       break;
     }
-    case "sendMentorMessage": {
-      const text = document.getElementById("newMentorMsg").value.trim();
-      if(!text) return;
-      state.mentorMessages = state.mentorMessages || [];
-      state.mentorMessages.push({id:uid(), sender:"me", text, at:new Date().toISOString()});
-      saveState(); render();
-      toast("Added — generate a link above to send it");
-      break;
-    }
-    case "importMentorReply": {
-      const code = document.getElementById("pasteReplyCode").value.trim();
-      if(!code){ toast("Paste a reply code first"); return; }
-      const decoded = decodeShareCode(code);
-      if(!decoded || !decoded.messages){ toast("That code doesn't look like a valid reply"); return; }
-      state.mentorMessages = state.mentorMessages || [];
-      const existingIds = new Set(state.mentorMessages.map(m=>m.id));
-      let added = 0;
-      decoded.messages.forEach(m=>{ if(m.sender==="mentor" && !existingIds.has(m.id)){ state.mentorMessages.push(m); added++; } });
-      saveState(); render();
-      toast(added ? added+" new message(s) imported" : "No new messages found in that code");
-      break;
-    }
-    case "genMentorReplyCode": {
-      const origCode = t.getAttribute("data-code");
-      const snap = decodeShareCode(origCode);
-      if(!snap){ toast("Something went wrong"); return; }
-      const replyTextEl = document.getElementById("mentorReplyText");
-      const replyText = replyTextEl ? replyTextEl.value.trim() : "";
-      if(!replyText){ toast("Write a reply first"); return; }
-      const newMsg = {id:uid(), sender:"mentor", text:replyText, at:new Date().toISOString()};
-      const replyPackage = {isReply:true, name:snap.name, messages:(snap.messages||[]).concat([newMsg])};
-      const replyCode = encodeShareCode(replyPackage);
-      document.getElementById("mentorReplyOutput").style.display="block";
-      document.getElementById("mentorReplyCodeBox").value = replyCode;
-      toast("Reply code generated — copy and send it back");
-      break;
-    }
-    case "copyMentorReplyCode": {
-      const box = document.getElementById("mentorReplyCodeBox");
-      box.select();
-      try{ document.execCommand("copy"); toast("Copied!"); }catch(err){ fallbackCopyText(box.value); }
-      break;
-    }
-    case "notifyMentorNow": {
+    case "copyUpdateLink": {
       const code = window._lastShareCode;
       if(!code){ toast("Nothing to share yet"); closeModal(); return; }
       const url = location.href.split("#")[0] + "#share=" + code;
-      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(()=>toast("Link copied — send it to your mentor!")).catch(()=>fallbackCopyText(url));
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(()=>toast("Link copied!")).catch(()=>fallbackCopyText(url));
       else fallbackCopyText(url);
       closeModal();
       break;
     }
-    case "toggleNotifyMentorOnProof": {
-      state.profile.notifyMentorOnProof = !state.profile.notifyMentorOnProof;
-      saveState(); render();
-      break;
-    }
-    case "saveMentorInfo": {
-      state.profile.mentorName = document.getElementById("mentorName").value.trim();
-      state.profile.mentorEmail = document.getElementById("mentorEmail").value.trim();
-      state.profile.mentorPhone = document.getElementById("mentorPhone").value.trim();
-      saveState(); toast("Saved");
-      break;
-    }
-
     case "saveName": {
       state.profile.firstName = document.getElementById("set_first").value.trim();
       state.profile.lastName = document.getElementById("set_last").value.trim();
@@ -8071,6 +8009,7 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openAsClient": await openAsClient(id); break;
+    case "saveClientViewChanges": await saveClientViewChanges(); break;
     case "saveExitClientView": await saveAndExitClientView(); break;
     case "confirmDiscardExitClientView": openModal(discardExitConfirmHtml()); break;
     case "discardExitClientView": { const n=_adminViewing?_adminViewing.name:""; closeModal(); exitClientView("Discarded — nothing was saved for "+n); break; }
@@ -8113,12 +8052,6 @@ document.addEventListener("click", async function(e){
     case "pickAlertSound": { state.profile.alertSound = v; saveState(); render(); previewAlertSound(v); break; }
     case "pickDefaultSnooze": { state.profile.defaultSnoozeMinutes = Number(v)||5; saveState(); render(); break; }
     case "requestNotificationPermission": requestNotificationPermission(); break;
-    case "saveSupabaseConfig": {
-      state.profile.supabaseUrl = document.getElementById("set_sbUrl").value.trim();
-      state.profile.supabaseAnonKey = document.getElementById("set_sbKey").value.trim();
-      saveState(); toast("Saved"); render();
-      break;
-    }
     case "deleteCustomCategory": {
       state.customCategories = (state.customCategories||[]).filter(c=>c.v!==id);
       saveState(); render();
@@ -8317,9 +8250,6 @@ document.addEventListener("change", function(e){
             toast("Proof photo added");
             checkNewBadges();
           }
-          if(state.profile.notifyMentorOnProof && state.profile.mentorName){
-            promptMentorNotify("Proof added: "+h.title);
-          }
         }
       }
       window._proofTarget = null;
@@ -8385,24 +8315,6 @@ function renderMentorView(code){
   }
   if(snap.proofCount){
     html += '<div class="card" style="margin-top:16px;text-align:center;">📸 '+snap.proofCount+' proof photo(s) attached — viewable in person on their device under Sharing.</div>';
-  }
-  if(!snap.isReply){
-    html += '<div class="card" style="margin-top:16px;"><h2>💬 Messages</h2>';
-    if(snap.messages && snap.messages.length){
-      html += '<div style="margin-bottom:10px;">'+snap.messages.slice().sort((a,b)=>(a.at||"").localeCompare(b.at||"")).map(m=>{
-        const fromOwner = m.sender==="me";
-        return '<div style="display:flex;'+(fromOwner?"justify-content:flex-start;":"justify-content:flex-end;")+'margin-bottom:8px;">'+
-          '<div style="max-width:78%;padding:8px 12px;border-radius:14px;font-size:13px;'+(fromOwner?"background:var(--surface-2);border-bottom-left-radius:4px;":"background:var(--accent);color:#fff;border-bottom-right-radius:4px;")+'">'+
-          escapeHtml(m.text)+'<div style="font-size:10px;opacity:.7;margin-top:3px;">'+(fromOwner?escapeHtml(snap.name||"Them"):"You")+'</div></div></div>';
-      }).join("")+'</div>';
-    } else {
-      html += '<p class="hc-meta">No messages yet.</p>';
-    }
-    html += '<div class="field"><textarea id="mentorReplyText" placeholder="Write a reply…"></textarea></div>'+
-      '<button class="btn block" data-action="genMentorReplyCode" data-code="'+code+'">Generate Reply Code</button>'+
-      '<div id="mentorReplyOutput" style="display:none;margin-top:10px;"><div class="field"><label>Reply Code — copy and send this back to '+escapeHtml(snap.name||"them")+'</label><textarea id="mentorReplyCodeBox" readonly></textarea></div>'+
-      '<button class="btn secondary block" data-action="copyMentorReplyCode">Copy Reply Code</button></div>'+
-      '</div>';
   }
   html += '<div class="card" style="margin-top:16px;text-align:center;"><p class="hc-meta">This is a private one-time snapshot — it won\'t update automatically. Ask '+escapeHtml(snap.name||"them")+' to send a fresh link anytime for the latest progress.</p></div>';
   html += '</div>';
