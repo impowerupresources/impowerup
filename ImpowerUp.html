@@ -7888,6 +7888,20 @@ document.addEventListener("click", async function(e){
   }
 });
 
+/* Color wheel inputs: update the picked color live on "input" (fires continuously while
+   dragging) in addition to "change" (which some browsers only fire once the native color
+   picker fully closes) — otherwise a quick pick-then-Save can grab a stale value. */
+function clearSwatchSelection(actionName){
+  document.querySelectorAll('[data-action="'+actionName+'"]').forEach(s=>s.classList.remove("selected"));
+}
+document.addEventListener("input", function(e){
+  if(e.target.id === "cls_colorWheel"){ classFormColor = e.target.value; clearSwatchSelection("pickClassColor"); return; }
+  if(e.target.id === "r_colorWheel"){ reminderFormColor = e.target.value; clearSwatchSelection("pickRColor"); return; }
+  if(e.target.id === "ce_colorWheel"){ ceFormColor = e.target.value; clearSwatchSelection("pickCEColor"); return; }
+  if(e.target.id === "tsk_colorWheel"){ taskFormColor = e.target.value; clearSwatchSelection("pickTaskColor"); return; }
+  if(e.target.id === "customAccentPicker"){ state.profile.accent = e.target.value; saveState(); applyTheme(); return; }
+  if(e.target.id === "customAccentPicker2"){ state.profile.accent2 = e.target.value; saveState(); applyTheme(); return; }
+});
 document.addEventListener("change", function(e){
   if(e.target.id === "importIcsFile"){
     const file = e.target.files[0];
