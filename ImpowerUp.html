@@ -1218,6 +1218,90 @@ function aiClientInsightsModalHtml(client){
     '<div class="modal-actions" style="margin-top:14px;"><button class="btn secondary" style="flex:1" data-action="closeModal">Close</button>'+
     '<button class="btn" style="flex:1" data-action="generateAiClientInsights" data-id="'+client.id+'"'+(_aiClientInsightsLoading?' disabled':'')+'>'+(_aiClientInsightsLoading?"Thinking…":(hasInsights?"↻ Regenerate":"Generate"))+'</button></div>';
 }
+/* Admin-facing version history browser — lists past snapshots of a client's data (captured
+   automatically by snapshotCloudStateHistory before every overwrite) and lets the admin restore
+   one. */
+let _clientHistoryList = null;
+let _clientHistoryLoading = false;
+let _clientHistoryClient = null;
+function historySummaryLine(stateJson){
+  if(!stateJson) return "";
+  const n = arr => Array.isArray(arr) ? arr.length : 0;
+  return n(stateJson.tasks)+" tasks · "+n(stateJson.habits)+" habits · "+n(stateJson.goals)+" goals · "+n(stateJson.customEvents)+" events";
+}
+function clientHistoryModalHtml(){
+  const name = _clientHistoryClient ? _clientHistoryClient.name : "this client";
+  let html = '<h2>🕘 History — '+escapeHtml(name)+'</h2>'+
+    '<p class="hc-meta">Snapshots captured automatically every time this client\'s data was saved — restoring replaces their current data with the version shown (today\'s live data is snapshotted first, so restoring is itself undoable).</p>';
+  if(_clientHistoryLoading){
+    html += '<div class="empty"><div class="big">⏳</div>Loading versions…</div>';
+  } else if(!_clientHistoryList || !_clientHistoryList.length){
+    html += '<p class="hc-meta">No earlier versions saved yet for this client — history starts building from their next save.</p>';
+  } else {
+    html += '<div style="max-height:360px;overflow-y:auto;">'+_clientHistoryList.map(row=>{
+      const when = new Date(row.created_at).toLocaleString();
+      return '<div class="habit-card" style="align-items:flex-start;">'+
+        '<div class="emoji-badge" style="background:var(--surface-2)">🕘</div>'+
+        '<div class="hc-body"><div class="hc-title">'+escapeHtml(when)+'</div>'+
+        '<div class="hc-meta">'+historySummaryLine(row.state_json)+'</div></div>'+
+        '<button class="btn secondary sm" data-action="confirmRestoreClientHistory" data-id="'+row.id+'">Restore</button>'+
+        '</div>';
+    }).join("")+'</div>';
+  }
+  html += '<button class="btn ghost sm block" style="margin-top:10px;" data-action="closeModal">Close</button>';
+  return html;
+}
+async function openClientHistory(clientId, clientName){
+  _clientHistoryClient = {id:clientId, name:clientName};
+  _clientHistoryList = null;
+  _clientHistoryLoading = true;
+  openModal(clientHistoryModalHtml());
+  try{
+    if(!(await ensureFreshSession())){ toast("Session expired — log back in"); _clientHistoryLoading=false; openModal(clientHistoryModalHtml()); return; }
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state_history?user_id=eq."+clientId+"&select=id,created_at,state_json&order=created_at.desc&limit=50", {headers: acctHeaders(true)});
+    _clientHistoryList = res.ok ? await res.json() : [];
+  }catch(e){ _clientHistoryList = []; }
+  _clientHistoryLoading = false;
+  openModal(clientHistoryModalHtml());
+}
+function confirmRestoreClientHistoryHtml(historyId){
+  const row = (_clientHistoryList||[]).find(r=>r.id===historyId);
+  const when = row ? new Date(row.created_at).toLocaleString() : "this version";
+  return '<h2>⚠️ Restore this version?</h2>'+
+    '<p class="hc-meta">This replaces <b>'+escapeHtml(_clientHistoryClient?_clientHistoryClient.name:"this client")+'</b>\'s current data with the version from <b>'+escapeHtml(when)+'</b>. Their data right now is snapshotted first, so this can be undone by restoring again afterward.</p>'+
+    '<div class="modal-actions" style="margin-top:14px;"><button class="btn secondary" style="flex:1" data-action="openClientHistory" data-id="'+(_clientHistoryClient?_clientHistoryClient.id:"")+'" data-v="'+escapeHtml(_clientHistoryClient?_clientHistoryClient.name:"")+'">Cancel — go back</button>'+
+    '<button class="btn sm" style="flex:1;background:var(--danger);color:#fff;" data-action="restoreClientHistory" data-id="'+historyId+'">Yes, restore it</button></div>';
+}
+async function restoreClientHistoryVersion(historyId){
+  const row = (_clientHistoryList||[]).find(r=>r.id===historyId);
+  const client = _clientHistoryClient;
+  if(!row || !client){ toast("Couldn't find that version"); return; }
+  if(!(await ensureFreshSession())){ toast("Session expired — log back in"); return; }
+  try{
+    await snapshotCloudStateHistory(client.id);
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
+      method:"POST",
+      headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
+      body: JSON.stringify({ user_id: client.id, state_json: row.state_json, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok){ toast("Couldn't restore — try again"); return; }
+    if(_adminViewing && _adminViewing.id===client.id){
+      // Currently browsing this exact client as admin — refresh the in-memory view to match
+      // what was just restored, same shape openAsClient builds (admin's own session preserved).
+      const adminSession = state.profile.cloudSession, adminIsAdmin = state.profile.isCloudAdmin;
+      const fresh = defaultState();
+      const snap = row.state_json;
+      state = snap ? Object.assign(fresh, snap) : fresh;
+      state.profile = Object.assign(defaultState().profile, (snap&&snap.profile)||{});
+      migrateCheckInsToSeparateLogs(state);
+      state.profile.cloudSession = adminSession;
+      state.profile.isCloudAdmin = adminIsAdmin;
+    }
+    closeModal();
+    render();
+    toast("Restored "+client.name+"'s data from "+new Date(row.created_at).toLocaleString());
+  }catch(e){ toast("Couldn't restore — "+(e.message||"unknown error")); }
+}
 function openAiClientInsights(clientId){
   const client = (adminClientList||[]).find(c=>c.id===clientId);
   if(!client){ toast("Couldn't find that client"); return; }
@@ -1445,10 +1529,31 @@ function serializableStateSnapshot(){
   if(copy.profile) delete copy.profile.cloudSession;
   return copy;
 }
+/* Before any cloud overwrite, copy whatever's currently live into app_cloud_state_history so it
+   can be browsed/restored later (Admin → client card → 🕘 History). Best-effort: a failure here
+   never blocks the actual save. Also prunes anything older than 30 days for that user so the
+   table doesn't grow unbounded. */
+async function snapshotCloudStateHistory(userId){
+  try{
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+userId+"&select=state_json,updated_at", {headers: acctHeaders(true)});
+    if(!res.ok) return;
+    const rows = await res.json();
+    const row = rows[0];
+    if(!row || !row.state_json) return;
+    await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state_history", {
+      method:"POST",
+      headers: acctHeaders(true),
+      body: JSON.stringify({ user_id:userId, state_json: row.state_json, created_at: row.updated_at || new Date().toISOString() })
+    });
+    const cutoff = new Date(Date.now()-30*24*60*60*1000).toISOString();
+    fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state_history?user_id=eq."+userId+"&created_at=lt."+encodeURIComponent(cutoff), {method:"DELETE", headers: acctHeaders(true)}).catch(()=>{});
+  }catch(e){}
+}
 async function syncStateToCloud(){
   if(!state.profile.cloudSession || !state.profile.cloudSyncEnabled) return false;
   if(!(await ensureFreshSession())) return false;
   try{
+    await snapshotCloudStateHistory(state.profile.cloudSession.user_id);
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
       method:"POST",
       headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
@@ -1536,6 +1641,7 @@ function renderAdmin(){
     '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+(email?('✉️ '+escapeHtml(email)+(emailIsSynthetic?' (no real email set)':'')+' · '):(adminEmailMap?'':'✉️ …'+' · '))+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
     (c.is_admin?'':'<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>'+
     '<button class="btn ghost sm" data-action="openAiClientInsights" data-id="'+c.id+'">✨ Insights</button>'+
+    '<button class="btn ghost sm" data-action="openClientHistory" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🕘 History</button>'+
     '<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username?("@"+c.username):(c.display_name||""))+'">🔑 Reset Password</button>'+
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
     '<button class="btn ghost sm" style="color:var(--danger);" data-action="adminDeleteClient" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🗑️ Delete</button>'+
@@ -1645,6 +1751,7 @@ async function saveClientStateToCloud(){
     return {ok:false, errMsg:"Your session expired — log back in and try again"};
   }
   try{
+    await snapshotCloudStateHistory(_adminViewing.id);
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
       method:"POST",
       headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
@@ -3351,10 +3458,10 @@ function subtaskProgressBadgeHtml(t){
 function subtaskChecklistHtml(t){
   const subs = t.subtasks||[];
   if(!subs.length) return "";
-  return '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">'+subs.map((s,i)=>
-    '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">'+
-    '<input type="checkbox" '+(s.done?"checked":"")+' data-action="toggleSubtask" data-id="'+t.id+'" data-idx="'+i+'" style="width:16px;height:16px;flex:0 0 auto;">'+
-    '<span style="'+(s.done?"text-decoration:line-through;color:var(--text-muted);":"")+'">'+escapeHtml(s.title)+'</span></label>').join("")+'</div>';
+  return '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">'+subs.map((s,i)=>
+    '<label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;">'+
+    '<input type="checkbox" '+(s.done?"checked":"")+' data-action="toggleSubtask" data-id="'+t.id+'" data-idx="'+i+'" style="width:16px;height:16px;flex:0 0 auto;margin-top:2px;">'+
+    '<span style="white-space:normal;overflow-wrap:break-word;word-break:break-word;line-height:1.4;'+(s.done?"text-decoration:line-through;color:var(--text-muted);":"")+'">'+escapeHtml(s.title)+'</span></label>').join("")+'</div>';
 }
 function taskRow(t){
   const cat = t.category ? catInfo(t.category) : null;
@@ -3765,7 +3872,7 @@ function renderPlannerWeek(){
     '<button class="icon-btn" data-action="toggleWeekGlanceView" title="'+(view==="horizontal"?"Switch to vertical view":"Switch to horizontal view")+'">'+(view==="horizontal"?"☰":"▦")+'</button>'+
     '</div></div>';
   if(view==="vertical"){
-    html += '<div class="card week-glance-vert">';
+    html += '<div class="grid week-glance-cols" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:start;">';
     for(let i=0;i<7;i++){
       const d2 = addDays(weekStart, i);
       const items = getDayTimelineItems(d2);
@@ -3773,14 +3880,19 @@ function renderPlannerWeek(){
       const habitCount = items.filter(it=>it.type==="habit").length;
       const tmpl = getTemplateForDate(d2);
       const [yy,mm,ddd] = d2.split("-").map(Number);
-      const namesPreview = items.slice(0,4).map(it=>it.emoji+" "+it.label).join("  •  ") || "Nothing scheduled";
-      html += '<div class="wg-row '+(d2===todayStr()?"today":"")+'" style="'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
-        '<div class="wg-daycol"><div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
-        '<div style="font-weight:800;font-size:16px;">'+ddd+'</div>'+
-        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+dayLetterBadgeHtml(d2,"sm")+plannerHolidayBadgeHtml(d2,"sm")+'</div>'+
-        '<div class="wg-list">'+escapeHtml(namesPreview)+'</div>'+
-        (habitCount?'<div style="font-size:11px;color:var(--text-muted);flex-shrink:0;">'+doneCount+'/'+habitCount+'</div>':'')+
-        '<div class="expand-ic" style="position:static;font-size:11px;opacity:.6;" data-action="expandDayPreview" data-v="'+d2+'">🔍</div>'+
+      const itemsHtml = items.length ? items.map(it=>
+        '<div style="font-size:11px;line-height:1.35;white-space:normal;overflow-wrap:break-word;word-break:break-word;margin-bottom:4px;text-align:left;">'+(it.emoji||"")+' '+escapeHtml(it.label||"")+'</div>'
+      ).join("") : '<div style="font-size:11px;color:var(--text-muted);text-align:left;">Nothing scheduled</div>';
+      html += '<div class="card '+(d2===todayStr()?"today":"")+'" style="padding:8px 6px;cursor:pointer;min-width:0;'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;">'+
+        '<div><div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
+        '<div style="font-weight:800;font-size:15px;">'+ddd+'</div></div>'+
+        '<div class="expand-ic" style="position:static;font-size:11px;opacity:.6;flex-shrink:0;" data-action="expandDayPreview" data-v="'+d2+'">🔍</div>'+
+        '</div>'+
+        (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+
+        '<div style="margin:2px 0;">'+dayLetterBadgeHtml(d2,"sm")+plannerHolidayBadgeHtml(d2,"sm")+'</div>'+
+        '<div style="margin-top:4px;">'+itemsHtml+'</div>'+
+        (habitCount?'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+doneCount+'/'+habitCount+'</div>':'')+
         '</div>';
     }
     html += '</div>';
@@ -8009,6 +8121,9 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openAsClient": await openAsClient(id); break;
+    case "openClientHistory": await openClientHistory(id, v); break;
+    case "confirmRestoreClientHistory": openModal(confirmRestoreClientHistoryHtml(id)); break;
+    case "restoreClientHistory": await restoreClientHistoryVersion(id); break;
     case "saveClientViewChanges": await saveClientViewChanges(); break;
     case "saveExitClientView": await saveAndExitClientView(); break;
     case "confirmDiscardExitClientView": openModal(discardExitConfirmHtml()); break;
