@@ -1608,7 +1608,7 @@ async function loadAdminPendingList(){
   }catch(e){ return []; }
 }
 function renderAdmin(){
-  if(!state.profile.isCloudAdmin) return renderHome();
+  if(!state.profile.isCloudAdmin || _adminViewing) return renderHome();
   if(adminClientList===null || adminPendingList===null){
     adminClientList = adminClientList || []; adminPendingList = adminPendingList || [];
     Promise.all([loadAdminClientList(), loadAdminPendingList()]).then(([list,pending])=>{
@@ -2539,7 +2539,7 @@ function renderAllProfilesSectionAdmin(){
   return html;
 }
 function renderAllProfilesSection(){
-  if(state.profile.isCloudAdmin) return renderAllProfilesSectionAdmin();
+  if(state.profile.isCloudAdmin && !_adminViewing) return renderAllProfilesSectionAdmin();
   const profiles = loadProfiles();
   const rows = profiles.map(p=>({profile:p, summary:computeProfileSummary(p.id)}));
   let html = '<div class="card" style="margin-top:14px;"><h2>📊 All Profiles</h2><p class="hc-meta">See everyone\'s progress on this device side by side, and add new profiles for them.</p>'+
@@ -3107,7 +3107,7 @@ function navIconFor(path){ return NAV_ICONS[path] || ''; }
 function computeNavRouteList(active){
   maybeCheckHasAnyAssessment();
   let routeList = ROUTES.filter(r=>r.path!=="assessments" || active==="assessments" || _hasAnyAssessment===true);
-  if(state && state.profile && state.profile.isCloudAdmin) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
+  if(state && state.profile && state.profile.isCloudAdmin && !_adminViewing) routeList = routeList.concat([{path:"admin", label:"Admin", icon:"🛡️"}]);
   return getOrderedRouteList(routeList);
 }
 const BOTTOM_NAV_PRIMARY_COUNT = 4;
@@ -4286,9 +4286,10 @@ function scheduleSettingsCardHtml(){
    it — nothing is saved to any date until the person confirms on the review screen. ---- */
 let _ocrStep = "upload";
 let _ocrLoading = false;
+let _ocrLoadingProgress = "";
 let _ocrDays = []; // [{date, code, note}]
 let _ocrCodeMap = {}; // code string -> template id ("" = skip / no school)
-function resetScheduleOcr(){ _ocrStep = "upload"; _ocrLoading = false; _ocrDays = []; _ocrCodeMap = {}; }
+function resetScheduleOcr(){ _ocrStep = "upload"; _ocrLoading = false; _ocrLoadingProgress = ""; _ocrDays = []; _ocrCodeMap = {}; }
 function fileToBase64(file){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -4316,12 +4317,12 @@ function uniqueOcrCodes(){
 function scheduleOcrModalHtml(){
   if(_ocrStep==="upload"){
     return '<h2>📷 Import Schedule from a Photo</h2>'+
-      '<p class="hc-meta">Upload one photo of a printed or handwritten class calendar. Works best with a clear, well-lit shot showing the date grid and each day\'s code.</p>'+
-      '<div class="field" style="margin-top:10px;"><input type="file" id="ocr_file" accept="image/*"></div>'+
-      (_ocrDays.length ? '<p class="hc-meta" style="margin-top:6px;">Already have '+_ocrDays.length+' day'+(_ocrDays.length===1?"":"s")+' scanned — this photo will add to them.</p>' : "")+
+      '<p class="hc-meta">Upload one or more photos of a printed or handwritten class calendar — e.g. one per week or month. Works best with clear, well-lit shots showing the date grid and each day\'s code.</p>'+
+      '<div class="field" style="margin-top:10px;"><input type="file" id="ocr_file" accept="image/*" multiple></div>'+
+      (_ocrDays.length ? '<p class="hc-meta" style="margin-top:6px;">Already have '+_ocrDays.length+' day'+(_ocrDays.length===1?"":"s")+' scanned — these photos will add to them.</p>' : "")+
       '<div class="modal-actions" style="margin-top:10px;">'+
       '<button class="btn secondary" style="flex:1" data-action="closeModal">Cancel</button>'+
-      '<button class="btn" style="flex:1" data-action="scanSchedulePhoto"'+(_ocrLoading?' disabled':'')+'>'+(_ocrLoading?"Reading photo…":"Scan Photo")+'</button></div>'+
+      '<button class="btn" style="flex:1" data-action="scanSchedulePhoto"'+(_ocrLoading?' disabled':'')+'>'+(_ocrLoading?(_ocrLoadingProgress||"Reading photo…"):"Scan Photo(s)")+'</button></div>'+
       (_ocrDays.length ? '<button class="btn ghost sm block" style="margin-top:8px;" data-action="finishScheduleOcrUpload">Skip — review what I have</button>' : "");
   }
   // review step
@@ -5694,12 +5695,16 @@ function accountCardHtml(){
       '<p class="hc-meta">Optional — log in with the username/password your coach set up so they can view your progress, or sync your data across devices. Nothing changes if you skip this; the app keeps working fully offline.</p>'+
       '<div class="modal-actions" style="margin-top:8px;"><button class="btn" style="flex:1" data-action="openAccountForm" data-v="login">Log In</button></div></div>';
   }
+  const viewingAsClient = !!_adminViewing;
   return '<div class="card" style="margin-top:14px;"><h2>🔐 Account &amp; Cloud Sync</h2>'+
-    '<p class="hc-meta">Signed in as <b>'+escapeHtml(displayLoginIdentifier(sess.email))+'</b>'+(state.profile.isCloudAdmin?' <span class="tag">Admin</span>':'')+'</p>'+
+    (viewingAsClient
+      ? '<p class="hc-meta">Cloud account connected.</p>'
+      : '<p class="hc-meta">Signed in as <b>'+escapeHtml(displayLoginIdentifier(sess.email))+'</b>'+(state.profile.isCloudAdmin?' <span class="tag">Admin</span>':'')+'</p>')+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">☁️ Sync this profile\'s data to the cloud</div><div class="switch '+(state.profile.cloudSyncEnabled?"on":"")+'" data-action="toggleCloudSync"></div></div>'+
     '<p class="hc-meta">'+(state.profile.cloudSyncEnabled ? ("Last synced: "+(state.profile.lastCloudSync ? new Date(state.profile.lastCloudSync).toLocaleString() : "not yet")) : "Turn this on so your mentor can see your progress.")+'</p>'+
     (state.profile.cloudSyncEnabled?'<button class="btn secondary sm block" style="margin-top:8px;" data-action="syncNowCloud">Sync Now</button>':'')+
-    '<button class="btn danger block" style="margin-top:10px;font-size:15px;padding:13px;" data-action="doLogOut">🚪 Sign Out</button></div>';
+    (viewingAsClient ? '' : '<button class="btn danger block" style="margin-top:10px;font-size:15px;padding:13px;" data-action="doLogOut">🚪 Sign Out</button>')+
+    '</div>';
 }
 
 /* ============ Settings ============ */
@@ -5829,7 +5834,7 @@ function renderSettings(){
      A real client (logged into their own cloud account, not admin) should never see it —
      they have exactly one account and no reason to add, switch to, or delete a profile.
      Admin (and anyone not on a cloud account, e.g. local-only/demo use) still gets it. */
-  const isRealClient = !!(state.profile.cloudSession && !state.profile.isCloudAdmin);
+  const isRealClient = !!(state.profile.cloudSession && !state.profile.isCloudAdmin) || !!_adminViewing;
   if(!isRealClient){
     html += '<div class="card" style="margin-top:14px;"><h2>👥 Profile</h2><p class="hc-meta">Switch to a different person\'s profile on this device, or manage this one.</p>'+
       '<div class="modal-actions" style="margin-top:8px;"><button class="btn secondary" style="flex:1" data-action="switchProfile">Switch Profile</button>'+
@@ -7222,25 +7227,33 @@ document.addEventListener("click", async function(e){
     case "openScheduleOcrImport": resetScheduleOcr(); openModal(scheduleOcrModalHtml()); break;
     case "scanSchedulePhoto": {
       const fileInp = document.getElementById("ocr_file");
-      const file = fileInp && fileInp.files && fileInp.files[0];
-      if(!file){ toast("Choose a photo first"); return; }
-      _ocrLoading = true; openModal(scheduleOcrModalHtml());
-      try{
-        const dataUrl = await fileToBase64(file);
-        const newDays = await callScheduleOcrFn(dataUrl, file.type||"image/jpeg");
-        const byDate = {}; _ocrDays.forEach(d=>{ byDate[d.date]=d; });
-        newDays.forEach(d=>{ if(d && d.date) byDate[d.date] = {date:d.date, code:d.code||"", note:d.note||""}; });
-        _ocrDays = Object.values(byDate);
-        if(!_ocrDays.length){ toast("Couldn't find any dates in that photo — try a clearer shot"); _ocrLoading=false; openModal(scheduleOcrModalHtml()); return; }
-        // Auto-suggest a template mapping when a code matches a template name exactly.
-        uniqueOcrCodes().forEach(c=>{
-          if(_ocrCodeMap[c]!==undefined) return;
-          const match = (state.scheduleTemplates||[]).find(tm=>tm.name.trim().toLowerCase()===c.trim().toLowerCase());
-          _ocrCodeMap[c] = match ? match.id : "";
-        });
-        _ocrStep = "review";
-      }catch(err){ toast(err.message); }
-      _ocrLoading = false;
+      const files = fileInp && fileInp.files ? Array.from(fileInp.files) : [];
+      if(!files.length){ toast("Choose at least one photo first"); return; }
+      _ocrLoading = true; _ocrLoadingProgress = files.length>1 ? ("Reading photo 1 of "+files.length+"…") : "Reading photo…";
+      openModal(scheduleOcrModalHtml());
+      const byDate = {}; _ocrDays.forEach(d=>{ byDate[d.date]=d; });
+      let failCount = 0;
+      for(let i=0;i<files.length;i++){
+        const file = files[i];
+        _ocrLoadingProgress = files.length>1 ? ("Reading photo "+(i+1)+" of "+files.length+"…") : "Reading photo…";
+        openModal(scheduleOcrModalHtml());
+        try{
+          const dataUrl = await fileToBase64(file);
+          const newDays = await callScheduleOcrFn(dataUrl, file.type||"image/jpeg");
+          newDays.forEach(d=>{ if(d && d.date) byDate[d.date] = {date:d.date, code:d.code||"", note:d.note||""}; });
+        }catch(err){ failCount++; }
+      }
+      _ocrDays = Object.values(byDate);
+      _ocrLoading = false; _ocrLoadingProgress = "";
+      if(!_ocrDays.length){ toast("Couldn't find any dates in "+(files.length>1?"those photos":"that photo")+" — try a clearer shot"); openModal(scheduleOcrModalHtml()); return; }
+      if(failCount) toast(failCount+" of "+files.length+" photo"+(files.length===1?"":"s")+" couldn't be read — the rest were applied");
+      // Auto-suggest a template mapping when a code matches a template name exactly.
+      uniqueOcrCodes().forEach(c=>{
+        if(_ocrCodeMap[c]!==undefined) return;
+        const match = (state.scheduleTemplates||[]).find(tm=>tm.name.trim().toLowerCase()===c.trim().toLowerCase());
+        _ocrCodeMap[c] = match ? match.id : "";
+      });
+      _ocrStep = "review";
       openModal(scheduleOcrModalHtml());
       break;
     }
