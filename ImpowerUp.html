@@ -5261,9 +5261,45 @@ function openTaskCompleteForm(id){
   if(!t) return;
   openModal(taskCompleteFormHtml(t));
 }
+function overdueTasks(){
+  const today = todayStr();
+  return (state.tasks||[]).filter(t=>t.status!=="done" && t.date && t.date<today).slice().sort((a,b)=>a.date.localeCompare(b.date));
+}
+function daysOverdueCount(dateStr){
+  const d1 = new Date(dateStr+"T00:00:00"), d2 = new Date(todayStr()+"T00:00:00");
+  return Math.max(1, Math.round((d2-d1)/86400000));
+}
+function overdueListModalHtml(){
+  const items = overdueTasks();
+  if(!items.length){
+    return '<h2>⚠️ Overdue &amp; Missing</h2><p class="hc-meta">Nothing overdue — you\'re all caught up!</p><div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Close</button></div>';
+  }
+  const rows = items.map(t=>{
+    const cat = t.category ? catInfo(t.category) : null;
+    const dO = daysOverdueCount(t.date);
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'+
+      '<div style="font-weight:700;">'+escapeHtml(t.title)+(t.is_graded?' <span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+'</div>'+
+      '<div class="hc-meta">Due '+fmtDatePretty(t.date)+' · '+dO+' day'+(dO===1?"":"s")+' overdue'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+'</div>'+
+      '</div>';
+  }).join("");
+  return '<h2>⚠️ Overdue &amp; Missing ('+items.length+')</h2>'+
+    '<div style="max-height:360px;overflow-y:auto;margin:8px 0;">'+rows+'</div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Close</button>'+
+    '<button class="btn" data-action="copyOverdueList" style="flex:1">📋 Copy List</button></div>';
+}
+function overdueBannerHtml(){
+  const items = overdueTasks();
+  if(!items.length) return "";
+  return '<div class="card" style="margin-bottom:14px;background:var(--danger);color:#fff;cursor:pointer;" data-action="openOverdueList">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'+
+    '<div><div style="font-weight:800;font-size:15px;">⚠️ '+items.length+' Overdue / Missing</div>'+
+    '<div style="font-size:12.5px;opacity:.9;">Tap to view and copy the full list</div></div>'+
+    '<div style="font-size:20px;">›</div></div></div>';
+}
 function renderTasks(){
   let html = topbarHtml("Tasks","Plan your time, track how it actually went, and see what's next.");
   html += bedtimeWidgetHtml();
+  html += overdueBannerHtml();
   html += '<button class="btn block" style="margin-bottom:14px;" data-action="openTaskForm">+ New Task</button>';
   const pending = (state.tasks||[]).filter(t=>t.status!=="done").slice().sort((a,b)=>{
     const ad = a.date||"9999-99-99", bd = b.date||"9999-99-99";
@@ -7769,6 +7805,18 @@ document.addEventListener("click", async function(e){
       if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(()=>toast("Link copied!")).catch(()=>fallbackCopyText(url));
       else fallbackCopyText(url);
       closeModal();
+      break;
+    }
+    case "openOverdueList": openModal(overdueListModalHtml()); break;
+    case "copyOverdueList": {
+      const items = overdueTasks();
+      if(!items.length){ toast("Nothing overdue"); break; }
+      const text = "Overdue / Missing Assignments ("+items.length+"):\n"+items.map(ti=>{
+        const dO = daysOverdueCount(ti.date);
+        return "- "+ti.title+" — due "+fmtDatePretty(ti.date)+" ("+dO+" day"+(dO===1?"":"s")+" overdue)"+(ti.is_graded && ti.grade_class_name ? " ["+ti.grade_class_name+"]" : "");
+      }).join("\n");
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>toast("List copied!")).catch(()=>fallbackCopyText(text));
+      else fallbackCopyText(text);
       break;
     }
     case "saveName": {
