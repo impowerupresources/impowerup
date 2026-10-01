@@ -3116,7 +3116,7 @@ const BOTTOM_NAV_PRIMARY_COUNT = 4;
    to that hub's main page. Only one hub is expanded at a time. */
 let _navExpandedRoute = null;
 function navSubsectionsFor(path){
-  if(path==="actionhub") return [{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")},{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")}];
+  if(path==="actionhub") return [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
   if(path==="toolkit") return [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
   if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
@@ -3144,7 +3144,7 @@ function navHtml(active){
       if(usesJump) subHref = '#/'+r.path+'?jump='+s.id;
       else if(s.jumpTab) subHref = '#/'+r.path+'?tab='+s.jumpTab+'&jump='+s.id;
       else subHref = '#/'+r.path+'?tab='+s.id;
-      const subActive = isActive && (usesJump || s.jumpTab ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="habits") || (isActive && r.path==="planner" && !activeTab && s.id==="calendar");
+      const subActive = isActive && (usesJump || s.jumpTab ? false : activeTab===s.id) || (isActive && r.path==="actionhub" && !activeTab && s.id==="tasks") || (isActive && r.path==="planner" && !activeTab && s.id==="calendar");
       const padLeft = 38 + (s.indent||0)*18;
       return '<a href="'+subHref+'" style="padding-left:'+padLeft+'px;font-size:12.5px;font-weight:600;'+(subActive?"background:var(--surface-2);color:var(--accent);":"")+'">'+(s.icon?'<span class="ic">'+s.icon+'</span>':'<span class="ic"></span>')+'<span>'+s.label+'</span></a>';
     }).join("");
@@ -3188,12 +3188,12 @@ function tabStripHtml(basePath, tabs, activeTab){
   ).join("")+'</div>';
 }
 function renderActionHub(){
-  const tab = currentQueryParam("tab") || "habits";
-  const tabs = [{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")},{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")}];
+  const tab = currentQueryParam("tab") || "tasks";
+  const tabs = [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
   let html = tabStripHtml("actionhub", tabs, tab);
   if(tab==="goals") html += renderGoals();
-  else if(tab==="tasks") html += renderTasks();
-  else html += renderHabits();
+  else if(tab==="habits") html += renderHabits();
+  else html += renderTasks();
   return html;
 }
 function renderToolkit(){
@@ -3259,7 +3259,7 @@ function render(){
     if(activeF) startFocusTicker(activeF);
   }
   if(route==="assessments" && _assessView.mode==="take") initAssessCanvases();
-  if((route==="actionhub" && subTab==="tasks") || route==="home") startTasksCountdownTicker();
+  if((route==="actionhub" && (subTab==="tasks" || !subTab)) || route==="home") startTasksCountdownTicker();
   if(route==="impowerzone" || route==="progress"){
     const jump = currentQueryParam("jump");
     if(jump){
@@ -5318,9 +5318,10 @@ function renderTasks(){
     html += emptyState("📝","No tasks yet","Add your first task above — a time estimate helps the countdown above know what's really on your plate.");
     return html;
   }
-  html += '<div class="section-head"><h2>To Do</h2></div>';
-  if(!pending.length) html += '<p class="hc-meta">Nothing pending — nice!</p>';
-  else html += pending.map(t=>{
+  const today = todayStr();
+  const dueToday = pending.filter(t=>t.date && t.date<=today);
+  const dueLater = pending.filter(t=>!t.date || t.date>today);
+  const taskCardHtml = (t) => {
     const cat = t.category ? catInfo(t.category) : null;
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
@@ -5331,7 +5332,13 @@ function renderTasks(){
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
       '<button class="icon-btn" data-action="openTaskForm" data-id="'+t.id+'">✏️</button>'+
       '</div></div>';
-  }).join("");
+  };
+  html += '<div class="section-head"><h2>📌 To Do Today</h2></div>';
+  if(!dueToday.length) html += '<p class="hc-meta">Nothing due today — nice!</p>';
+  else html += dueToday.map(taskCardHtml).join("");
+  html += '<div class="section-head"><h2>🗓️ To Do Later</h2></div>';
+  if(!dueLater.length) html += '<p class="hc-meta">Nothing else on deck.</p>';
+  else html += dueLater.map(taskCardHtml).join("");
   if(followUps.length){
     html += '<div class="section-head"><h2>🔁 Follow-ups</h2></div>';
     html += followUps.map(t=>
