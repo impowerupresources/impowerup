@@ -2191,6 +2191,14 @@ function renderAssessTake(){
   return html;
 }
 
+function profileHasActiveSession(id){
+  try{
+    const raw = localStorage.getItem(storeKeyFor(id));
+    if(!raw) return false;
+    const s = JSON.parse(raw);
+    return !!(s && s.profile && s.profile.cloudSession && s.profile.cloudSession.access_token);
+  }catch(e){ return false; }
+}
 function bootApp(){
   setupPwaMeta();
   if(checkPasswordRecoveryReturn()) return;
@@ -2199,7 +2207,12 @@ function bootApp(){
   if(curId && profiles.find(p=>p.id===curId)){
     activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
   } else if(profiles.length===1 && profiles[0].id!==DEMO_PROFILE_ID){
-    activateProfile(profiles[0].id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
+    const p = profiles[0];
+    if(p.cloudUserId && !profileHasActiveSession(p.id)){
+      renderLoginGate();
+    } else {
+      activateProfile(p.id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
+    }
   } else if(profiles.length>0){
     renderProfilePicker();
   } else {
@@ -3145,10 +3158,10 @@ function navHtml(active){
     const moreActive = overflowRoutes.some(r=>r.path===active);
     bottomItems += '<a href="javascript:void(0)" data-action="openMoreNav" class="'+(moreActive?"active":"")+'"><span class="ic">'+NAV_ICONS.more+'</span><span>More</span></a>';
   }
-  const signOutItem = state.profile.cloudSession
-    ? '<a href="javascript:void(0)" data-action="doLogOut" style="margin-top:auto;color:var(--danger);"><span class="ic">🚪</span><span>Sign Out</span></a>'
-    : '';
-  return '<nav class="sidebar" id="sidebarNav"><a href="#/home" class="brand" style="text-decoration:none;color:inherit;cursor:pointer;"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</a>'+sidebarItems+signOutItem+'</nav>'+
+  const authNavItem = state.profile.cloudSession
+    ? '<a href="javascript:void(0)" data-action="doLogOut" style="margin-top:auto;background:var(--danger);color:#fff;border-radius:10px;margin:10px 12px 14px;padding:12px 14px;font-weight:800;justify-content:center;">'+'<span class="ic">🚪</span><span>Sign Out</span></a>'
+    : '<a href="javascript:void(0)" data-action="goToLoginGate" style="margin-top:auto;background:var(--accent);color:#fff;border-radius:10px;margin:10px 12px 14px;padding:12px 14px;font-weight:800;justify-content:center;">'+'<span class="ic">🔐</span><span>Log In</span></a>';
+  return '<nav class="sidebar" id="sidebarNav"><a href="#/home" class="brand" style="text-decoration:none;color:inherit;cursor:pointer;"><div class="logo" style="padding:0;overflow:hidden;">'+'<img src="'+LOGO_IMG+'" style="width:100%;height:100%;object-fit:cover;" alt="ImpowerUp logo">'+'</div>ImpowerUp</a>'+sidebarItems+authNavItem+'</nav>'+
          '<nav class="bottombar">'+bottomItems+'</nav>';
 }
 function moreNavModalHtml(){
