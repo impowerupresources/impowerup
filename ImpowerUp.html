@@ -7807,8 +7807,9 @@ document.addEventListener("click", async function(e){
       state.profile.cloudSyncEnabled = false;
       saveState();
       _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
-      if(currentRoute()==="admin" || currentRoute()==="assessments") location.hash = "#/home";
-      render();
+      state = null; STORE_KEY = null; setCurrentProfileId("");
+      location.hash = "#/home";
+      renderLoginGate();
       toast("Logged out");
       break;
     }
