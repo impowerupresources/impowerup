@@ -2204,20 +2204,24 @@ function bootApp(){
   if(checkPasswordRecoveryReturn()) return;
   const profiles = loadProfiles();
   const curId = getCurrentProfileId();
-  if(curId && profiles.find(p=>p.id===curId)){
-    activateProfile(curId); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
-  } else if(profiles.length===1 && profiles[0].id!==DEMO_PROFILE_ID){
-    const p = profiles[0];
-    if(p.cloudUserId && !profileHasActiveSession(p.id)){
-      renderLoginGate();
-    } else {
-      activateProfile(p.id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig();
+  const enterProfile = (id) => { activateProfile(id); render(); checkForMissedAlarms(); checkGoogleOAuthReturn(); loadGlobalConfig(); };
+  if(curId){
+    const p = profiles.find(x=>x.id===curId);
+    if(p){
+      if(p.cloudUserId && !profileHasActiveSession(p.id)){ renderLoginGate(); return; }
+      enterProfile(curId);
+      return;
     }
-  } else if(profiles.length>0){
-    renderProfilePicker();
-  } else {
-    renderLoginGate();
   }
+  // No active pointer (e.g. just logged out) — land on the Login Gate by default,
+  // unless a cloud account elsewhere in the local profile list is still signed in,
+  // or there's exactly one true local-only (non-cloud, non-demo) profile to resume.
+  const cloudProfiles = profiles.filter(p=>p.cloudUserId);
+  const loggedInCloud = cloudProfiles.find(p=>profileHasActiveSession(p.id));
+  if(loggedInCloud){ enterProfile(loggedInCloud.id); return; }
+  const localOnly = profiles.filter(p=>!p.cloudUserId && p.id!==DEMO_PROFILE_ID);
+  if(localOnly.length===1 && cloudProfiles.length===0){ enterProfile(localOnly[0].id); return; }
+  renderLoginGate();
 }
 /* ============ Missed alarms (shown once on app open if any fired while closed) ============ */
 let missedAlarmsCache = [];
