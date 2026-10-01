@@ -408,7 +408,7 @@ let SECTION_ICONS = {
   focus:"🧘", alerts:"⏰", timeblind:"⏳",
   calendar:"📅", schedule:"📆", classes:"📚", templates:"🗂️",
   sleep:"😴", mood:"🙂", braindump:"📓", grades:"📊",
-  stats:"📊", matrix:"✨", heatmap:"🔥", trends:"📈", timeline:"🗓️", badges:"🏅"
+  stats:"📊", matrix:"✨", heatmap:"🔥", trends:"📈", timeline:"🗓️", badges:"🏅", distractions:"🌀"
 };
 const DEFAULT_SECTION_ICONS = JSON.parse(JSON.stringify(SECTION_ICONS));
 const SECTION_ICON_META = [
@@ -417,7 +417,7 @@ const SECTION_ICON_META = [
   {key:"calendar",label:"Calendar"},{key:"schedule",label:"Schedule"},{key:"classes",label:"Classes"},{key:"templates",label:"Templates"},
   {key:"sleep",label:"Sleep Tracker"},{key:"mood",label:"Mood Tracker"},{key:"braindump",label:"Brain Dump"},{key:"grades",label:"Grades"},
   {key:"stats",label:"Stats"},{key:"matrix",label:"Success Matrix"},{key:"heatmap",label:"Habit Heatmap"},
-  {key:"trends",label:"Trends & Streaks"},{key:"timeline",label:"Timeline"},{key:"badges",label:"Badges"}
+  {key:"trends",label:"Trends & Streaks"},{key:"timeline",label:"Timeline"},{key:"badges",label:"Badges"},{key:"distractions",label:"Distractions & What Helped"}
 ];
 function sectionIcon(key){ return (SECTION_ICONS && SECTION_ICONS[key]!==undefined) ? SECTION_ICONS[key] : ""; }
 const COLORS = ["#2563EB","#14B8A6","#FB923C","#EC4899","#3B82F6","#F43F5E","#10B981","#EAB308"];
@@ -4659,9 +4659,49 @@ const PROGRESS_SECTIONS = [
   {id:"matrix", label:"Success Matrix"},
   {id:"heatmap", label:"Habit Heatmap"},
   {id:"trends", label:"Trends & Streaks"},
+  {id:"distractions", label:"Distractions & What Helped"},
   {id:"timeline", label:"Timeline"},
   {id:"badges", label:"Badges"}
 ];
+function distractionsInsightHtml(){
+  const logged = (state.tasks||[]).filter(t=>t.status==="done" && (t.distraction || t.helped));
+  if(!logged.length){
+    return emptyState("🌀","Nothing logged yet","When you mark a task done, jot what distracted you or what helped — it'll all show up here.");
+  }
+  const sorted = logged.slice().sort((a,b)=>(b.completed_at||"").localeCompare(a.completed_at||""));
+  function tally(field){
+    const counts = {};
+    logged.forEach(t=>{
+      const v = (t[field]||"").trim();
+      if(!v) return;
+      const key = v.toLowerCase();
+      counts[key] = counts[key] || {label:v, count:0};
+      counts[key].count++;
+    });
+    return Object.values(counts).sort((a,b)=>b.count-a.count);
+  }
+  const distractionTally = tally("distraction");
+  const helpedTally = tally("helped");
+  let html = '<p class="hc-meta">Pulled from what you logged when marking tasks done.</p>';
+  if(distractionTally.length){
+    html += '<h3 style="margin:14px 0 6px;font-size:14px;">🌀 Most common distractions</h3>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">'+distractionTally.map(d=>'<span class="tag">'+escapeHtml(d.label)+(d.count>1?' ×'+d.count:'')+'</span>').join("")+'</div>';
+  }
+  if(helpedTally.length){
+    html += '<h3 style="margin:14px 0 6px;font-size:14px;">✨ What helped most</h3>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">'+helpedTally.map(d=>'<span class="tag">'+escapeHtml(d.label)+(d.count>1?' ×'+d.count:'')+'</span>').join("")+'</div>';
+  }
+  html += '<h3 style="margin:16px 0 6px;font-size:14px;">📋 Full log</h3>'+
+    '<div style="display:flex;flex-direction:column;gap:2px;">'+sorted.map(t=>
+      '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'+
+      '<div style="font-weight:700;font-size:13px;">'+escapeHtml(t.title)+'</div>'+
+      '<div class="hc-meta">'+(t.completed_at?fmtDatePretty(t.completed_at.slice(0,10)):"")+'</div>'+
+      (t.distraction?'<div style="font-size:12.5px;margin-top:4px;">🌀 '+escapeHtml(t.distraction)+'</div>':'')+
+      (t.helped?'<div style="font-size:12.5px;margin-top:2px;">✨ '+escapeHtml(t.helped)+'</div>':'')+
+      '</div>'
+    ).join("")+'</div>';
+  return html;
+}
 function getImpowerZoneOrder(){
   const allIds = IMPOWERZONE_SECTIONS.map(w=>w.id);
   const saved = state.profile.impowerZoneOrder;
@@ -4772,6 +4812,7 @@ function renderProgress(){
     matrix: '<div class="card"><h2>'+sectionIcon("matrix")+' Success Matrix</h2><p class="hc-meta">How check-ins connect to your habit consistency.</p>'+successMatrixHtml()+'</div>',
     heatmap: '<div class="card"><h2>'+sectionIcon("heatmap")+' Habit Heatmap</h2>'+habitHeatmapHtml()+'</div>',
     trends: impowerZoneTrendsHtml(),
+    distractions: '<div class="card"><h2>'+sectionIcon("distractions")+' Distractions & What Helped</h2>'+distractionsInsightHtml()+'</div>',
     timeline: '<div class="card"><h2>'+sectionIcon("timeline")+' Timeline</h2>'+habitGoalTimelineHtml()+'</div>',
     badges: '<div class="section-head" style="margin-top:0;"><h2>'+sectionIcon("badges")+' Badges</h2></div><div class="grid cols-3">'+
       BADGES.map(b=>{ const earned = state.profile.badgesSeen.includes(b.id) || computeEarnedBadges().some(x=>x.id===b.id);
