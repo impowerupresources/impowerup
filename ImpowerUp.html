@@ -535,6 +535,82 @@ function addMonths(ym, n){ let [y,m]=ym.split("-").map(Number); m+=n; while(m<1)
 function dayOfWeekName(dateStr){ const [y,m,d] = dateStr.split("-").map(Number); return DAY_NAMES[new Date(y,m-1,d).getDay()]; }
 function fmtDatePretty(dateStr){ if(!dateStr) return ""; const [y,m,d]=dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}); }
 function fmtTime12(t){ if(!t) return ""; let [h,m]=t.split(":").map(Number); const ap = h>=12?"PM":"AM"; h = h%12; if(h===0)h=12; return h+":"+String(m).padStart(2,"0")+" "+ap; }
+
+/* ============ Reusable time-entry widgets: dropdown time picker, and a
+   Start Time + (Duration OR End Time) toggle, used by Tasks, Custom Events,
+   Schedule Templates, and Classes. Still stores plain "HH:MM" + duration_minutes
+   underneath — the widget just offers a friendlier way to fill those in. ============ */
+const TIME_DD_HOURS = [12,1,2,3,4,5,6,7,8,9,10,11];
+const TIME_DD_MINUTES = [0,5,10,15,20,25,30,35,40,45,50,55];
+function minutesToHHMM(totalMin){ totalMin = ((Math.round(totalMin)%1440)+1440)%1440; const h=Math.floor(totalMin/60), m=totalMin%60; return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
+function hhmmToMinutes(hhmm){ if(!hhmm) return 0; const parts = hhmm.split(":").map(Number); return (parts[0]||0)*60+(parts[1]||0); }
+function to12h(hhmm){ let [h,m]=(hhmm||"09:00").split(":").map(Number); h=h||0; m=m||0; const ap = h>=12?"PM":"AM"; let h12 = h%12; if(h12===0) h12=12; return {h:h12, m: TIME_DD_MINUTES.includes(m)?m:(Math.round(m/5)*5)%60, ap}; }
+function from12h(h,m,ap){ let h24 = Number(h)%12; if(ap==="PM") h24 += 12; return String(h24).padStart(2,"0")+":"+String(Number(m)).padStart(2,"0"); }
+function timeDropdownHtml(prefix, hhmm){
+  const t = to12h(hhmm);
+  const hOpts = TIME_DD_HOURS.map(h=>'<option value="'+h+'" '+(t.h===h?"selected":"")+'>'+h+'</option>').join("");
+  const mOpts = TIME_DD_MINUTES.map(m=>'<option value="'+m+'" '+(t.m===m?"selected":"")+'>'+String(m).padStart(2,"0")+'</option>').join("");
+  const apOpts = ["AM","PM"].map(a=>'<option value="'+a+'" '+(t.ap===a?"selected":"")+'>'+a+'</option>').join("");
+  return '<div class="row-inline" style="gap:4px;flex-wrap:nowrap;">'+
+    '<select id="'+prefix+'_h" style="flex:0 0 58px;padding:8px 4px;">'+hOpts+'</select>'+
+    '<select id="'+prefix+'_m" style="flex:0 0 58px;padding:8px 4px;">'+mOpts+'</select>'+
+    '<select id="'+prefix+'_ap" style="flex:0 0 64px;padding:8px 4px;">'+apOpts+'</select></div>';
+}
+function collectTimeDropdown(prefix){
+  const h = document.getElementById(prefix+"_h"), m = document.getElementById(prefix+"_m"), ap = document.getElementById(prefix+"_ap");
+  if(!h||!m||!ap) return null;
+  return from12h(h.value, m.value, ap.value);
+}
+function durationDropdownHtml(prefix, totalMinutes){
+  totalMinutes = Math.max(0, Number(totalMinutes)||0);
+  const h = Math.floor(totalMinutes/60), m = totalMinutes%60;
+  const hOpts = Array.from({length:13},(_,i)=>i).map(i=>'<option value="'+i+'" '+(h===i?"selected":"")+'>'+i+'</option>').join("");
+  const mOpts = TIME_DD_MINUTES.map(mm=>'<option value="'+mm+'" '+((TIME_DD_MINUTES.includes(m)?m:0)===mm?"selected":"")+'>'+mm+'</option>').join("");
+  return '<div class="row-inline" style="gap:6px;align-items:center;flex-wrap:nowrap;">'+
+    '<select id="'+prefix+'_durH" style="flex:0 0 62px;padding:8px 4px;">'+hOpts+'</select><span style="font-size:12px;color:var(--text-muted);">hr</span>'+
+    '<select id="'+prefix+'_durM" style="flex:0 0 62px;padding:8px 4px;">'+mOpts+'</select><span style="font-size:12px;color:var(--text-muted);">min</span></div>';
+}
+function collectDurationDropdown(prefix){
+  const h = document.getElementById(prefix+"_durH"), m = document.getElementById(prefix+"_durM");
+  if(!h||!m) return null;
+  return (Number(h.value)||0)*60 + (Number(m.value)||0);
+}
+let _timeRangeModes = {}; // prefix -> "duration" | "endtime"
+function timeRangeWidgetHtml(prefix, startTime, durationMinutes){
+  const mode = _timeRangeModes[prefix] || "duration";
+  startTime = startTime || "09:00";
+  durationMinutes = Math.max(0, Number(durationMinutes)||30);
+  const endTime = minutesToHHMM(hhmmToMinutes(startTime) + durationMinutes);
+  let html = '<div class="field"><label>Start time</label>'+timeDropdownHtml(prefix+"_start", startTime)+'</div>'+
+    '<div class="chip-group" style="margin:8px 0 6px;">'+
+    '<div class="chip '+(mode==="duration"?"selected":"")+'" data-action="setTimeRangeMode" data-id="'+prefix+'" data-v="duration">⏱ Hours &amp; Minutes</div>'+
+    '<div class="chip '+(mode==="endtime"?"selected":"")+'" data-action="setTimeRangeMode" data-id="'+prefix+'" data-v="endtime">➡️ End Time</div>'+
+    '</div>';
+  if(mode==="endtime"){
+    html += '<div class="field"><label>End time</label>'+timeDropdownHtml(prefix+"_end", endTime)+'</div>'+
+      '<p class="hc-meta" style="margin-top:2px;">'+fmtTime12(startTime)+' – '+fmtTime12(endTime)+' · '+fmtMinutesDuration(durationMinutes)+'</p>';
+  } else {
+    html += '<div class="field"><label>Duration</label>'+durationDropdownHtml(prefix+"_dur", durationMinutes)+'</div>'+
+      '<p class="hc-meta" style="margin-top:2px;">'+fmtTime12(startTime)+' – '+fmtTime12(endTime)+'</p>';
+  }
+  return html;
+}
+function collectTimeRangeWidget(prefix, fallbackStart, fallbackDuration){
+  const mode = _timeRangeModes[prefix] || "duration";
+  const start = collectTimeDropdown(prefix+"_start") || fallbackStart || "09:00";
+  let duration;
+  if(mode==="endtime"){
+    const end = collectTimeDropdown(prefix+"_end");
+    duration = end ? (((hhmmToMinutes(end) - hhmmToMinutes(start) + 1440) % 1440) || 1440) : (fallbackDuration||30);
+  } else {
+    const d = collectDurationDropdown(prefix+"_dur");
+    duration = d==null ? (fallbackDuration||30) : d;
+  }
+  return {time:start, duration_minutes:duration};
+}
+function timeRangeBoxHtml(prefix, startTime, durationMinutes){
+  return '<div id="timeRangeBox_'+prefix+'">'+timeRangeWidgetHtml(prefix, startTime, durationMinutes)+'</div>';
+}
 function allCategories(){ return CATEGORIES.concat((state&&state.customCategories)||[]); }
 function catInfo(v){ return allCategories().find(c=>c.v===v) || CATEGORIES[CATEGORIES.length-1]; }
 /* Habits and Goals can carry more than one category. `categories` is the source of truth;
@@ -3964,12 +4040,12 @@ function customEventFormHtml(dateStr, ev){
   const repeatLabels = {none:"Does not repeat", daily:"Every day", weekly:"Weekly", monthly:"Monthly (same date)", custom:"Custom…"};
   const unitLabels = {day:"day(s)", week:"week(s)", month:"month(s)"};
   const showDays = repeat==="weekly" || (repeat==="custom" && repeatUnit==="week");
+  _timeRangeModes.ce = "duration";
   return '<h2>'+(ev.id?"Edit Event":"New Event")+'</h2>'+
     '<div class="row-inline"><div class="field" style="flex:0 0 76px;"><label>Emoji</label><input id="ce_emoji" type="text" maxlength="4" value="'+escapeHtml(ev.emoji)+'">'+emojiPickerHtml("ce_emoji")+'</div>'+
     '<div class="field" style="flex:1;"><label>Title</label><input id="ce_label" type="text" placeholder="e.g. Dentist appointment" value="'+escapeHtml(ev.label)+'"></div></div>'+
-    '<div class="row-inline"><div class="field"><label>Date</label><input id="ce_date" type="date" value="'+(ev.date||dateStr)+'"></div>'+
-    '<div class="field"><label>Time</label><input id="ce_time" type="time" value="'+(ev.time||"09:00")+'"></div></div>'+
-    '<div class="field"><label>Duration (min)</label><input id="ce_duration" type="number" min="5" value="'+(ev.duration_minutes||30)+'"></div>'+
+    '<div class="field"><label>Date</label><input id="ce_date" type="date" value="'+(ev.date||dateStr)+'"></div>'+
+    timeRangeBoxHtml("ce", ev.time||"09:00", ev.duration_minutes||30)+
     '<div class="field"><label>Repeat</label><select id="ce_repeat">'+
       Object.keys(repeatLabels).map(r=>'<option value="'+r+'" '+(repeat===r?"selected":"")+'>'+repeatLabels[r]+'</option>').join("")+
     '</select></div>'+
@@ -4072,8 +4148,7 @@ function renderClassSlotRows(sem, slots){
     row += '<div class="field"><label>'+(sem.scheduleType==="fixed"?"Day(s) of week":(sem.scheduleType==="week_rotation"?"Week(s)":"Day(s)"))+'</label>'+
       '<p class="hc-meta" style="margin:0 0 6px;">Pick more than one if this class meets on multiple '+(sem.scheduleType==="fixed"?"days":(sem.scheduleType==="week_rotation"?"weeks":"days"))+' at this same time.</p>'+
       '<div class="chip-group">'+dayOpts.map(o=>'<div class="chip '+(selDays.includes(o.key)?"selected":"")+'" data-action="pickClassSlotDayKey" data-idx="'+i+'" data-v="'+o.key+'">'+o.label+'</div>').join("")+'</div></div>';
-    row += '<div class="row-inline"><div class="field" style="flex:0 0 118px;"><label>Time</label><input class="cs_time" type="time" data-idx="'+i+'" value="'+(s.time||"09:00")+'"></div>'+
-      '<div class="field" style="flex:0 0 90px;"><label>Mins</label><input class="cs_dur" type="number" min="5" data-idx="'+i+'" value="'+(s.duration||50)+'"></div></div>';
+    row += timeRangeBoxHtml("cs"+i, s.time||"09:00", s.duration||50);
     row += '<div class="field"><label>Dates</label><div class="chip-group">'+
       [["none","Whole semester"],["term","Pick a term"],["manual","Custom range"]].map(o=>'<div class="chip '+(s.dateRangeMode===o[0]?"selected":"")+'" data-action="pickClassSlotRangeMode" data-idx="'+i+'" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+'</div></div>';
     if(s.dateRangeMode==="term"){
@@ -4095,8 +4170,8 @@ function collectClassSlotsFromDOM(){
     const idx = Number(row.getAttribute("data-slotrow"));
     if(!classFormSlots[idx]) return;
     const s = classFormSlots[idx];
-    const timeEl = row.querySelector(".cs_time"); if(timeEl) s.time = timeEl.value;
-    const durEl = row.querySelector(".cs_dur"); if(durEl) s.duration = Number(durEl.value)||50;
+    const tr = collectTimeRangeWidget("cs"+idx, s.time, s.duration);
+    s.time = tr.time; s.duration = tr.duration_minutes;
     const termEl = row.querySelector(".cs_term"); if(termEl) s.termId = termEl.value;
     const startEl = row.querySelector(".cs_start"); if(startEl) s.startDate = startEl.value;
     const endEl = row.querySelector(".cs_end"); if(endEl) s.endDate = endEl.value;
@@ -4125,6 +4200,7 @@ function openClassForm(id){
   const cls = id ? (sem.classSubjects||[]).find(x=>x.id===id) : null;
   classFormSlots = cls ? cls.slots.map(s=>Object.assign({},s,{dayKeys:[s.dayKey]})) : [];
   classFormColor = cls ? (cls.color||COLORS[0]) : COLORS[(sem.classSubjects||[]).length % COLORS.length];
+  Object.keys(_timeRangeModes).filter(k=>k.indexOf("cs")===0).forEach(k=>delete _timeRangeModes[k]);
   openModal(classFormHtml(sem, cls));
 }
 function classesCardHtml(sem){
@@ -4355,10 +4431,13 @@ function scheduleOcrModalHtml(){
 
 /* Schedule template CRUD */
 let templateFormColor = COLORS[0], templateFormBlocks=[];
+let _tplFormId = null;
 function openTemplateForm(id){
   const tmpl = id ? state.scheduleTemplates.find(x=>x.id===id) : null;
   templateFormColor = tmpl ? tmpl.color : COLORS[0];
   templateFormBlocks = tmpl ? tmpl.time_blocks.map(b=>Object.assign({},b)) : [];
+  _tplFormId = id || null;
+  Object.keys(_timeRangeModes).filter(k=>k.indexOf("blk")===0).forEach(k=>delete _timeRangeModes[k]);
   openModal(templateFormHtml(tmpl));
 }
 function templateFormHtml(t){
@@ -4369,21 +4448,85 @@ function templateFormHtml(t){
     '<div class="field"><label>Description</label><input id="t_desc" type="text" value="'+escapeHtml(t.description||"")+'"></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(templateFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickTColor" data-v="'+c+'"></div>').join("")+'</div></div>'+
     '<div class="field"><label>Schedule items</label><div id="blockList">'+renderBlockRows(templateFormBlocks)+'</div>'+
-    '<button class="btn secondary sm" type="button" data-action="addBlockRow">+ Add item</button></div>'+
+    '<button class="btn secondary sm" type="button" data-action="addBlockRow">+ Add item</button> '+
+    '<button class="btn secondary sm" type="button" data-action="openTemplateOcrImport">📷 Scan from a photo</button></div>'+
     '<div class="modal-actions">'+(t.id?'<button class="btn danger" data-action="deleteTemplate" data-id="'+t.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveTemplate" data-id="'+(t.id||"")+'" style="flex:1">Save</button></div>';
+}
+
+/* ---- Template photo import: upload one or more photos of a printed daily schedule /
+   bell schedule / routine and let Claude vision read each row's time + label, then drop
+   the chosen rows straight into the template's Schedule items as "event" blocks. ---- */
+let _tplOcrStep = "upload";
+let _tplOcrLoading = false;
+let _tplOcrLoadingProgress = "";
+let _tplOcrBlocks = []; // [{time, duration_minutes, label, include}]
+function resetTemplateOcr(){ _tplOcrStep = "upload"; _tplOcrLoading = false; _tplOcrLoadingProgress = ""; _tplOcrBlocks = []; }
+async function callTemplateOcrFn(base64DataUrl, mimeType){
+  if(!(await ensureFreshSession())) throw new Error("Log in to use photo import");
+  const res = await fetch(SB_ACCOUNTS_URL+"/functions/v1/template-ocr", {
+    method:"POST",
+    headers: Object.assign(acctHeaders(true), {apikey: SB_ACCOUNTS_KEY}),
+    body: JSON.stringify({ image: base64DataUrl, mimeType })
+  });
+  const json = await res.json();
+  if(!res.ok) throw new Error(json.error || "Couldn't read that photo");
+  return json.blocks || [];
+}
+function templateOcrModalHtml(){
+  if(_tplOcrStep==="upload"){
+    return '<h2>📷 Scan Schedule from a Photo</h2>'+
+      '<p class="hc-meta">Upload one or more photos of a printed daily schedule, bell schedule, or routine — e.g. a syllabus timetable or planner page. Works best with a clear, well-lit shot.</p>'+
+      '<div class="field" style="margin-top:10px;"><input type="file" id="tpl_ocr_file" accept="image/*" multiple></div>'+
+      (_tplOcrBlocks.length ? '<p class="hc-meta" style="margin-top:6px;">Already have '+_tplOcrBlocks.length+' item'+(_tplOcrBlocks.length===1?"":"s")+' scanned — these photos will add to them.</p>' : "")+
+      '<div class="modal-actions" style="margin-top:10px;">'+
+      '<button class="btn secondary" style="flex:1" data-action="backToTemplateFormFromOcr">Cancel</button>'+
+      '<button class="btn" style="flex:1" data-action="scanTemplatePhoto"'+(_tplOcrLoading?' disabled':'')+'>'+(_tplOcrLoading?(_tplOcrLoadingProgress||"Reading photo…"):"Scan Photo(s)")+'</button></div>'+
+      (_tplOcrBlocks.length ? '<button class="btn ghost sm block" style="margin-top:8px;" data-action="finishTemplateOcrUpload">Skip — review what I have</button>' : "");
+  }
+  // review step
+  const rows = _tplOcrBlocks.map((b,i)=>
+    '<div class="row-inline" style="align-items:center;margin-bottom:6px;gap:6px;">'+
+    '<input type="checkbox" class="tplOcrInclude" data-idx="'+i+'" '+(b.include!==false?"checked":"")+' style="width:16px;height:16px;flex:0 0 auto;">'+
+    '<input class="tplOcrTime" type="time" data-idx="'+i+'" value="'+(b.time||"09:00")+'" style="flex:0 0 100px;padding:6px 6px;">'+
+    '<input class="tplOcrDur" type="number" min="5" data-idx="'+i+'" value="'+(b.duration_minutes||30)+'" style="flex:0 0 64px;padding:6px 6px;" title="Minutes">'+
+    '<input class="tplOcrLabel" type="text" data-idx="'+i+'" value="'+escapeHtml(b.label||"")+'" style="flex:1;padding:6px 8px;">'+
+    '</div>'
+  ).join("");
+  return '<h2>Review Scanned Items</h2>'+
+    '<p class="hc-meta">Found '+_tplOcrBlocks.length+' item'+(_tplOcrBlocks.length===1?"":"s")+'. Uncheck any you don\'t want, fix times/labels, then add them to this schedule.</p>'+
+    '<button class="btn ghost sm" style="margin:6px 0 12px;" data-action="rescanTemplatePhoto">+ Scan another photo</button>'+
+    (_tplOcrBlocks.length ? '<div style="max-height:320px;overflow-y:auto;">'+rows+'</div>' : '<p class="hc-meta">No items were found — try a clearer photo.</p>')+
+    '<div class="modal-actions" style="margin-top:10px;">'+
+    '<button class="btn secondary" style="flex:1" data-action="backToTemplateFormFromOcr">Cancel</button>'+
+    '<button class="btn" style="flex:1" data-action="applyTemplateOcrBlocks">Add to Schedule</button></div>';
+}
+function collectTemplateOcrBlocksFromDOM(){
+  document.querySelectorAll(".tplOcrInclude").forEach(cb=>{
+    const idx = Number(cb.getAttribute("data-idx"));
+    if(_tplOcrBlocks[idx]) _tplOcrBlocks[idx].include = cb.checked;
+  });
+  document.querySelectorAll(".tplOcrTime").forEach(inp=>{
+    const idx = Number(inp.getAttribute("data-idx"));
+    if(_tplOcrBlocks[idx]) _tplOcrBlocks[idx].time = inp.value;
+  });
+  document.querySelectorAll(".tplOcrDur").forEach(inp=>{
+    const idx = Number(inp.getAttribute("data-idx"));
+    if(_tplOcrBlocks[idx]) _tplOcrBlocks[idx].duration_minutes = Number(inp.value)||30;
+  });
+  document.querySelectorAll(".tplOcrLabel").forEach(inp=>{
+    const idx = Number(inp.getAttribute("data-idx"));
+    if(_tplOcrBlocks[idx]) _tplOcrBlocks[idx].label = inp.value;
+  });
 }
 function renderBlockRows(blocks){
   if(!blocks || blocks.length===0) return '<p class="hc-meta">No items yet — add a habit, reminder, or custom event below.</p>';
   return blocks.map((b,i)=>
     '<div class="card" style="margin-bottom:8px;padding:10px;" data-blockrow="'+i+'">'+
-      '<div class="row-inline">'+
-      '<div class="field" style="flex:1;"><label>Type</label><select class="blk_type" data-idx="'+i+'">'+
+      '<div class="field"><label>Type</label><select class="blk_type" data-idx="'+i+'">'+
         ["habit","reminder","event"].map(ty=>'<option value="'+ty+'" '+(b.type===ty?"selected":"")+'>'+ty+'</option>').join("")+'</select></div>'+
-      '<div class="field" style="flex:0 0 90px;"><label>Time</label><input class="blk_time" type="time" value="'+(b.time||"09:00")+'"></div>'+
-      '<div class="field" style="flex:0 0 70px;"><label>Mins</label><input class="blk_dur" type="number" min="5" value="'+(b.duration_minutes||30)+'"></div>'+
-      '</div>'+
+      timeRangeBoxHtml("blk"+i, b.time||"09:00", b.duration_minutes||30)+
       '<div class="blk_linked">'+linkedFieldHtml(b)+'</div>'+
       '<button class="btn ghost sm" type="button" data-action="removeBlockRow" data-idx="'+i+'">Remove item</button>'+
       '</div>'
@@ -4405,8 +4548,8 @@ function collectBlocksFromDOM(){
     const idx = Number(row.getAttribute("data-blockrow"));
     if(!templateFormBlocks[idx]) return;
     const b = templateFormBlocks[idx];
-    const timeEl = row.querySelector(".blk_time"); if(timeEl) b.time = timeEl.value;
-    const durEl = row.querySelector(".blk_dur"); if(durEl) b.duration_minutes = Number(durEl.value)||30;
+    const tr = collectTimeRangeWidget("blk"+idx, b.time, b.duration_minutes);
+    b.time = tr.time; b.duration_minutes = tr.duration_minutes;
     if(b.type==="event"){
       const lbl = row.querySelector(".blk_label"); if(lbl) b.label = lbl.value;
       const lvl = row.querySelector(".blk_alarm_level"); if(lvl) b.alarm_level = lvl.value;
@@ -5227,8 +5370,8 @@ function taskFormHtml(t){
       '<div class="toggle-row" style="padding:4px 0;"><div style="font-weight:700;font-size:13px;">🤷 Not sure how long</div><div class="switch" data-action="toggleTbGapNotSure"></div></div>'+
       '</div>' : '')+
     '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
-    '<div class="row-inline"><div class="field"><label>Planned time (minutes)</label><input id="tsk_planned" type="number" min="1" value="'+(t.planned_minutes||30)+'"></div>'+
-    '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div></div>'+
+    '<div class="field"><label>Planned time</label>'+durationDropdownHtml("tsk_planned", t.planned_minutes||30)+'</div>'+
+    '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="tsk_notes" placeholder="Any extra details">'+escapeHtml(t.description||"")+'</textarea></div>'+
     '<div class="field"><label>Subtasks (optional)</label><div id="subtaskList">'+subtaskListRowsHtml()+
       '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
@@ -6805,6 +6948,23 @@ document.addEventListener("click", async function(e){
       if(block) block.style.display = isOn ? "" : "none";
       break;
     }
+    case "setTimeRangeMode": {
+      const box = document.getElementById("timeRangeBox_"+id);
+      if(box){
+        const curStart = collectTimeDropdown(id+"_start") || "09:00";
+        const existingDur = collectDurationDropdown(id+"_dur");
+        const existingEnd = collectTimeDropdown(id+"_end");
+        let curDuration;
+        if(existingEnd!=null) curDuration = ((hhmmToMinutes(existingEnd) - hhmmToMinutes(curStart) + 1440) % 1440) || 1440;
+        else if(existingDur!=null) curDuration = existingDur;
+        else curDuration = 30;
+        _timeRangeModes[id] = v;
+        box.innerHTML = timeRangeWidgetHtml(id, curStart, curDuration);
+      } else {
+        _timeRangeModes[id] = v;
+      }
+      break;
+    }
     case "addSubtaskRow": { collectSubtasksFromDOM(); taskFormSubtasks.push({title:"",done:false}); rerenderSubtaskList(); break; }
     case "removeSubtaskRow": { collectSubtasksFromDOM(); taskFormSubtasks.splice(Number(t.getAttribute("data-idx")),1); rerenderSubtaskList(); break; }
     case "toggleSubtask": {
@@ -6832,7 +6992,7 @@ document.addEventListener("click", async function(e){
     case "saveTask": {
       const title = document.getElementById("tsk_title").value.trim();
       if(!title){ toast("Please enter a task"); return; }
-      const planned = Math.max(1, Number(document.getElementById("tsk_planned").value)||30);
+      const planned = Math.max(1, collectDurationDropdown("tsk_planned") || 30);
       const linkVal = document.getElementById("tsk_link") ? document.getElementById("tsk_link").value : "";
       const linkParts = linkVal ? linkVal.split(":") : ["",""];
       const taskDate = document.getElementById("tsk_date").value||"";
@@ -7259,6 +7419,44 @@ document.addEventListener("click", async function(e){
     }
     case "finishScheduleOcrUpload": { if(!_ocrDays.length){ toast("Scan a photo first"); return; } _ocrStep="review"; openModal(scheduleOcrModalHtml()); break; }
     case "rescanSchedulePhoto": { _ocrStep = "upload"; openModal(scheduleOcrModalHtml()); break; }
+    case "openTemplateOcrImport": { collectBlocksFromDOM(); resetTemplateOcr(); openModal(templateOcrModalHtml()); break; }
+    case "backToTemplateFormFromOcr": { resetTemplateOcr(); openModal(templateFormHtml(_tplFormId ? state.scheduleTemplates.find(x=>x.id===_tplFormId) : null)); break; }
+    case "finishTemplateOcrUpload": { if(!_tplOcrBlocks.length){ toast("Scan a photo first"); return; } _tplOcrStep="review"; openModal(templateOcrModalHtml()); break; }
+    case "rescanTemplatePhoto": { collectTemplateOcrBlocksFromDOM(); _tplOcrStep = "upload"; openModal(templateOcrModalHtml()); break; }
+    case "scanTemplatePhoto": {
+      const fileInp = document.getElementById("tpl_ocr_file");
+      const files = fileInp && fileInp.files ? Array.from(fileInp.files) : [];
+      if(!files.length){ toast("Choose at least one photo first"); return; }
+      _tplOcrLoading = true; _tplOcrLoadingProgress = files.length>1 ? ("Reading photo 1 of "+files.length+"…") : "Reading photo…";
+      openModal(templateOcrModalHtml());
+      let failCount = 0;
+      for(let i=0;i<files.length;i++){
+        const file = files[i];
+        _tplOcrLoadingProgress = files.length>1 ? ("Reading photo "+(i+1)+" of "+files.length+"…") : "Reading photo…";
+        openModal(templateOcrModalHtml());
+        try{
+          const dataUrl = await fileToBase64(file);
+          const newBlocks = await callTemplateOcrFn(dataUrl, file.type||"image/jpeg");
+          newBlocks.forEach(b=>{ if(b && b.time) _tplOcrBlocks.push({time:b.time, duration_minutes:Number(b.duration_minutes)||30, label:b.label||"", include:true}); });
+        }catch(err){ failCount++; }
+      }
+      _tplOcrLoading = false; _tplOcrLoadingProgress = "";
+      if(!_tplOcrBlocks.length){ toast("Couldn't find any items in "+(files.length>1?"those photos":"that photo")+" — try a clearer shot"); openModal(templateOcrModalHtml()); return; }
+      if(failCount) toast(failCount+" of "+files.length+" photo"+(files.length===1?"":"s")+" couldn't be read — the rest were applied");
+      _tplOcrStep = "review";
+      openModal(templateOcrModalHtml());
+      break;
+    }
+    case "applyTemplateOcrBlocks": {
+      collectTemplateOcrBlocksFromDOM();
+      const chosen = _tplOcrBlocks.filter(b=>b.include!==false && (b.label||"").trim());
+      if(!chosen.length){ toast("Nothing selected to add"); return; }
+      chosen.forEach(b=>{ templateFormBlocks.push({id:uid(), type:"event", time:b.time||"09:00", duration_minutes:Number(b.duration_minutes)||30, label:b.label.trim(), alarm_enabled:false}); });
+      resetTemplateOcr();
+      openModal(templateFormHtml(_tplFormId ? state.scheduleTemplates.find(x=>x.id===_tplFormId) : null));
+      toast(chosen.length+" item"+(chosen.length===1?"":"s")+" added");
+      break;
+    }
     case "confirmScheduleOcrImport": {
       document.querySelectorAll(".ocrDayCode").forEach(inp=>{
         const idx = Number(inp.getAttribute("data-idx"));
@@ -7393,11 +7591,12 @@ document.addEventListener("click", async function(e){
       const repeatInterval = document.getElementById("ce_repeatInterval") ? (Number(document.getElementById("ce_repeatInterval").value)||1) : 1;
       if(repeat==="custom" && repeatInterval<1){ toast("Repeat interval must be at least 1"); return; }
       if((repeat==="weekly" || (repeat==="custom" && repeatUnit==="week")) && ceRepeatDays.length===0){ toast("Pick at least one day to repeat on"); return; }
+      const ceTimeRange = collectTimeRangeWidget("ce", "09:00", 30);
       const payload = {
         label, emoji: document.getElementById("ce_emoji").value.trim()||"📌",
         date: document.getElementById("ce_date").value,
-        time: document.getElementById("ce_time").value,
-        duration_minutes: Number(document.getElementById("ce_duration").value)||30,
+        time: ceTimeRange.time,
+        duration_minutes: ceTimeRange.duration_minutes,
         color: ceFormColor,
         description: document.getElementById("ce_desc").value.trim(),
         alarm_enabled: customEventAlarmOn,
