@@ -1626,6 +1626,12 @@ async function snapshotCloudStateHistory(userId){
   }catch(e){}
 }
 async function syncStateToCloud(){
+  // Hard guard, checked at the moment this actually runs (not just when it was scheduled) —
+  // a debounced auto-sync timer can fire after state has been swapped to a client's data via
+  // openAsClient(), and without this check it would upload the client's data to the admin's
+  // own cloud row (state.profile.cloudSession is always the admin's real session while viewing
+  // a client, by design, so the user_id below would resolve to the admin, not the client).
+  if(_adminViewing) return false;
   if(!state.profile.cloudSession || !state.profile.cloudSyncEnabled) return false;
   if(!(await ensureFreshSession())) return false;
   try{
@@ -1806,6 +1812,7 @@ async function openAsClient(clientId){
     const rows = await stateRes.json();
     const profRows = profRes.ok ? await profRes.json() : [];
     const clientName = (profRows[0] && profRows[0].display_name) || "Client";
+    if(_syncDebounceTimer){ clearTimeout(_syncDebounceTimer); _syncDebounceTimer = null; }
     _adminOwnState = state; _adminOwnKey = STORE_KEY;
     const adminSession = state.profile.cloudSession, adminIsAdmin = state.profile.isCloudAdmin;
     const snap = rows[0] ? rows[0].state_json : null;
@@ -1871,6 +1878,7 @@ function discardExitConfirmHtml(){
     '<button class="btn sm" style="flex:1;background:var(--danger);color:#fff;" data-action="discardExitClientView">Yes, discard it</button></div>';
 }
 function exitClientView(msg){
+  if(_syncDebounceTimer){ clearTimeout(_syncDebounceTimer); _syncDebounceTimer = null; }
   const name = _adminViewing ? _adminViewing.name : "";
   state = _adminOwnState; STORE_KEY = _adminOwnKey;
   _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
@@ -5405,10 +5413,10 @@ let taskGradedOn = false;
 let taskFormSubtasks = [];
 function subtaskListRowsHtml(){
   return taskFormSubtasks.map((s,i)=>
-    '<div class="row-inline" style="margin-bottom:6px;align-items:center;">'+
-    '<input type="checkbox" class="stDone" data-idx="'+i+'" '+(s.done?"checked":"")+' style="width:18px;height:18px;flex:0 0 auto;">'+
-    '<input type="text" class="stInput" value="'+escapeHtml(s.title)+'" placeholder="e.g. Read chapter 3" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);'+(s.done?"text-decoration:line-through;opacity:.6;":"")+'">'+
-    '<button class="icon-btn" type="button" data-action="removeSubtaskRow" data-idx="'+i+'">✕</button></div>'
+    '<div class="row-inline" style="margin-bottom:6px;align-items:flex-start;">'+
+    '<input type="checkbox" class="stDone" data-idx="'+i+'" '+(s.done?"checked":"")+' style="width:18px;height:18px;flex:0 0 auto;margin-top:9px;">'+
+    '<textarea class="stInput" rows="1" placeholder="e.g. Read chapter 3" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.4;'+(s.done?"text-decoration:line-through;opacity:.6;":"")+'" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\';">'+escapeHtml(s.title)+'</textarea>'+
+    '<button class="icon-btn" type="button" data-action="removeSubtaskRow" data-idx="'+i+'" style="margin-top:4px;">✕</button></div>'
   ).join("");
 }
 function collectSubtasksFromDOM(){
@@ -8137,6 +8145,8 @@ document.addEventListener("click", async function(e){
       state.profile.cloudSyncEnabled = false;
       saveState();
       _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
+      if(_syncDebounceTimer){ clearTimeout(_syncDebounceTimer); _syncDebounceTimer = null; }
+      _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
       state = null; STORE_KEY = null; setCurrentProfileId("");
       location.hash = "#/home";
       renderLoginGate();
@@ -8385,10 +8395,19 @@ document.addEventListener("click", async function(e){
       state.profile.cloudSyncEnabled = !state.profile.cloudSyncEnabled;
       saveState();
       render();
-      if(state.profile.cloudSyncEnabled){ const ok = await syncStateToCloud(); render(); toast(ok?"Cloud sync on":"Sync on, but the first upload failed — check your connection"); }
+      if(state.profile.cloudSyncEnabled){
+        const ok = _adminViewing ? (await saveClientStateToCloud()).ok : await syncStateToCloud();
+        render();
+        toast(ok?"Cloud sync on":"Sync on, but the first upload failed — check your connection");
+      }
       break;
     }
-    case "syncNowCloud": { const ok = await syncStateToCloud(); render(); toast(ok?"Synced":"Sync failed — check your connection"); break; }
+    case "syncNowCloud": {
+      const ok = _adminViewing ? (await saveClientStateToCloud()).ok : await syncStateToCloud();
+      render();
+      toast(ok?"Synced":"Sync failed — check your connection");
+      break;
+    }
     case "refreshAdminList": adminClientList = null; adminPendingList = null; render(); break;
     case "openNewClientForm": openNewClientForm(); break;
     case "openNewClientEmailForm": openNewClientEmailForm(); break;
