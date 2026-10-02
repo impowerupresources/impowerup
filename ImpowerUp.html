@@ -1791,6 +1791,11 @@ function convertToEmailFormHtml(clientId, displayName){
 function openConvertToEmailForm(clientId, displayName){ newClientPw = generateSimplePassword(); openModal(convertToEmailFormHtml(clientId, displayName)); }
 
 async function openAsClient(clientId){
+  if(_adminViewing){
+    if(_adminViewing.id===clientId){ toast("Already viewing "+_adminViewing.name+"'s profile"); return; }
+    toast("Exit "+_adminViewing.name+"'s profile first (Save & Exit or Discard) before viewing another client");
+    return;
+  }
   if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
   try{
     const [stateRes, profRes] = await Promise.all([
