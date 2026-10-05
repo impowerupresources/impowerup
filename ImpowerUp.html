@@ -680,7 +680,7 @@ function defaultState(){
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
       dashboardOrder:[], dashboardHidden:[], impowerZoneOrder:[], progressOrder:[], defaultSnoozeMinutes:5,
-      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, lastGoogleSync:null,
+      googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, googleSyncPausedByClient:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], customCategories:[],
     semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[], timeBlindnessLogs:[]
@@ -1042,6 +1042,20 @@ let _googleSyncing = false;
 async function syncGoogleCalendarNow(silent){
   if(!state.profile.googleCalendarConnected || !state.profile.googleSyncKey) return;
   if(_googleSyncing) return;
+  // Admin kill switch: re-check live (not just the value cached at login) so a pause an admin
+  // flips mid-session takes effect on the very next sync attempt, not just the next login.
+  if(state.profile.cloudSession && !_adminViewing){
+    const flags = await acctFetchProfileFlags();
+    state.profile.calendarSyncPausedByAdmin = !!(flags && flags.calendar_sync_paused);
+  }
+  if(state.profile.calendarSyncPausedByAdmin){
+    if(!silent) toast("Calendar sync is paused by your admin");
+    return;
+  }
+  if(state.profile.googleSyncPausedByClient){
+    if(!silent) toast("Calendar sync is paused — turn it back on in Settings");
+    return;
+  }
   _googleSyncing = true;
   try{
     let importedCount = 0, exportedCount = 0;
@@ -1060,6 +1074,7 @@ async function syncGoogleCalendarNow(silent){
 let _lastGoogleAutoSync = 0;
 function maybeAutoSyncGoogle(){
   if(!state.profile.googleCalendarConnected) return;
+  if(state.profile.calendarSyncPausedByAdmin || state.profile.googleSyncPausedByClient) return;
   if(!state.profile.googleImportEnabled && !state.profile.googleExportEnabled) return;
   const now = Date.now();
   if(now - _lastGoogleAutoSync < 300000) return;
@@ -1085,19 +1100,27 @@ function calendarSyncCardHtml(){
   let html = '<div class="card" style="margin-top:14px;"><h2>📅 Calendar Sync</h2>';
 
   html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Google Calendar — live two-way sync</p>';
-  if(!connected){
+  if(state.profile.calendarSyncPausedByAdmin){
+    html += '<p class="hc-meta">⏸️ Calendar sync has been paused by your admin. Your Google connection and past synced items are untouched — syncing will pick back up automatically once it\'s turned back on.</p>';
+  } else if(!connected){
     html += '<p class="hc-meta">Import your Google Calendar events into Planner, and/or send your ImpowerUp tasks &amp; events to Google Calendar.</p>'+
       '<button class="btn secondary sm" style="margin-top:8px;" data-action="connectGoogleCalendar">🔗 Continue with Google</button>';
   } else {
+    const clientPaused = !!state.profile.googleSyncPausedByClient;
     html += '<p class="hc-meta">✅ Connected — last synced '+escapeHtml(lastSync)+'</p>'+
-      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
-      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
-      '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
-      '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
-      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
-      '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
-      '<button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button>'+
-      '</div>';
+      '<div class="toggle-row" style="padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:4px;"><div><div style="font-weight:700;font-size:13px;">📅 Calendar Sync</div><div class="hc-meta" style="margin-top:2px;">Master switch — turn off to pause everything below without disconnecting your Google account</div></div><div class="switch '+(clientPaused?"":"on")+'" data-action="toggleGoogleSyncClientPause"></div></div>';
+    if(clientPaused){
+      html += '<p class="hc-meta">⏸️ You\'ve paused calendar sync. Flip the switch above back on whenever you want it to resume.</p>';
+    } else {
+      html += '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬇️ Import Google Calendar events</div><div class="hc-meta" style="margin-top:2px;">New Google events appear in your Planner</div></div><div class="switch '+(state.profile.googleImportEnabled?"on":"")+'" data-action="toggleGoogleImport"></div></div>'+
+        '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">⬆️ Add ImpowerUp items to Google Calendar</div><div class="hc-meta" style="margin-top:2px;">New tasks &amp; events get sent to Google</div></div><div class="switch '+(state.profile.googleExportEnabled?"on":"")+'" data-action="toggleGoogleExport"></div></div>'+
+        '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔁 Two-way sync</div><div class="hc-meta" style="margin-top:2px;">Turns both switches above on together</div></div><div class="switch '+(state.profile.googleTwoWaySync?"on":"")+'" data-action="toggleGoogleTwoWay"></div></div>'+
+        '<p class="hc-meta" style="margin-top:6px;">Syncing creates new items on each side — editing or deleting an item afterward won\'t currently update the other side.</p>'+
+        '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
+        '<button class="btn secondary sm" data-action="syncGoogleNow">🔄 Sync Now</button>'+
+        '</div>';
+    }
+    html += '<div style="margin-top:10px;"><button class="btn ghost sm" style="color:#ef4444;" data-action="disconnectGoogleCalendar">Disconnect</button></div>';
   }
 
   html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
@@ -1427,7 +1450,7 @@ async function ensureFreshSession(){
 async function acctFetchProfileFlags(){
   if(!(await ensureFreshSession())) return null;
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+state.profile.cloudSession.user_id+"&select=display_name,is_admin,approved", {headers: acctHeaders(true)});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+state.profile.cloudSession.user_id+"&select=display_name,is_admin,approved,calendar_sync_paused", {headers: acctHeaders(true)});
     if(!res.ok) return null;
     const rows = await res.json();
     return rows[0]||null;
@@ -1688,7 +1711,7 @@ let _adminOwnState = null, _adminOwnKey = null, _adminViewing = null;
 async function loadAdminClientList(){
   if(!(await ensureFreshSession())) return [];
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?approved=eq.true&select=id,display_name,username,is_admin,created_at,ai_insights_text,ai_insights_generated_at&order=created_at.desc", {headers: acctHeaders(true)});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?approved=eq.true&select=id,display_name,username,is_admin,created_at,ai_insights_text,ai_insights_generated_at,calendar_sync_paused&order=created_at.desc", {headers: acctHeaders(true)});
     if(!res.ok) return [];
     const list = await res.json();
     // Never list the currently-logged-in admin's own profile as a "client" — opening it via
@@ -1736,7 +1759,7 @@ function renderAdmin(){
   html += adminClientList.map(c=>{
     const email = adminEmailMap ? adminEmailMap[c.id] : null;
     const emailIsSynthetic = !!(email && email.endsWith("@impowerup.local"));
-    return '<div class="habit-card"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
+    return '<div class="habit-card" style="flex-wrap:wrap;"><div class="emoji-badge" style="background:var(--surface-2);">'+(c.is_admin?"🛡️":"👤")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(c.display_name||("Client "+c.id.slice(0,8)))+(c.is_admin?' <span class="tag">Admin</span>':'')+'</div>'+
     '<div class="hc-meta">'+(c.username?('@'+escapeHtml(c.username)+' · '):'')+(email?('✉️ '+escapeHtml(email)+(emailIsSynthetic?' (no real email set)':'')+' · '):(adminEmailMap?'':'✉️ …'+' · '))+'Joined '+fmtDatePretty((c.created_at||"").slice(0,10))+'</div></div>'+
     (c.is_admin?'':'<div style="display:flex;flex-direction:column;gap:6px;"><button class="btn secondary sm" data-action="openAsClient" data-id="'+c.id+'">Open ›</button>'+
@@ -1745,7 +1768,9 @@ function renderAdmin(){
     '<button class="btn ghost sm" data-action="openResetPasswordForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.username?("@"+c.username):(c.display_name||""))+'">🔑 Reset Password</button>'+
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
     '<button class="btn ghost sm" style="color:var(--danger);" data-action="adminDeleteClient" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🗑️ Delete</button>'+
-    '</div>')+'</div>';
+    '</div>')+
+    (c.is_admin?'':'<div class="toggle-row" style="flex-basis:100%;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;"><div><div style="font-weight:700;font-size:13px;">📅 Calendar sync allowed</div><div class="hc-meta" style="margin-top:2px;">Pauses their Google Calendar import/export without disconnecting anything</div></div><div class="switch '+(c.calendar_sync_paused?"":"on")+'" data-action="adminToggleCalendarSync" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'"></div></div>')+
+    '</div>';
   }).join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
   return html;
@@ -2513,6 +2538,10 @@ async function completeCloudLogin(json, displayNameHint){
   activateProfile(p.id);
   applySession(json);
   state.profile.isCloudAdmin = !!(flagsPreCheck && flagsPreCheck.is_admin);
+  // Admin-controlled kill switch for this profile's Google Calendar sync — lives on app_profiles,
+  // not inside the synced state blob, and is re-fetched fresh on every login so a pause takes
+  // effect the next time this profile signs in without needing any change to their own data.
+  state.profile.calendarSyncPausedByAdmin = !!(flagsPreCheck && flagsPreCheck.calendar_sync_paused);
   if(flagsPreCheck && flagsPreCheck.display_name && !state.profile.firstName) state.profile.firstName = flagsPreCheck.display_name;
   state.profile.cloudSyncEnabled = true;
   state.profile.onboarded = true;
@@ -2530,6 +2559,7 @@ async function completeCloudLogin(json, displayNameHint){
         migrateCheckInsToSeparateLogs(state);
         state.profile.cloudSession = sess;
         state.profile.isCloudAdmin = isAdmin;
+        state.profile.calendarSyncPausedByAdmin = !!(flagsPreCheck && flagsPreCheck.calendar_sync_paused);
         state.profile.cloudSyncEnabled = true;
         state.profile.onboarded = true;
         saveState();
@@ -2545,7 +2575,7 @@ async function completeCloudLogin(json, displayNameHint){
 }
 async function fetchProfileFlagsByToken(token, userId){
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+userId+"&select=display_name,is_admin,approved", {headers:{apikey:SB_ACCOUNTS_KEY, Authorization:"Bearer "+token}});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+userId+"&select=display_name,is_admin,approved,calendar_sync_paused", {headers:{apikey:SB_ACCOUNTS_KEY, Authorization:"Bearer "+token}});
     if(!res.ok) return null;
     const rows = await res.json();
     return rows[0]||null;
@@ -3088,14 +3118,21 @@ function getDayTimelineItems(dateStr){
     state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), color:h.color}));
     state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   }
-  (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.emoji||(e.alarm_enabled?"🔔":"📌"), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color}));
+  (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.is_graded?"📚":(e.emoji||(e.alarm_enabled?"🔔":"📌")), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color, isGraded:!!e.is_graded, gradeClassName:e.grade_class_name||"", gradePercentage:e.grade_percentage}));
   const sched = getScheduleDayInfo(dateStr);
   if(sched && !sched.noSchool){
     sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:c.duration||30, color:c.color, classId:c.classId||null}));
   }
   (state.tasks||[]).filter(t=>t.date===dateStr).forEach(t=>{
     const link = taskLinkedInfo(t);
-    items.push({time:"", label:t.title, emoji:"📝", type:"task", id:t.id, done:t.status==="done", color:t.color, duration:t.planned_minutes, linkLabel: link?link.label:null});
+    const dueToday = t.due_date && t.due_date===dateStr;
+    items.push({time:"", label:t.title, emoji:"📝", type:"task", id:t.id, done:t.status==="done", color:dueToday?"#ef4444":t.color, duration:t.planned_minutes, linkLabel: link?link.label:null, isDue:dueToday});
+  });
+  // Separate red "due" marker on the due date itself, when it's a different day than the
+  // "When To Do It" date above (or when no do-date was set at all) — so a deadline still shows
+  // up on the calendar even if nothing was scheduled toward it that day.
+  (state.tasks||[]).filter(t=>t.status!=="done" && t.due_date && t.due_date===dateStr && t.date!==dateStr).forEach(t=>{
+    items.push({time:"", label:"Due: "+t.title, emoji:"⚠️", type:"task_due", id:t.id, color:"#ef4444", isDue:true});
   });
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
@@ -3591,10 +3628,11 @@ function subtaskChecklistHtml(t){
 }
 function taskRow(t){
   const cat = t.category ? catInfo(t.category) : null;
+  const dueBit = t.due_date ? '<span style="color:#ef4444;"> · Due '+fmtDatePretty(t.due_date)+'</span>' : '';
   return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
     '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
     '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-    '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+subtaskProgressBadgeHtml(t)+'</div></div>'+
+    '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+subtaskProgressBadgeHtml(t)+'</div></div>'+
     '<div style="display:flex;flex-direction:column;gap:6px;">'+
     '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Done</button>'+
     '<button class="icon-btn" data-action="openTaskForm" data-id="'+t.id+'">✏️</button>'+
@@ -3929,13 +3967,15 @@ function dayTimelineListHtml(dateStr){
       controls = it.done
         ? '<button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>'
         : '<div style="display:flex;gap:6px;flex-shrink:0;"><button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+it.id+'">Done</button><button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'">✏️</button></div>';
+    } else if(it.type==="task_due"){
+      controls = '<button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>';
     }
     const itColor = it.color||(tmpl?tmpl.color:"var(--accent)");
     const editId = it.id || it.classId || "";
     return '<div class="timeline-item" data-action="openTimelineItemEditor" data-type="'+it.type+'" data-id="'+editId+'" data-date="'+dateStr+'" style="align-items:center;cursor:pointer;'+(it.color?"border-left:3px solid "+it.color+";padding-left:8px;":"")+'"><div class="timeline-time">'+(it.time?fmtTime12(it.time):"")+'</div>'+
       '<div class="timeline-line"><div class="timeline-dot" style="background:'+itColor+'"></div></div>'+
-      '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
-      '<div class="hc-meta">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):it.type==="task"?("Task"+(it.linkLabel?" · "+escapeHtml(it.linkLabel):"")):"Event")+'</div></div>'+controls+'</div>';
+      '<div class="timeline-content" style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:8px;font-weight:700;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+(it.isDue&&!it.done?"color:#ef4444;":"")+'">'+it.emoji+' '+escapeHtml(it.label)+(it.duration?' <span class="hc-meta">('+it.duration+'m)</span>':"")+'</div>'+
+      '<div class="hc-meta" style="'+(it.isDue&&!it.done?"color:#ef4444;":"")+'">'+(it.type==="habit"?"Habit":it.type==="reminder"?"Reminder":it.type==="class_period"?(it.letter?it.letter+" Day class":(it.overrideLabel||"Custom schedule")):it.type==="task"?(("Task"+(it.isDue?" · Due today":""))+(it.linkLabel?" · "+escapeHtml(it.linkLabel):"")):it.type==="task_due"?"Due date":it.type==="custom_event"?("Event"+(it.isGraded?(" · 📚 Graded"+(it.gradeClassName?" — "+escapeHtml(it.gradeClassName):"")+(it.gradePercentage!=null?" ("+it.gradePercentage+"%)":"")):"")):"Event")+'</div></div>'+controls+'</div>';
   }).join("");
 }
 function dayPreviewModalHtml(dateStr){
@@ -4058,6 +4098,7 @@ function renderPlannerMonth(){
 
 /* One-off (or repeating) custom Planner events (not tied to a template) */
 let customEventAlarmOn = false;
+let eventGradedOn = false;
 let ceRepeatDays = [1,2,3,4,5];
 let ceFormColor = COLORS[0];
 const WEEKDAY_OPTS = [[0,"Sun"],[1,"Mon"],[2,"Tue"],[3,"Wed"],[4,"Thu"],[5,"Fri"],[6,"Sat"]];
@@ -4066,6 +4107,7 @@ function customEventFormHtml(dateStr, ev){
   customEventAlarmOn = !!ev.alarm_enabled;
   notifyEmailOn = !!ev.notify_email;
   notifySmsOn = !!ev.notify_sms;
+  eventGradedOn = !!ev.is_graded;
   ceFormColor = ev.color || COLORS[(state.customEvents||[]).length % COLORS.length];
   ceRepeatDays = (ev.repeat_days && ev.repeat_days.length) ? ev.repeat_days.slice() : [weekdayIndexOf(ev.date||dateStr)];
   const repeat = ev.repeat || "none";
@@ -4096,6 +4138,12 @@ function customEventFormHtml(dateStr, ev){
     '<div class="field"><label>Notes (optional)</label><textarea id="ce_desc">'+escapeHtml(ev.description||"")+'</textarea></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div style="font-weight:700;font-size:13px;">🔔 Alert for this event</div><div class="switch '+(customEventAlarmOn?"on":"")+'" data-action="toggleCustomEventAlarm"></div></div>'+
     '<div id="ce_alarmLevelBlock" style="'+(customEventAlarmOn?"":"display:none;")+'"><div class="field"><label>Alert level</label><select id="ce_alarm_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(ev.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+notifyChannelChipsHtml()+'</div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Graded assignment (quiz/test)</div><div class="hc-meta" style="margin-top:2px;">Tracks this on the calendar and lets you log a grade for it — without making it a Task</div></div><div class="switch '+(eventGradedOn?"on":"")+'" data-action="toggleEventGraded"></div></div>'+
+    '<div id="ce_gradedBlock" style="'+(eventGradedOn?"":"display:none;")+'">'+
+    '<div class="field"><label>Class</label><select id="ce_gradeClass">'+gradeClassOptionsHtml(ev.grade_class_id)+'</select></div>'+
+    '<div class="field" style="padding:10px;border-radius:10px;background:var(--surface-2);"><label>📊 Grade (optional — add now or come back later)</label>'+
+    '<div class="row-inline"><input id="ce_gradeScore" type="number" step="0.01" placeholder="Score" value="'+(ev.grade_score!=null?ev.grade_score:"")+'" style="flex:1;"><span style="align-self:center;">out of</span><input id="ce_gradeMax" type="number" step="0.01" placeholder="100" value="'+(ev.grade_max!=null?ev.grade_max:100)+'" style="flex:1;"></div></div>'+
+    '</div>'+
     '<div class="modal-actions">'+(ev.id?'<button class="btn secondary" data-action="duplicateCustomEvent" data-id="'+ev.id+'">Duplicate</button>':'')+(ev.id?'<button class="btn danger" data-action="deleteCustomEvent" data-id="'+ev.id+'">Delete</button>':'')+
     '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveCustomEvent" data-id="'+(ev.id||"")+'" style="flex:1">Save</button></div>';
@@ -4811,7 +4859,7 @@ function gradesByClass(){
 }
 function gradesSectionHtml(){
   const groups = gradesByClass();
-  if(!groups.length) return '<p class="hc-meta">No grades logged yet — mark a homework/graded task as done and enter a score to start tracking.</p>';
+  if(!groups.length) return '<p class="hc-meta">No grades logged yet — mark a homework/graded task as done, or enter a score on a graded Planner event, to start tracking.</p>';
   return groups.map(gr=>{
     const avg = Math.round((gr.entries.reduce((s,e)=>s+e.percentage,0)/gr.entries.length)*10)/10;
     const chartData = gr.entries.map(e=>({label:fmtDatePretty(e.date).slice(0,6), value:e.percentage}));
@@ -5404,7 +5452,9 @@ function taskFormHtml(t){
       '</div>' : '')+
     '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
     '<div class="field"><label>Planned time</label>'+durationDropdownHtml("tsk_planned", t.planned_minutes||30)+'</div>'+
-    '<div class="field"><label>Date (optional — shows on Planner)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div>'+
+    '<div class="row-inline"><div class="field" style="flex:1;"><label>When To Do It (optional)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div>'+
+    '<div class="field" style="flex:1;"><label>When It\'s Due (optional)</label><input id="tsk_dueDate" type="date" value="'+(t.due_date||"")+'" style="'+(t.due_date?"color:#ef4444;font-weight:700;":"")+'"></div></div>'+
+    '<p class="hc-meta" style="margin-top:-6px;">Both show on Planner/Calendar — the due date appears in red.</p>'+
     '<div class="field"><label>Notes (optional)</label><textarea id="tsk_notes" placeholder="Any extra details">'+escapeHtml(t.description||"")+'</textarea></div>'+
     '<div class="field"><label>Subtasks (optional)</label><div id="subtaskList">'+subtaskListRowsHtml()+
       '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
@@ -5483,9 +5533,11 @@ function openTaskCompleteForm(id){
   if(!t) return;
   openModal(taskCompleteFormHtml(t));
 }
+function taskEffectiveDueDate(t){ return t.due_date || t.date || ""; }
 function overdueTasks(){
   const today = todayStr();
-  return (state.tasks||[]).filter(t=>t.status!=="done" && t.date && t.date<today).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  return (state.tasks||[]).filter(t=>t.status!=="done" && taskEffectiveDueDate(t) && taskEffectiveDueDate(t)<today)
+    .slice().sort((a,b)=>taskEffectiveDueDate(a).localeCompare(taskEffectiveDueDate(b)));
 }
 function daysOverdueCount(dateStr){
   const d1 = new Date(dateStr+"T00:00:00"), d2 = new Date(todayStr()+"T00:00:00");
@@ -5498,10 +5550,11 @@ function overdueListModalHtml(){
   }
   const rows = items.map(t=>{
     const cat = t.category ? catInfo(t.category) : null;
-    const dO = daysOverdueCount(t.date);
+    const effDate = taskEffectiveDueDate(t);
+    const dO = daysOverdueCount(effDate);
     return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'+
       '<div style="font-weight:700;">'+escapeHtml(t.title)+(t.is_graded?' <span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+'</div>'+
-      '<div class="hc-meta">Due '+fmtDatePretty(t.date)+' · '+dO+' day'+(dO===1?"":"s")+' overdue'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+'</div>'+
+      '<div class="hc-meta" style="color:#ef4444;">Due '+fmtDatePretty(effDate)+' · '+dO+' day'+(dO===1?"":"s")+' overdue'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+'</div>'+
       '</div>';
   }).join("");
   return '<h2>⚠️ Overdue &amp; Missing ('+items.length+')</h2>'+
@@ -5524,7 +5577,7 @@ function renderTasks(){
   html += overdueBannerHtml();
   html += '<button class="btn block" style="margin-bottom:14px;" data-action="openTaskForm">+ New Task</button>';
   const pending = (state.tasks||[]).filter(t=>t.status!=="done").slice().sort((a,b)=>{
-    const ad = a.date||"9999-99-99", bd = b.date||"9999-99-99";
+    const ad = taskEffectiveDueDate(a)||"9999-99-99", bd = taskEffectiveDueDate(b)||"9999-99-99";
     if(ad!==bd) return ad.localeCompare(bd);
     const pr = priorityRank(b.priority) - priorityRank(a.priority);
     if(pr!==0) return pr;
@@ -5537,14 +5590,16 @@ function renderTasks(){
     return html;
   }
   const today = todayStr();
-  const dueToday = pending.filter(t=>t.date && t.date<=today);
-  const dueLater = pending.filter(t=>!t.date || t.date>today);
+  const dueToday = pending.filter(t=>taskEffectiveDueDate(t) && taskEffectiveDueDate(t)<=today);
+  const dueLater = pending.filter(t=>!taskEffectiveDueDate(t) || taskEffectiveDueDate(t)>today);
   const taskCardHtml = (t) => {
     const cat = t.category ? catInfo(t.category) : null;
+    const isPastDue = t.due_date && t.due_date<today;
+    const dueBit = t.due_date ? '<span style="'+(isPastDue?"color:#ef4444;font-weight:700;":"color:#ef4444;")+'"> · Due '+fmtDatePretty(t.due_date)+'</span>' : '';
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+subtaskProgressBadgeHtml(t)+'</div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+subtaskProgressBadgeHtml(t)+'</div>'+
       subtaskChecklistHtml(t)+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:6px;">'+
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
@@ -6925,6 +6980,12 @@ document.addEventListener("click", async function(e){
       location.href = GOOGLE_CONNECT_URL + "?key=" + encodeURIComponent(key);
       break;
     }
+    case "toggleGoogleSyncClientPause": {
+      state.profile.googleSyncPausedByClient = !state.profile.googleSyncPausedByClient;
+      saveState(); render();
+      toast(state.profile.googleSyncPausedByClient ? "Calendar sync paused" : "Calendar sync resumed");
+      break;
+    }
     case "toggleGoogleImport": {
       state.profile.googleImportEnabled = !state.profile.googleImportEnabled;
       if(!state.profile.googleImportEnabled || !state.profile.googleExportEnabled) state.profile.googleTwoWaySync = false;
@@ -7029,6 +7090,7 @@ document.addEventListener("click", async function(e){
       const linkVal = document.getElementById("tsk_link") ? document.getElementById("tsk_link").value : "";
       const linkParts = linkVal ? linkVal.split(":") : ["",""];
       const taskDate = document.getElementById("tsk_date").value||"";
+      const taskDueDate = document.getElementById("tsk_dueDate") ? (document.getElementById("tsk_dueDate").value||"") : "";
       if(taskAlarmOn && !taskDate){ toast("Add a date above to set a reminder"); return; }
       const gradeClassEl = document.getElementById("tsk_gradeClass");
       const gradeClassId = (taskGradedOn && gradeClassEl) ? gradeClassEl.value : "";
@@ -7036,7 +7098,7 @@ document.addEventListener("click", async function(e){
       if(taskGradedOn && !gradeClassId){ toast("Pick a class for this graded assignment"); return; }
       collectSubtasksFromDOM();
       const subtasks = taskFormSubtasks.filter(s=>s.title.trim()!=="").map(s=>({id:s.id||uid(), title:s.title.trim(), done:!!s.done}));
-      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate,
+      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate, due_date: taskDueDate,
         is_graded: taskGradedOn, grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
         linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
         description: (document.getElementById("tsk_notes")?document.getElementById("tsk_notes").value:"").trim(),
@@ -7601,6 +7663,13 @@ document.addEventListener("click", async function(e){
       if(ev) openCustomEventForm(ev.date, id);
       break;
     }
+    case "toggleEventGraded": {
+      const block = document.getElementById("ce_gradedBlock");
+      const isOn = t.classList.toggle("on");
+      if(block) block.style.display = isOn ? "" : "none";
+      eventGradedOn = isOn;
+      break;
+    }
     case "toggleCustomEventAlarm": {
       const block = document.getElementById("ce_alarmLevelBlock");
       const isOn = t.classList.toggle("on");
@@ -7641,8 +7710,47 @@ document.addEventListener("click", async function(e){
         repeat_until: (document.getElementById("ce_repeatUntil") && repeat!=="none") ? document.getElementById("ce_repeatUntil").value : "",
         notify_email: notifyEmailOn, notify_sms: notifySmsOn
       };
+      if(eventGradedOn){
+        const classEl = document.getElementById("ce_gradeClass");
+        const gradeClassId = classEl ? classEl.value : "";
+        if(!gradeClassId){ toast("Pick a class for this graded assignment"); return; }
+        const sem = activeSemester();
+        const cls = sem && (sem.classSubjects||[]).find(c=>c.id===gradeClassId);
+        payload.is_graded = true;
+        payload.grade_class_id = gradeClassId;
+        payload.grade_class_name = cls ? cls.name : "";
+        const scoreEl = document.getElementById("ce_gradeScore");
+        const maxEl = document.getElementById("ce_gradeMax");
+        const scoreVal = scoreEl && scoreEl.value !== "" ? Number(scoreEl.value) : null;
+        const maxVal = maxEl && maxEl.value !== "" ? Number(maxEl.value) : 100;
+        if(scoreVal!=null && maxVal>0){
+          payload.grade_score = scoreVal; payload.grade_max = maxVal;
+          payload.grade_percentage = Math.round((scoreVal/maxVal)*1000)/10;
+          payload.graded_at = todayStr();
+        } else {
+          payload.grade_score = null; payload.grade_max = maxVal; payload.grade_percentage = null; payload.graded_at = "";
+        }
+      } else {
+        payload.is_graded = false;
+        payload.grade_class_id = ""; payload.grade_class_name = "";
+        payload.grade_score = null; payload.grade_max = null; payload.grade_percentage = null; payload.graded_at = "";
+      }
       state.customEvents = state.customEvents || [];
-      if(id){ Object.assign(state.customEvents.find(x=>x.id===id), payload); } else { payload.id = uid(); state.customEvents.push(payload); }
+      let savedEvent;
+      if(id){ savedEvent = Object.assign(state.customEvents.find(x=>x.id===id), payload); } else { payload.id = uid(); state.customEvents.push(payload); savedEvent = payload; }
+      // Keep the Grades tracker (Progress tab) in sync with this event, same pattern used for
+      // graded Tasks — keyed by event_id so re-saving updates the existing entry instead of
+      // duplicating it, and removes it if the event is no longer graded or the score is cleared.
+      state.grades = state.grades || [];
+      const existingGradeIdx = state.grades.findIndex(g=>g.event_id===savedEvent.id);
+      if(savedEvent.is_graded && savedEvent.grade_percentage!=null){
+        const gradeEntry = { event_id: savedEvent.id, class_id: savedEvent.grade_class_id||"", class_name: savedEvent.grade_class_name||"Unassigned",
+          title: savedEvent.label, score: savedEvent.grade_score, max: savedEvent.grade_max, percentage: savedEvent.grade_percentage, date: savedEvent.graded_at||savedEvent.date };
+        if(existingGradeIdx>=0){ Object.assign(state.grades[existingGradeIdx], gradeEntry); }
+        else { state.grades.push(Object.assign({id:uid()}, gradeEntry)); }
+      } else if(existingGradeIdx>=0){
+        state.grades.splice(existingGradeIdx,1);
+      }
       saveState(); closeModal(); render();
       toast("Event saved");
       break;
@@ -7653,6 +7761,9 @@ document.addEventListener("click", async function(e){
       const copy = JSON.parse(JSON.stringify(src));
       copy.id = uid();
       copy.title = (src.title||"Event") + " (Copy)";
+      // A duplicated graded assignment is a new quiz/test — keep the class link but never carry
+      // the previous score over, so it doesn't look pre-graded or create a duplicate grades-log entry.
+      if(copy.is_graded){ copy.grade_score = null; copy.grade_percentage = null; copy.graded_at = ""; }
       state.customEvents = state.customEvents || [];
       state.customEvents.push(copy);
       saveState(); closeModal(); render();
@@ -7661,6 +7772,7 @@ document.addEventListener("click", async function(e){
     }
     case "deleteCustomEvent": {
       state.customEvents = (state.customEvents||[]).filter(x=>x.id!==id);
+      state.grades = (state.grades||[]).filter(g=>g.event_id!==id);
       saveState(); closeModal(); render();
       break;
     }
@@ -7894,7 +8006,7 @@ document.addEventListener("click", async function(e){
       if(type==="habit") openHabitForm(id);
       else if(type==="reminder") openReminderForm(id);
       else if(type==="custom_event"){ const ev=(state.customEvents||[]).find(x=>x.id===id); if(ev) openCustomEventForm(ev.date, id); }
-      else if(type==="task") openTaskForm(id);
+      else if(type==="task" || type==="task_due") openTaskForm(id);
       else if(type==="class_period"){ if(id) openClassForm(id); else openDayOverrideForm(date); }
       else if(type==="event") openApplyTemplateModal(date);
       break;
@@ -8109,8 +8221,9 @@ document.addEventListener("click", async function(e){
       const items = overdueTasks();
       if(!items.length){ toast("Nothing overdue"); break; }
       const text = "Overdue / Missing Assignments ("+items.length+"):\n"+items.map(ti=>{
-        const dO = daysOverdueCount(ti.date);
-        return "- "+ti.title+" — due "+fmtDatePretty(ti.date)+" ("+dO+" day"+(dO===1?"":"s")+" overdue)"+(ti.is_graded && ti.grade_class_name ? " ["+ti.grade_class_name+"]" : "");
+        const effDate = taskEffectiveDueDate(ti);
+        const dO = daysOverdueCount(effDate);
+        return "- "+ti.title+" — due "+fmtDatePretty(effDate)+" ("+dO+" day"+(dO===1?"":"s")+" overdue)"+(ti.is_graded && ti.grade_class_name ? " ["+ti.grade_class_name+"]" : "");
       }).join("\n");
       if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>toast("List copied!")).catch(()=>fallbackCopyText(text));
       else fallbackCopyText(text);
@@ -8151,6 +8264,7 @@ document.addEventListener("click", async function(e){
           return;
         }
         state.profile.isCloudAdmin = !!(flags && flags.is_admin);
+        state.profile.calendarSyncPausedByAdmin = !!(flags && flags.calendar_sync_paused);
         saveState(); closeModal();
         _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
         render();
@@ -8405,6 +8519,24 @@ document.addEventListener("click", async function(e){
     case "adminRejectClient": {
       if(!confirm("Reject and delete this request? This can't be undone.")) return;
       try{ await adminApproveClientFn(id, "reject"); toast("Request rejected"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
+      break;
+    }
+    case "adminToggleCalendarSync": {
+      const client = (adminClientList||[]).find(c=>c.id===id);
+      if(!client) return;
+      const nextPaused = !client.calendar_sync_paused;
+      if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
+      try{
+        const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+id, {
+          method:"PATCH",
+          headers: Object.assign(acctHeaders(true), {Prefer:"return=minimal"}),
+          body: JSON.stringify({ calendar_sync_paused: nextPaused })
+        });
+        if(!res.ok){ toast("Couldn't update — try again"); return; }
+        client.calendar_sync_paused = nextPaused;
+        toast(nextPaused ? "Calendar sync paused for "+(v||client.display_name||"this client") : "Calendar sync allowed again for "+(v||client.display_name||"this client"));
+        render();
+      }catch(e){ toast("Couldn't update — try again"); }
       break;
     }
     case "adminDeleteClient": {
