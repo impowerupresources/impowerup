@@ -3873,12 +3873,27 @@ function plannerShortcutsHtml(current){
     '<a href="'+it.href+'" class="chip '+(current===it.id?"selected":"")+'" style="text-decoration:none;">'+it.icon+' '+it.label+'</a>'
   ).join("")+'</div>';
 }
+/* Add-item shortcuts (+Event, +Task, +Day Off, Override Day, Change schedule) — shown once,
+   above the Day/Week/Month switcher, so they're available no matter which view is active
+   rather than only inside the Day view's own header. All act on the currently selected
+   plannerDate. */
+function plannerQuickActionsHtml(){
+  const tmpl = getTemplateForDate(plannerDate);
+  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'+
+    '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
+    '<button class="btn ghost sm" data-action="openTaskForm" data-v="'+plannerDate+'">+ Task</button>'+
+    '<button class="btn ghost sm" data-action="openHolidayForm" data-v="'+plannerDate+'">+ Day Off</button>'+
+    '<button class="btn ghost sm" data-action="openDayOverrideForm" data-v="'+plannerDate+'">🔀 Override Day</button>'+
+    '<button class="btn ghost sm" data-action="openApplyTemplateModal">'+(tmpl?tmpl.emoji+" "+escapeHtml(tmpl.name):"Change schedule")+'</button>'+
+    '</div>';
+}
 function renderPlanner(){
   const tab = currentQueryParam("tab") || "calendar";
   if(tab==="schedule") return renderPlannerSchedule();
   if(tab==="templates") return renderPlannerTemplates();
   let html = topbarHtml(sectionIcon("calendar")+" Planner","Plan your day, week, and month.");
   html += plannerShortcutsHtml("calendar");
+  html += plannerQuickActionsHtml();
   html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
     '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div></div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
@@ -3993,7 +4008,6 @@ function dayPreviewModalHtml(dateStr){
     '<button class="btn" data-action="jumpToDay" data-v="'+dateStr+'" style="flex:1">Open full day ›</button></div>';
 }
 function renderPlannerDay(){
-  const tmpl = getTemplateForDate(plannerDate);
   const [yy,mm,dd] = plannerDate.split("-").map(Number);
   const dayLabel = new Date(yy,mm-1,dd).toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"});
   const calPos = state.profile.plannerDayCalPos || "bottom";
@@ -4011,11 +4025,6 @@ function renderPlannerDay(){
     '</div>'+
     '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
     '<button class="icon-btn" data-action="togglePlannerDayCalPos" title="'+(calPos==="bottom"?"Move calendar above":"Move calendar below")+'">'+(calPos==="bottom"?"⬆️":"⬇️")+'</button>'+
-    '<button class="btn ghost sm" data-action="openCustomEventForm" data-v="'+plannerDate+'">+ Event</button>'+
-    '<button class="btn ghost sm" data-action="openTaskForm" data-v="'+plannerDate+'">+ Task</button>'+
-    '<button class="btn ghost sm" data-action="openHolidayForm" data-v="'+plannerDate+'">+ Day Off</button>'+
-    '<button class="btn ghost sm" data-action="openDayOverrideForm" data-v="'+plannerDate+'">🔀 Override Day</button>'+
-    '<button class="btn ghost sm" data-action="openApplyTemplateModal">'+(tmpl?tmpl.emoji+" "+escapeHtml(tmpl.name):"Change schedule")+'</button>'+
     '</div></div>'+
     dayTimelineListHtml(plannerDate)+
     '</div>';
