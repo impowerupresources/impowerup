@@ -1653,11 +1653,23 @@ async function syncStateToCloud(){
    sync attempt the moment the tab is hidden or closed, so we don't depend on the debounce
    timer alone. */
 let _syncDebounceTimer = null;
+/* Bumped by openAsClient/exitClientView/doLogOut on every identity switch. A debounce timer
+   captures the token at schedule time; if the token has moved on by the time the timer fires
+   (meaning ANY identity swap happened in between — admin<->client, logout, whatever), the
+   timer is a no-op. This is a second, independent layer on top of the _adminViewing check below:
+   it closes the gap even for swap mechanisms we haven't specifically identified, since it doesn't
+   care WHY the identity changed, only THAT it changed. */
+let _viewSessionToken = 0;
 function maybeAutoSyncCloud(){
   if(_adminViewing) return; // never sync while browsing as a client — would overwrite the admin's own row with client data
   if(!state.profile.cloudSyncEnabled || !state.profile.cloudSession) return;
   if(_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
-  _syncDebounceTimer = setTimeout(()=>{ _syncDebounceTimer = null; syncStateToCloud(); }, 4000);
+  const tok = _viewSessionToken;
+  _syncDebounceTimer = setTimeout(()=>{
+    _syncDebounceTimer = null;
+    if(tok !== _viewSessionToken) return; // identity switched since this was scheduled — abort
+    syncStateToCloud();
+  }, 4000);
 }
 function flushCloudSyncNow(){
   if(_adminViewing) return;
@@ -1678,7 +1690,13 @@ async function loadAdminClientList(){
   try{
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?approved=eq.true&select=id,display_name,username,is_admin,created_at,ai_insights_text,ai_insights_generated_at&order=created_at.desc", {headers: acctHeaders(true)});
     if(!res.ok) return [];
-    return await res.json();
+    const list = await res.json();
+    // Never list the currently-logged-in admin's own profile as a "client" — opening it via
+    // openAsClient() would use the admin's own id as _adminViewing.id, so later edits/saves
+    // made while "viewing" would legitimately target the admin's own row, but it's never
+    // meant to be reachable this way and only adds risk for no benefit.
+    const myId = state && state.profile && state.profile.cloudSession && state.profile.cloudSession.user_id;
+    return myId ? list.filter(c=>c.id!==myId) : list;
   }catch(e){ return []; }
 }
 async function loadAdminPendingList(){
@@ -1827,6 +1845,7 @@ async function openAsClient(clientId){
     state.profile.isCloudAdmin = adminIsAdmin;
     STORE_KEY = null;
     _adminViewing = {id: clientId, name: clientName};
+    _viewSessionToken++;
     _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
     location.hash = "#/home";
     render();
@@ -1882,6 +1901,7 @@ function exitClientView(msg){
   const name = _adminViewing ? _adminViewing.name : "";
   state = _adminOwnState; STORE_KEY = _adminOwnKey;
   _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
+  _viewSessionToken++;
   _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
   location.hash = "#/admin";
   render();
@@ -8147,6 +8167,7 @@ document.addEventListener("click", async function(e){
       _assessCache = null; _assessView = {mode:"list"}; _assessCurrent = null; _hasAnyAssessment = null;
       if(_syncDebounceTimer){ clearTimeout(_syncDebounceTimer); _syncDebounceTimer = null; }
       _adminOwnState = null; _adminOwnKey = null; _adminViewing = null;
+      _viewSessionToken++;
       state = null; STORE_KEY = null; setCurrentProfileId("");
       location.hash = "#/home";
       renderLoginGate();
