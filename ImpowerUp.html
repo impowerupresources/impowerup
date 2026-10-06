@@ -684,7 +684,7 @@ function defaultState(){
       googleSyncKey:"", googleCalendarConnected:false, googleImportEnabled:false, googleExportEnabled:false, googleTwoWaySync:false, googleSyncPausedByClient:false, lastGoogleSync:null,
       navOrder:[] },
     habits:[], habitLogs:[], goals:[], reminders:[], focusSessions:[], scheduleTemplates:[], dayPlans:[], templateRules:[], pomodoroPresets:[], customEvents:[], customCategories:[],
-    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[], timeBlindnessLogs:[]
+    semesters:[], activeSemesterId:null, plannerHolidays:[], scheduleOverrides:{}, tasks:[], todoItems:[], checkIns:[], sleepLogs:[], moodLogs:[], grades:[], journalEntries:[], timeBlindnessLogs:[]
   };
 }
 /* One-time migration: the old combined "checkIns" log (sleep + mood together) is split into
@@ -3270,7 +3270,7 @@ const BOTTOM_NAV_PRIMARY_COUNT = 4;
    to that hub's main page. Only one hub is expanded at a time. */
 let _navExpandedRoute = null;
 function navSubsectionsFor(path){
-  if(path==="actionhub") return [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
+  if(path==="actionhub") return [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"todolist",label:"To Do List",icon:(sectionIcon("todolist")||"📋"),indent:1},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
   if(path==="toolkit") return [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
   if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
@@ -3342,9 +3342,10 @@ function tabStripHtml(basePath, tabs, activeTab){
 }
 function renderActionHub(){
   const tab = currentQueryParam("tab") || "tasks";
-  const tabs = [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
+  const tabs = [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"todolist",label:"To Do List",icon:(sectionIcon("todolist")||"📋")},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
   let html = tabStripHtml("actionhub", tabs, tab);
-  if(tab==="goals") html += renderGoals();
+  if(tab==="todolist") html += renderTodoList();
+  else if(tab==="goals") html += renderGoals();
   else if(tab==="habits") html += renderHabits();
   else html += renderTasks();
   return html;
@@ -5530,6 +5531,7 @@ function rerenderSubtaskList(){
   if(list) list.innerHTML = subtaskListRowsHtml();
 }
 function openTaskForm(id, prefillDate){
+  pendingTodoItemId = null;
   const t = id ? (state.tasks||[]).find(x=>x.id===id) : (prefillDate ? {title:"", planned_minutes:30, category:"", date:prefillDate} : null);
   taskFormColor = t ? (t.color||COLORS[0]) : COLORS[(state.tasks||[]).length % COLORS.length];
   taskFormCat = t ? (t.category||"") : "";
@@ -5606,6 +5608,56 @@ function overdueBannerHtml(){
     '<div style="font-size:12.5px;opacity:.9;">Tap to view and copy the full list</div></div>'+
     '<div style="font-size:20px;">›</div></div></div>';
 }
+/* ============ To Do List (brain-dump list that can be turned into Tasks) ============ */
+let pendingTodoItemId = null;
+function todoItems(){ state.todoItems = state.todoItems || []; return state.todoItems; }
+function newTaskFromTitle(title){
+  return { id: uid(), title: title, planned_minutes: 30, color: COLORS[(state.tasks||[]).length % COLORS.length], category:"", priority:"medium",
+    date:"", due_date:"", is_academic:false, is_graded:false, grade_class_id:"", grade_class_name:"", subtasks:[], linked_type:"", linked_id:"",
+    description:"", alarm_enabled:false, alarm_time:"", alarm_level:"moderate", notify_email:false, notify_sms:false,
+    status:"pending", actual_minutes:null, distraction:"", helped:"", follow_up_needed:false, follow_up_date:"", follow_up_notes:"",
+    created_at:new Date().toISOString(), completed_at:null };
+}
+function renderTodoList(){
+  const items = todoItems();
+  const open = items.filter(i=>!i.done && !i.task_id);
+  const finished = items.filter(i=>i.done || i.task_id);
+  let html = topbarHtml("To Do List","Jot down everything you need to do, then turn items into Tasks when you're ready to plan them.");
+  html += '<div class="card"><div class="field"><label>Add to your list</label>'+
+    '<textarea id="todo_input" rows="3" placeholder="Type or paste your list — one item per line"></textarea></div>'+
+    '<button class="btn block" data-action="addTodoItems">+ Add to list</button></div>';
+  if(!items.length){
+    html += emptyState("📋","Your list is empty","Add a few things above. You can turn any item into a full Task (with a date, time estimate, and alerts) whenever you're ready.");
+    return html;
+  }
+  html += '<div class="section-head"><h2>📋 To Do ('+open.length+')</h2></div>';
+  if(!open.length) html += '<p class="hc-meta">Nothing left on the list.</p>';
+  else {
+    html += open.map(i=>
+      '<div class="habit-card"><div class="hc-body" style="display:flex;align-items:center;gap:10px;">'+
+        '<div class="chip" data-action="toggleTodoItem" data-id="'+i.id+'" title="Check off" style="min-width:28px;text-align:center;">☐</div>'+
+        '<div class="hc-title" style="flex:1;word-break:break-word;">'+escapeHtml(i.text)+'</div></div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px;">'+
+        '<button class="btn secondary sm" data-action="todoToTask" data-id="'+i.id+'">➜ Make Task</button>'+
+        '<div style="display:flex;gap:6px;justify-content:flex-end;"><button class="icon-btn" data-action="editTodoItem" data-id="'+i.id+'" title="Edit">✏️</button>'+
+        '<button class="icon-btn" data-action="deleteTodoItem" data-id="'+i.id+'" title="Delete">🗑️</button></div></div></div>'
+    ).join("");
+    html += '<button class="btn secondary block" style="margin-top:10px;" data-action="todoAllToTasks">➜ Make Tasks from all '+open.length+' open item'+(open.length===1?"":"s")+'</button>'+
+      '<p class="hc-meta" style="margin-top:4px;">Quick-creates plain Tasks (30 min, medium priority). Edit any task afterward to add dates, alerts, and more.</p>';
+  }
+  if(finished.length){
+    html += '<div class="section-head"><h2>✅ Done / Turned into Tasks ('+finished.length+')</h2></div>';
+    html += finished.map(i=>
+      '<div class="habit-card" style="opacity:.8;"><div class="hc-body" style="display:flex;align-items:center;gap:10px;">'+
+        (i.task_id ? '<span class="tag">➜ Task</span>' : '<div class="chip" data-action="toggleTodoItem" data-id="'+i.id+'" title="Put back" style="min-width:28px;text-align:center;">☑</div>')+
+        '<div class="hc-title" style="flex:1;text-decoration:line-through;opacity:.7;word-break:break-word;">'+escapeHtml(i.text)+'</div></div>'+
+        '<button class="icon-btn" data-action="deleteTodoItem" data-id="'+i.id+'" title="Delete">🗑️</button></div>'
+    ).join("");
+    html += '<button class="btn ghost sm" style="margin-top:8px;" data-action="clearDoneTodos">Clear done items</button>';
+  }
+  return html;
+}
+
 let taskListTypeFilter = "all";
 let taskListPriorityFilter = "all";
 function taskMatchesFilters(t){
@@ -7212,6 +7264,7 @@ document.addEventListener("click", async function(e){
         payload.distraction = ""; payload.helped = ""; payload.follow_up_needed = false;
         payload.follow_up_date = ""; payload.follow_up_notes = ""; payload.created_at = new Date().toISOString(); payload.completed_at = null;
         state.tasks.push(payload);
+        if(pendingTodoItemId){ const ti = todoItems().find(x=>x.id===pendingTodoItemId); if(ti){ ti.task_id = payload.id; ti.done = true; } pendingTodoItemId = null; }
         const gapNoteEl = document.getElementById("tsk_gapNote");
         const gapMinutesEl = document.getElementById("tsk_gapMinutes");
         if(gapNoteEl){
@@ -7240,6 +7293,56 @@ document.addEventListener("click", async function(e){
       state.tasks.push(copy);
       saveState(); closeModal(); render();
       toast("Task duplicated");
+      break;
+    }
+    case "addTodoItems": {
+      const el = document.getElementById("todo_input");
+      const lines = (el ? el.value : "").split(/\n+/).map(x=>x.replace(/^\s*(?:[-*••]|\d+[.)])\s*/,"").trim()).filter(Boolean);
+      if(!lines.length){ toast("Type at least one item"); return; }
+      lines.forEach(text=>todoItems().push({id:uid(), text, done:false, task_id:null, created_at:new Date().toISOString()}));
+      saveState(); render();
+      toast(lines.length===1 ? "Added to your list" : lines.length+" items added");
+      break;
+    }
+    case "toggleTodoItem": {
+      const it = todoItems().find(x=>x.id===id);
+      if(it && !it.task_id){ it.done = !it.done; saveState(); render(); }
+      break;
+    }
+    case "editTodoItem": {
+      const it = todoItems().find(x=>x.id===id);
+      if(!it) return;
+      const nt = prompt("Edit item", it.text);
+      if(nt!==null && nt.trim()){ it.text = nt.trim(); saveState(); render(); }
+      break;
+    }
+    case "deleteTodoItem": {
+      state.todoItems = todoItems().filter(x=>x.id!==id);
+      saveState(); render();
+      break;
+    }
+    case "clearDoneTodos": {
+      state.todoItems = todoItems().filter(x=>!(x.done || x.task_id));
+      saveState(); render();
+      break;
+    }
+    case "todoToTask": {
+      const it = todoItems().find(x=>x.id===id);
+      if(!it) return;
+      openTaskForm(null);
+      pendingTodoItemId = it.id;
+      const ti = document.getElementById("tsk_title");
+      if(ti) ti.value = it.text;
+      break;
+    }
+    case "todoAllToTasks": {
+      const open = todoItems().filter(x=>!x.done && !x.task_id);
+      if(!open.length) return;
+      if(!confirm("Create "+open.length+" task"+(open.length===1?"":"s")+" from your open list items?")) return;
+      state.tasks = state.tasks || [];
+      open.forEach(it=>{ const tk = newTaskFromTitle(it.text); state.tasks.push(tk); it.task_id = tk.id; it.done = true; });
+      saveState(); render();
+      toast(open.length+" task"+(open.length===1?"":"s")+" created — find them under Tasks");
       break;
     }
     case "deleteTask": { state.tasks = (state.tasks||[]).filter(x=>x.id!==id); state.grades = (state.grades||[]).filter(g=>g.task_id!==id); saveState(); closeModal(); render(); break; }
