@@ -3275,8 +3275,7 @@ function navSubsectionsFor(path){
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="planner") return [
     {id:"calendar", label:"Calendar", icon:sectionIcon("calendar")},
-    {id:"schedule", label:"Schedule", icon:sectionIcon("schedule")},
-    {id:"classes", label:"Classes", icon:sectionIcon("classes"), indent:1, jumpTab:"schedule"},
+    {id:"schedule", label:"Class Setup", icon:sectionIcon("schedule")},
     {id:"templates", label:"Templates", icon:sectionIcon("templates"), indent:1}
   ];
   return null;
@@ -3872,8 +3871,7 @@ let plannerMonthCursor = todayStr().slice(0,7);
 function plannerShortcutsHtml(current){
   const items = [
     {id:"calendar", href:"#/planner", label:"Calendar", icon:sectionIcon("calendar")},
-    {id:"schedule", href:"#/planner?tab=schedule", label:"Schedule", icon:sectionIcon("schedule")},
-    {id:"classes", href:"#/planner?tab=schedule&jump=classes", label:"Classes", icon:sectionIcon("classes")},
+    {id:"schedule", href:"#/planner?tab=schedule", label:"Class Setup", icon:sectionIcon("schedule")},
     {id:"templates", href:"#/planner?tab=templates", label:"Templates", icon:sectionIcon("templates")}
   ];
   return '<div class="chip-group" style="margin-bottom:12px;">'+items.map(it=>
@@ -3909,7 +3907,7 @@ function renderPlanner(){
   return html;
 }
 function renderPlannerSchedule(){
-  let html = topbarHtml(sectionIcon("schedule")+" Schedule","Your class schedule, rotation, and holidays.");
+  let html = topbarHtml(sectionIcon("schedule")+" Class Setup","Your class schedule, rotation, and holidays.");
   html += plannerShortcutsHtml("schedule");
   html += scheduleSettingsCardHtml();
   return html;
