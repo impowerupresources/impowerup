@@ -859,6 +859,7 @@ function setupPwaMeta(){
   }catch(e){}
 }
 function requestNotificationPermission(){
+  if(typeof _adminViewing!=="undefined" && _adminViewing){ toast("Phone push must be set up by the client on their own device"); return; }
   if(!("Notification" in window)){ toast("This browser doesn't support notifications"); return; }
   if(location.protocol!=="https:" && location.hostname!=="localhost"){
     toast("Notifications need HTTPS hosting — see Settings for details");
@@ -906,6 +907,7 @@ function sbRest(path, opts){
   return fetch(SB_ACCOUNTS_URL+"/rest/v1/"+path, Object.assign({headers: sbHeaders()}, opts||{}));
 }
 async function subscribeToPush(){
+  if(typeof _adminViewing!=="undefined" && _adminViewing) return false;
   if(!("serviceWorker" in navigator) || !("PushManager" in window)){ toast("This browser doesn't support push"); return false; }
   try{
     const reg = await navigator.serviceWorker.ready;
@@ -6029,6 +6031,13 @@ function notificationsCardHtml(){
   const smsConnected = !!p.notifyPhone;
   let html = '<div class="card" style="margin-top:14px;"><h2>🔔 Notifications</h2>';
 
+  html += '<div style="background:var(--surface-2, rgba(127,127,127,.1));border-radius:12px;padding:12px 14px;margin:6px 0 12px;">'+
+    '<p class="hc-meta" style="font-weight:700;margin:0 0 6px;">Set up your alerts in 3 steps</p>'+
+    '<ol class="hc-meta" style="margin:0;padding-left:18px;line-height:1.5;">'+
+    '<li><b>Email:</b> enter your email below, tap <i>Save contact info</i>, then switch on Email notifications.</li>'+
+    '<li><b>Phone alerts (iPhone):</b> in Safari tap Share → <i>Add to Home Screen</i>, open ImpowerUp from that icon, log in, then tap <i>Enable Phone Notifications</i> and allow the prompt.</li>'+
+    '<li><b>Check it:</b> the Background Push card should say "connected ✅ (this device)". Use the same device each time so alerts reach it.</li></ol></div>';
+
   html += '<p class="hc-meta" style="font-weight:700;margin-top:2px;">Email &amp; Text</p>'+
     '<p class="hc-meta">Send task, event, habit, and goal alerts to your email and/or phone — not just this device. Delivery runs through ImpowerUp\'s shared email/text provider, so there\'s nothing for you to connect — just add your contact info below.</p>'+
     '<div class="row-inline" style="margin-top:10px;"><div class="field"><label>Notification email</label><input id="set_notifyEmail" type="email" placeholder="you@example.com" value="'+escapeHtml(p.notifyEmail||"")+'"></div>'+
@@ -6041,6 +6050,11 @@ function notificationsCardHtml(){
   const notifPerm = notifSupported ? Notification.permission : "unsupported";
   const isSecure = location.protocol==="https:" || location.hostname==="localhost";
   html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
+  if(typeof _adminViewing!=="undefined" && _adminViewing){
+    html += '<p class="hc-meta" style="font-weight:700;">📱 Phone Notifications</p>'+
+      '<p class="hc-meta">Viewing as a client: phone push is set up by the client on their own device, so it\'s disabled here.</p></div>';
+    return html;
+  }
   html += '<p class="hc-meta" style="font-weight:700;">📱 Phone Notifications</p>'+
     '<p class="hc-meta">For real lock-screen banners/badges on iPhone, this file needs to be hosted at a real HTTPS address and added to your Home Screen — a local file can\'t send phone notifications at all.</p>'+
     (!isSecure ? '<p class="hc-meta" style="color:var(--danger, #ef4444);">⚠️ Not currently on HTTPS — host this file first (see About below), then come back here.</p>' :
@@ -6050,7 +6064,7 @@ function notificationsCardHtml(){
   html += '<div style="border-top:1px solid var(--border);margin:16px 0;"></div>';
   html += '<p class="hc-meta" style="font-weight:700;">🔁 Background Push</p>'+
     '<p class="hc-meta">Deliver alerts even when the app is fully closed — runs automatically through ImpowerUp\'s backend once you enable Phone Notifications above, nothing to set up.</p>'+
-    (state.profile.pushEnabled ? '<span class="tag">Background push connected ✅</span>' :
+    (window._pushEndpoint ? '<span class="tag">Background push connected ✅ (this device)</span>' :
       '<button class="btn sm" data-action="requestNotificationPermission">Connect</button>');
 
   html += '</div>';
@@ -6633,8 +6647,21 @@ function dismissAlarm(){
   const overlay = document.getElementById("alarmOverlay");
   if(overlay) overlay.remove();
 }
+/* pushEnabled lives in the cloud-synced profile, so a second device can inherit "connected" without
+   ever subscribing. Each device must register its own subscription — do it silently here when this
+   device already has notification permission. */
+let _pushEnsureRan = false;
+async function ensurePushRegistered(){
+  if(_pushEnsureRan || (typeof _adminViewing!=="undefined" && _adminViewing)) return;
+  if(!pushBackendConfigured() || !("Notification" in window) || Notification.permission!=="granted") return;
+  _pushEnsureRan = true;
+  const ok = await subscribeToPush();
+  if(ok){ syncAllAlertsToServer(true); render(); }
+  else _pushEnsureRan = false;
+}
 function checkReminders(){
   if(!state || !state.profile.onboarded) return;
+  ensurePushRegistered();
   syncAllAlertsToServer(false);
   maybeAutoSyncGoogle();
   if(document.getElementById("alarmOverlay")) return;
