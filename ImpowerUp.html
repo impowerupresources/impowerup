@@ -1772,7 +1772,6 @@ function renderAdmin(){
     (c.username?'<button class="btn ghost sm" data-action="openConvertToEmailForm" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"")+'">✉️ Give Real Email Login</button>':'')+
     '<button class="btn ghost sm" style="color:var(--danger);" data-action="adminDeleteClient" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'">🗑️ Delete</button>'+
     '</div>')+
-    (c.is_admin?'':'<div class="toggle-row" style="flex-basis:100%;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;"><div><div style="font-weight:700;font-size:13px;">📅 Calendar sync allowed</div><div class="hc-meta" style="margin-top:2px;">Pauses their Google Calendar import/export without disconnecting anything</div></div><div class="switch '+(c.calendar_sync_paused?"":"on")+'" data-action="adminToggleCalendarSync" data-id="'+c.id+'" data-v="'+escapeHtml(c.display_name||"this client")+'"></div></div>')+
     '</div>';
   }).join("");
   html += '<button class="btn secondary sm" style="margin-top:10px;" data-action="refreshAdminList">↻ Refresh list</button>';
@@ -8624,24 +8623,6 @@ document.addEventListener("click", async function(e){
     case "adminRejectClient": {
       if(!confirm("Reject and delete this request? This can't be undone.")) return;
       try{ await adminApproveClientFn(id, "reject"); toast("Request rejected"); adminClientList=null; adminPendingList=null; render(); }catch(err){ toast(err.message); }
-      break;
-    }
-    case "adminToggleCalendarSync": {
-      const client = (adminClientList||[]).find(c=>c.id===id);
-      if(!client) return;
-      const nextPaused = !client.calendar_sync_paused;
-      if(!(await ensureFreshSession())){ toast("Session expired — log in again"); return; }
-      try{
-        const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_profiles?id=eq."+id, {
-          method:"PATCH",
-          headers: Object.assign(acctHeaders(true), {Prefer:"return=minimal"}),
-          body: JSON.stringify({ calendar_sync_paused: nextPaused })
-        });
-        if(!res.ok){ toast("Couldn't update — try again"); return; }
-        client.calendar_sync_paused = nextPaused;
-        toast(nextPaused ? "Calendar sync paused for "+(v||client.display_name||"this client") : "Calendar sync allowed again for "+(v||client.display_name||"this client"));
-        render();
-      }catch(e){ toast("Couldn't update — try again"); }
       break;
     }
     case "adminDeleteClient": {
