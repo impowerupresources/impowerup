@@ -674,6 +674,7 @@ function defaultState(){
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerShowClasses:true, plannerShowTemplates:false,
       username:"", email:"", pushEnabled:false,
       cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
@@ -2834,6 +2835,7 @@ function checkLevelUp(prevXp){
 
 /* ============ Schedule templates / effective time ============ */
 function getTemplateForDate(dateStr){
+  if(!state.profile.plannerShowTemplates) return null; // templates are opt-in — off by default so a day stays blank until turned on
   if(isPlannerHoliday(dateStr)) return null; // holidays/breaks/days off suppress the assigned day template
   const dp = state.dayPlans.find(x=>x.date===dateStr);
   if(dp){
@@ -3096,6 +3098,11 @@ function dayLetterBadgeHtml(dateStr, size){
   return '<span class="tag" style="background:var(--accent);color:#fff;'+(size==="sm"?"font-size:9px;padding:2px 7px;":"")+'">'+escapeHtml(label)+'</span>';
 }
 function getDayTimelineItems(dateStr){
+  // Classes (from the rotation/block Class Schedule) and Templates (reusable day plans with
+  // their own time blocks) are two separate, optional sources for what shows up on a day —
+  // gated by their own Settings switches so a client never sees the same class period twice
+  // (once as a template "Event" block, once as the actual class) unless they deliberately turn
+  // both sources on. With both off, the day is intentionally blank aside from events/tasks/habits.
   const template = getTemplateForDate(dateStr);
   const items = [];
   if(template){
@@ -3119,7 +3126,7 @@ function getDayTimelineItems(dateStr){
     state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   }
   (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.is_graded?"📚":(e.emoji||(e.alarm_enabled?"🔔":"📌")), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color, isGraded:!!e.is_graded, gradeClassName:e.grade_class_name||"", gradePercentage:e.grade_percentage}));
-  const sched = getScheduleDayInfo(dateStr);
+  const sched = state.profile.plannerShowClasses ? getScheduleDayInfo(dateStr) : null;
   if(sched && !sched.noSchool){
     sched.classes.forEach(c=>items.push({time:c.time, label:c.subject, emoji:"📚", type:"class_period", letter:sched.letter, overrideLabel:sched.overrideLabel, duration:c.duration||30, color:c.color, classId:c.classId||null}));
   }
@@ -3907,9 +3914,21 @@ function renderPlannerSchedule(){
   html += scheduleSettingsCardHtml();
   return html;
 }
+function plannerSourceTogglesHtml(){
+  const showClasses = state.profile.plannerShowClasses!==false;
+  const showTemplates = !!state.profile.plannerShowTemplates;
+  return '<div class="card" style="margin-top:14px;">'+
+    '<h2>👀 What shows on your Calendar</h2>'+
+    '<p class="hc-meta">Classes and Templates are separate, optional sources — leave Templates off if your classes already come from the Class Schedule below, so the same period never shows twice.</p>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Show Classes</div><div class="hc-meta" style="margin-top:2px;">From your rotation/block Class Schedule</div></div><div class="switch '+(showClasses?"on":"")+'" data-action="togglePlannerShowClasses"></div></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🗓️ Show Templates</div><div class="hc-meta" style="margin-top:2px;">Off by default — a day stays blank until you turn this on or apply a template to it</div></div><div class="switch '+(showTemplates?"on":"")+'" data-action="togglePlannerShowTemplates"></div></div>'+
+    (showClasses && showTemplates ? '<p class="hc-meta" style="margin-top:4px;color:#ef4444;">Both are on — if a template also includes your class periods as Event blocks, they\'ll show twice. Turn one off, or remove those blocks from the template.</p>' : '')+
+    '</div>';
+}
 function renderPlannerTemplates(){
   let html = topbarHtml(sectionIcon("templates")+" Templates","Reusable daily schedules you can apply to any day.");
   html += plannerShortcutsHtml("templates");
+  html += plannerSourceTogglesHtml();
   html += '<div class="card" style="margin-top:14px;">'+templateGalleryHtml()+'</div>';
   return html;
 }
@@ -7500,6 +7519,8 @@ document.addEventListener("click", async function(e){
     case "pickPlannerDay": plannerDate=v; render(); break;
     case "expandDayPreview": openModal(dayPreviewModalHtml(v)); break;
     case "togglePlannerDayCalPos": state.profile.plannerDayCalPos = (state.profile.plannerDayCalPos==="bottom"?"top":"bottom"); saveState(); render(); break;
+    case "togglePlannerShowClasses": state.profile.plannerShowClasses = !(state.profile.plannerShowClasses!==false); saveState(); render(); break;
+    case "togglePlannerShowTemplates": state.profile.plannerShowTemplates = !state.profile.plannerShowTemplates; saveState(); render(); break;
     case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="horizontal"?"vertical":"horizontal"); saveState(); render(); break;
     case "toggleMonthGlanceView": state.profile.monthGlanceView = (state.profile.monthGlanceView==="expanded"?"compact":"expanded"); saveState(); render(); break;
     case "toggleWeekStartDay": state.profile.weekStartDay = (state.profile.weekStartDay==="monday"?"sunday":"monday"); saveState(); render(); break;
@@ -7531,6 +7552,7 @@ document.addEventListener("click", async function(e){
     case "applyTemplate": {
       const date = t.getAttribute("data-date");
       assignTemplateToDate(date, id);
+      state.profile.plannerShowTemplates = true; // applying one explicitly is the client "turning it on"
       saveState(); closeModal(); render();
       toast("Schedule applied");
       break;
@@ -7622,6 +7644,7 @@ document.addEventListener("click", async function(e){
         if(templateId){ assignTemplateToDate(d.date, templateId); applied++; }
         else skipped++;
       });
+      if(applied) state.profile.plannerShowTemplates = true; // applying any is the client "turning it on"
       saveState(); closeModal(); render();
       resetScheduleOcr();
       toast("Applied schedule to "+applied+" day"+(applied===1?"":"s")+(skipped?" ("+skipped+" skipped)":""));
@@ -7669,6 +7692,7 @@ document.addEventListener("click", async function(e){
       const date = todayStr();
       const existing = state.dayPlans.find(dp=>dp.date===date);
       if(existing) existing.template_id = id; else state.dayPlans.push({id:uid(), date, template_id:id});
+      state.profile.plannerShowTemplates = true; // applying one explicitly is the client "turning it on"
       saveState(); closeModal();
       location.hash = "#/planner";
       render();
