@@ -5460,6 +5460,10 @@ function taskFormHtml(t){
       '<div class="toggle-row" style="padding:4px 0;"><div style="font-weight:700;font-size:13px;">🤷 Not sure how long</div><div class="switch" data-action="toggleTbGapNotSure"></div></div>'+
       '</div>' : '')+
     '<div class="field"><label>Task</label><input id="tsk_title" type="text" placeholder="e.g. Math homework" value="'+escapeHtml(t.title||"")+'"></div>'+
+    '<div class="field"><label>Type</label><div class="chip-group" id="taskTypeChips">'+
+      '<div class="chip '+(taskFormType==="academic"?"selected":"")+'" data-action="pickTaskType" data-v="academic">🎓 Academic</div>'+
+      '<div class="chip '+(taskFormType==="personal"?"selected":"")+'" data-action="pickTaskType" data-v="personal">🏠 Personal</div>'+
+    '</div></div>'+
     '<div class="field"><label>Planned time</label>'+durationDropdownHtml("tsk_planned", t.planned_minutes||30)+'</div>'+
     '<div class="row-inline"><div class="field" style="flex:1;"><label>When To Do It (optional)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div>'+
     '<div class="field" style="flex:1;"><label>When It\'s Due (optional)</label><input id="tsk_dueDate" type="date" value="'+(t.due_date||"")+'" style="'+(t.due_date?"color:#ef4444;font-weight:700;":"")+'"></div></div>'+
@@ -5468,7 +5472,7 @@ function taskFormHtml(t){
     '<div class="field"><label>Subtasks (optional)</label><div id="subtaskList">'+subtaskListRowsHtml()+
       '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
     priorityChipsHtml("pickTaskPriority", taskFormPriority)+
-    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Homework / graded assignment</div><div class="hc-meta" style="margin-top:2px;">Marks this task so you can log a grade when it\'s done</div></div><div class="switch '+(taskGradedOn?"on":"")+'" data-action="toggleTaskGraded"></div></div>'+
+    '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Homework / graded assignment</div><div class="hc-meta" style="margin-top:2px;">Marks this task so you can log a grade when it\'s done — switches Type to Academic</div></div><div class="switch '+(taskGradedOn?"on":"")+'" data-action="toggleTaskGraded"></div></div>'+
     '<div id="tsk_gradedBlock" style="'+(taskGradedOn?"":"display:none;")+'"><div class="field"><label>Class</label><select id="tsk_gradeClass">'+gradeClassOptionsHtml(t.grade_class_id)+'</select></div></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
@@ -5489,6 +5493,7 @@ let taskAlarmOn = false;
 let tskGapNotSure = false;
 let taskFormPriority = "medium";
 let taskGradedOn = false;
+let taskFormType = "personal";
 let taskFormSubtasks = [];
 function subtaskListRowsHtml(){
   return taskFormSubtasks.map((s,i)=>
@@ -5512,6 +5517,9 @@ function openTaskForm(id, prefillDate){
   taskFormCat = t ? (t.category||"") : "";
   taskFormPriority = t ? (t.priority||"medium") : "medium";
   taskGradedOn = !!(t && t.is_graded);
+  // Existing tasks saved before this field existed have is_academic===undefined — treat those
+  // as Academic if they were already graded (a safe inference), Personal otherwise.
+  taskFormType = t ? ((t.is_academic!==undefined ? t.is_academic : !!t.is_graded) ? "academic" : "personal") : "personal";
   taskFormSubtasks = t ? (t.subtasks||[]).map(s=>Object.assign({},s)) : [];
   taskAlarmOn = !!(t && t.alarm_enabled);
   tskGapNotSure = false;
@@ -5580,22 +5588,39 @@ function overdueBannerHtml(){
     '<div style="font-size:12.5px;opacity:.9;">Tap to view and copy the full list</div></div>'+
     '<div style="font-size:20px;">›</div></div></div>';
 }
+let taskListTypeFilter = "all";
+let taskListPriorityFilter = "all";
+function taskMatchesFilters(t){
+  if(taskListTypeFilter==="academic" && !(t.is_academic || t.is_graded)) return false;
+  if(taskListTypeFilter==="personal" && (t.is_academic || t.is_graded)) return false;
+  if(taskListPriorityFilter!=="all" && (t.priority||"medium")!==taskListPriorityFilter) return false;
+  return true;
+}
 function renderTasks(){
   let html = topbarHtml("Tasks","Plan your time, track how it actually went, and see what's next.");
   html += bedtimeWidgetHtml();
   html += overdueBannerHtml();
   html += '<button class="btn block" style="margin-bottom:14px;" data-action="openTaskForm">+ New Task</button>';
-  const pending = (state.tasks||[]).filter(t=>t.status!=="done").slice().sort((a,b)=>{
+  const allTasksExist = (state.tasks||[]).length>0;
+  if(allTasksExist){
+    html += '<div class="field" style="margin-bottom:4px;"><label>Show</label><div class="chip-group">'+
+      [["all","All"],["academic","🎓 Academic"],["personal","🏠 Personal"]].map(o=>'<div class="chip '+(taskListTypeFilter===o[0]?"selected":"")+'" data-action="setTaskListTypeFilter" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
+      '</div></div>'+
+      '<div class="field" style="margin-bottom:14px;"><label>Priority</label><div class="chip-group">'+
+      [["all","All"]].concat(PRIORITY_LEVELS.slice().reverse().map(p=>[p.v,p.e+' '+p.l])).map(o=>'<div class="chip '+(taskListPriorityFilter===o[0]?"selected":"")+'" data-action="setTaskListPriorityFilter" data-v="'+o[0]+'">'+o[1]+'</div>').join("")+
+      '</div></div>';
+  }
+  const pending = (state.tasks||[]).filter(t=>t.status!=="done" && taskMatchesFilters(t)).slice().sort((a,b)=>{
     const ad = taskEffectiveDueDate(a)||"9999-99-99", bd = taskEffectiveDueDate(b)||"9999-99-99";
     if(ad!==bd) return ad.localeCompare(bd);
     const pr = priorityRank(b.priority) - priorityRank(a.priority);
     if(pr!==0) return pr;
     return (a.created_at||"").localeCompare(b.created_at||"");
   });
-  const done = (state.tasks||[]).filter(t=>t.status==="done");
+  const done = (state.tasks||[]).filter(t=>t.status==="done" && taskMatchesFilters(t));
   const followUps = done.filter(t=>t.follow_up_needed).slice().sort((a,b)=>(a.follow_up_date||"").localeCompare(b.follow_up_date||""));
   if(!pending.length && !done.length){
-    html += emptyState("📝","No tasks yet","Add your first task above — a time estimate helps the countdown above know what's really on your plate.");
+    html += emptyState("📝", allTasksExist?"No tasks match these filters":"No tasks yet", allTasksExist?"Try a different Show/Priority filter above.":"Add your first task above — a time estimate helps the countdown above know what's really on your plate.");
     return html;
   }
   const today = todayStr();
@@ -5605,10 +5630,11 @@ function renderTasks(){
     const cat = t.category ? catInfo(t.category) : null;
     const isPastDue = t.due_date && t.due_date<today;
     const dueBit = t.due_date ? '<span style="'+(isPastDue?"color:#ef4444;font-weight:700;":"color:#ef4444;")+'"> · Due '+fmtDatePretty(t.due_date)+'</span>' : '';
+    const typeBit = (t.is_academic && !t.is_graded) ? '<span class="tag">🎓 Academic</span>' : '';
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+subtaskProgressBadgeHtml(t)+'</div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':typeBit)+subtaskProgressBadgeHtml(t)+'</div>'+
       subtaskChecklistHtml(t)+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:6px;">'+
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
@@ -7084,6 +7110,26 @@ document.addEventListener("click", async function(e){
       taskGradedOn = isOn;
       const block = document.getElementById("tsk_gradedBlock");
       if(block) block.style.display = isOn ? "" : "none";
+      // Graded work is always Academic — flip the Type chips to match and keep them in sync.
+      if(isOn && taskFormType!=="academic"){
+        taskFormType = "academic";
+        document.querySelectorAll('[data-action="pickTaskType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")==="academic"));
+      }
+      break;
+    }
+    case "setTaskListTypeFilter": { taskListTypeFilter = v; render(); break; }
+    case "setTaskListPriorityFilter": { taskListPriorityFilter = v; render(); break; }
+    case "pickTaskType": {
+      taskFormType = v;
+      document.querySelectorAll('[data-action="pickTaskType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
+      // A graded assignment can't be Personal — switching away from Academic turns that off too.
+      if(v==="personal" && taskGradedOn){
+        taskGradedOn = false;
+        const gradedSwitch = document.querySelector('[data-action="toggleTaskGraded"]');
+        if(gradedSwitch) gradedSwitch.classList.remove("on");
+        const block = document.getElementById("tsk_gradedBlock");
+        if(block) block.style.display = "none";
+      }
       break;
     }
     case "toggleTskGapBlock": {
@@ -7108,6 +7154,7 @@ document.addEventListener("click", async function(e){
       collectSubtasksFromDOM();
       const subtasks = taskFormSubtasks.filter(s=>s.title.trim()!=="").map(s=>({id:s.id||uid(), title:s.title.trim(), done:!!s.done}));
       const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate, due_date: taskDueDate,
+        is_academic: taskGradedOn ? true : (taskFormType==="academic"),
         is_graded: taskGradedOn, grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
         linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
         description: (document.getElementById("tsk_notes")?document.getElementById("tsk_notes").value:"").trim(),
