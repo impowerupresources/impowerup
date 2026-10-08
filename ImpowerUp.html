@@ -3200,7 +3200,23 @@ function openModal(html){
   host.innerHTML = '<div class="modal-overlay"><div class="modal">'+
     '<span class="modal-close-x" data-action="closeModal" title="Close">✕</span>'+html+'</div></div>';
 }
-function closeModal(){ document.getElementById("modalHost").innerHTML = ""; }
+let focusDumpPausedId = null;
+function focusSessionPause(s){ if(s && !s.paused_at){ s.paused_at = new Date().toISOString(); saveState(); } }
+function focusSessionResume(s){
+  if(!s || !s.paused_at) return;
+  const d = Math.max(0, Date.now() - new Date(s.paused_at).getTime());
+  ["start_time","phaseStartTime","lastBrainInterruptAt"].forEach(k=>{ if(s[k]) s[k] = new Date(new Date(s[k]).getTime()+d).toISOString(); });
+  s.paused_at = null;
+  saveState();
+}
+function closeModal(){
+  document.getElementById("modalHost").innerHTML = "";
+  if(focusDumpPausedId){
+    const sid = focusDumpPausedId; focusDumpPausedId = null;
+    const s = (state.focusSessions||[]).find(x=>x.id===sid && x.status==="active");
+    if(s){ focusSessionResume(s); render(); }
+  }
+}
 function fallbackCopyText(text){
   const ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
   document.body.appendChild(ta); ta.select();
@@ -5107,7 +5123,7 @@ function brainDumpListHtml(){
     const m = j.mood ? MOODS.find(x=>x.v===j.mood) : null;
     const preview = j.text.length>220 ? j.text.slice(0,220)+"…" : j.text;
     return '<div class="card" style="margin-bottom:10px;cursor:pointer;" data-action="openJournalForm" data-id="'+j.id+'">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="hc-meta">'+fmtDatePretty(j.date)+'</span>'+(m?'<span class="tag">'+m.e+' '+m.l+'</span>':'')+'</div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="hc-meta">'+fmtDatePretty(j.date)+'</span>'+(m?'<span class="tag">'+m.e+' '+m.l+'</span>':'')+(j.source==="focus"?'<span class="tag">⏱️ During focus'+(j.focus_intention?': '+escapeHtml(j.focus_intention):'')+'</span>':'')+'</div>'+
       '<p style="white-space:pre-wrap;margin-top:6px;font-size:13.5px;">'+escapeHtml(preview)+'</p>'+
       '</div>';
   }).join("");
@@ -5250,7 +5266,7 @@ function focusRingSvgHtml(){
     '<circle class="focus-ring-progress" id="focusRingProgress" cx="110" cy="110" r="'+FOCUS_RING_R+'" stroke-dasharray="'+FOCUS_RING_CIRC+'" stroke-dashoffset="0"></circle>'+
     '</svg>';
 }
-function renderActiveFocus(session){
+function renderActiveFocusCard(session){
   if(session.mode==="pomodoro"){
     const phase = session.phases[session.phaseIndex] || session.phases[session.phases.length-1];
     const phaseLabel = phase.type==="work" ? "🍅 Work session" : (phase.long ? "☕ Long break" : "🌤️ Short break");
@@ -5263,7 +5279,8 @@ function renderActiveFocus(session){
       '<div style="font-weight:800;">'+escapeHtml(session.intention)+'</div>'+
       '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;">'+escapeHtml(session.lastCheckinMsg||"")+'</div>'+
       '<div class="modal-actions" style="justify-content:center;">'+
-      '<button class="btn secondary" data-action="cancelFocus" data-id="'+session.id+'">Cancel</button>'+
+      '<button class="btn secondary" data-action="toggleFocusPause" data-id="'+session.id+'">'+(session.paused_at?"▶ Resume":"⏸ Pause")+'</button>'+
+    '<button class="btn secondary" data-action="cancelFocus" data-id="'+session.id+'">Cancel</button>'+
       '<button class="btn ghost" data-action="skipPomodoroPhase" data-id="'+session.id+'">⏭ Skip phase</button>'+
       '<button class="btn" data-action="completeFocus" data-id="'+session.id+'">Finish Now</button>'+
       '</div></div>';
@@ -5275,11 +5292,32 @@ function renderActiveFocus(session){
     '<div style="font-weight:800;">'+escapeHtml(session.intention)+'</div>'+
     '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;"></div>'+
     '<div class="modal-actions" style="justify-content:center;">'+
+    '<button class="btn secondary" data-action="toggleFocusPause" data-id="'+session.id+'">'+(session.paused_at?"▶ Resume":"⏸ Pause")+'</button>'+
     '<button class="btn secondary" data-action="cancelFocus" data-id="'+session.id+'">Cancel</button>'+
     '<button class="btn" data-action="completeFocus" data-id="'+session.id+'">Finish Now</button>'+
     '</div></div>';
 }
+function focusPostItHtml(session){
+  return '<div data-action="openFocusBrainDump" data-id="'+session.id+'" title="Park a thought without losing your place" '+
+    'style="position:fixed;right:16px;bottom:96px;z-index:50;width:128px;padding:12px 10px 14px;background:#FEF08A;color:#4a3b00;border-radius:3px 3px 14px 3px;'+
+    'box-shadow:0 6px 14px rgba(0,0,0,.28);transform:rotate(3deg);cursor:pointer;text-align:center;font-weight:800;line-height:1.25;">'+
+    '<div style="font-size:22px;">🧠</div><div style="font-size:14px;">Brain Dump</div>'+
+    '<div style="font-size:11px;font-weight:600;opacity:.8;margin-top:2px;">Jot a thought — timer pauses</div></div>';
+}
+function renderActiveFocus(session){ return renderActiveFocusCard(session) + focusPostItHtml(session); }
+function focusDumpFormHtml(session){
+  return '<div style="background:#FEF08A;color:#3d3000;border-radius:6px;padding:16px;box-shadow:0 4px 12px rgba(0,0,0,.2);margin:-4px -4px 4px;">'+
+    '<h2 style="margin:0 0 4px;color:#3d3000;">🧠 Brain Dump</h2>'+
+    '<p style="font-size:12.5px;margin:0 0 8px;opacity:.85;">⏸ Your timer is paused. Get it out of your head, then jump back in'+(session.intention?(' to <b>'+escapeHtml(session.intention)+'</b>'):'')+'.</p>'+
+    '<textarea id="fxd_text" rows="5" placeholder="Whatever popped into your head…" style="width:100%;background:rgba(255,255,255,.55);color:#3d3000;border:1px dashed #b59f00;"></textarea>'+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;"><input type="checkbox" id="fxd_todo"> Also add to my To Do List</label>'+
+    '<div class="modal-actions" style="margin-top:10px;">'+
+    '<button class="btn secondary" data-action="saveFocusDump" data-id="'+session.id+'" data-v="more" style="flex:1">Save &amp; add another</button>'+
+    '<button class="btn" data-action="saveFocusDump" data-id="'+session.id+'" data-v="resume" style="flex:1">Save &amp; Resume ▶</button></div>'+
+    '</div>';
+}
 function checkBrainInterrupt(session){
+  if(session.paused_at) return;
   if(!state.profile.brainInterruptEnabled) return;
   if(document.getElementById("alarmOverlay")) return;
   const isWorkPhase = session.mode==="pomodoro" ? (session.phases[session.phaseIndex] && session.phases[session.phaseIndex].type==="work") : true;
@@ -5305,35 +5343,37 @@ function startFocusTicker(session){
   function tick(){
     const el = document.getElementById("focusTimeDisplay");
     if(!el) { clearInterval(focusTimer); return; }
-    checkBrainInterrupt(session);
+    const paused = !!session.paused_at;
+    const nowMs = paused ? new Date(session.paused_at).getTime() : Date.now();
+    if(!paused) checkBrainInterrupt(session);
     if(session.mode==="pomodoro"){
       const phase = session.phases[session.phaseIndex];
       if(!phase){ clearInterval(focusTimer); return; }
       const start = new Date(session.phaseStartTime).getTime();
       const totalMs = phase.minutes*60000;
-      const remain = Math.max(0, start+totalMs-Date.now());
+      const remain = Math.max(0, start+totalMs-nowMs);
       const mm = String(Math.floor(remain/60000)).padStart(2,"0");
       const ss = String(Math.floor((remain%60000)/1000)).padStart(2,"0");
-      el.textContent = mm+":"+ss;
+      el.textContent = mm+":"+ss+(paused?" ⏸":"");
       setRingProgress(remain, totalMs);
-      if(remain<=0){
+      if(remain<=0 && !paused){
         advancePomodoroPhase(session);
       }
       return;
     }
     const start = new Date(session.start_time).getTime();
     const totalMs = session.duration_minutes*60000;
-    const remain = Math.max(0, start+totalMs-Date.now());
+    const remain = Math.max(0, start+totalMs-nowMs);
     const mm = String(Math.floor(remain/60000)).padStart(2,"0");
     const ss = String(Math.floor((remain%60000)/1000)).padStart(2,"0");
-    el.textContent = mm+":"+ss;
+    el.textContent = mm+":"+ss+(paused?" ⏸":"");
     setRingProgress(remain, totalMs);
-    if(!checkinShown && remain <= totalMs/2 && remain > 0){
+    if(!paused && !checkinShown && remain <= totalMs/2 && remain > 0){
       checkinShown = true;
       const msgEl = document.getElementById("focusCheckinMsg");
       if(msgEl) msgEl.textContent = CHECKINS[Math.floor(Math.random()*CHECKINS.length)];
     }
-    if(remain<=0){ clearInterval(focusTimer); toast("Session time's up! Tap Finish Now."); }
+    if(remain<=0 && !paused){ clearInterval(focusTimer); toast("Session time's up! Tap Finish Now."); }
   }
   tick();
   focusTimer = setInterval(tick, 1000);
@@ -8336,6 +8376,44 @@ document.addEventListener("click", async function(e){
     case "skipPomodoroPhase": {
       const s = state.focusSessions.find(x=>x.id===id);
       if(s) advancePomodoroPhase(s);
+      break;
+    }
+    case "toggleFocusPause": {
+      const s = state.focusSessions.find(x=>x.id===id && x.status==="active");
+      if(!s) return;
+      if(s.paused_at) focusSessionResume(s); else focusSessionPause(s);
+      render();
+      break;
+    }
+    case "openFocusBrainDump": {
+      const s = state.focusSessions.find(x=>x.id===id && x.status==="active");
+      if(!s || focusDumpPausedId) return;
+      const wasPaused = !!s.paused_at;
+      focusSessionPause(s);
+      focusDumpPausedId = wasPaused ? null : s.id; // only auto-resume if the dump itself caused the pause
+      openModal(focusDumpFormHtml(s));
+      const ta = document.getElementById("fxd_text"); if(ta) ta.focus();
+      break;
+    }
+    case "saveFocusDump": {
+      const s = state.focusSessions.find(x=>x.id===id);
+      const ta = document.getElementById("fxd_text");
+      const text = ta ? ta.value.trim() : "";
+      if(!text){ toast(v==="resume" ? "Nothing written — resuming" : "Write something first"); if(v==="resume") closeModal(); return; }
+      state.journalEntries = state.journalEntries || [];
+      state.journalEntries.push({id:uid(), text, mood:"", date:todayStr(), created_at:new Date().toISOString(), source:"focus", focus_session_id:id, focus_intention:(s&&s.intention)||""});
+      const todoBox = document.getElementById("fxd_todo");
+      if(todoBox && todoBox.checked){
+        text.split(/\n+/).map(x=>x.trim()).filter(Boolean).forEach(line=>todoItems().push({id:uid(), text:line, done:false, task_id:null, created_at:new Date().toISOString()}));
+      }
+      saveState();
+      if(v==="more"){
+        ta.value = ""; if(todoBox) todoBox.checked = false; ta.focus();
+        toast("Saved — add another or resume");
+      } else {
+        closeModal();
+        toast("Saved to Brain Dump — back to it! 💪");
+      }
       break;
     }
     case "cancelFocus": {
