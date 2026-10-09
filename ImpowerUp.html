@@ -1160,13 +1160,16 @@ async function syncAllAlertsToServer(force){
     const p = state.profile;
     const toEmail = (p.emailNotifyEnabled && p.notifyEmail) ? p.notifyEmail : null;
     const toPhone = (p.smsNotifyEnabled && p.notifyPhone) ? p.notifyPhone : null;
+    // One row per (alert, device) so EVERY registered device gets the push — not just whichever synced last.
+    let h = 0; for(let i=0;i<endpoint.length;i++){ h = (h*31 + endpoint.charCodeAt(i))>>>0; }
+    const devKey = "@@"+h.toString(36);
     const active = state.reminders.filter(r=>r.is_active!==false && r.time && (r.days||[]).length);
     for(const r of active){
       const next = computeNextFireAt(r.time, r.days);
       await sbRest("scheduled_alerts?on_conflict=id", {
         method:"POST",
         headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ id:r.id, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString(),
+        body: JSON.stringify({ id:r.id+devKey, subscription_endpoint:endpoint, title:r.title, body:r.message||"", days:r.days, time_of_day:r.time, next_fire_at:next, is_active:true, updated_at:new Date().toISOString(),
           notify_email: !!(r.notify_email && toEmail), notify_sms: !!(r.notify_sms && toPhone), to_email: r.notify_email ? toEmail : null, to_phone: r.notify_sms ? toPhone : null })
       });
     }
@@ -1175,7 +1178,7 @@ async function syncAllAlertsToServer(force){
       await sbRest("scheduled_alerts?on_conflict=id", {
         method:"POST",
         headers: Object.assign(sbHeaders(), {Prefer:"resolution=merge-duplicates"}),
-        body: JSON.stringify({ id:item.id, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString(),
+        body: JSON.stringify({ id:item.id+devKey, subscription_endpoint:endpoint, title:item.title, body:item.body, days:[], time_of_day:null, next_fire_at:item.fireAt, is_active:true, updated_at:new Date().toISOString(),
           notify_email: !!(item.notify_email && toEmail), notify_sms: !!(item.notify_sms && toPhone), to_email: item.notify_email ? toEmail : null, to_phone: item.notify_sms ? toPhone : null })
       });
     }
@@ -1183,7 +1186,7 @@ async function syncAllAlertsToServer(force){
     const listRes = await sbRest("scheduled_alerts?subscription_endpoint=eq."+encodeURIComponent(endpoint)+"&select=id");
     if(listRes.ok){
       const serverIds = (await listRes.json()).map(r=>r.id);
-      const localIds = new Set(active.map(r=>r.id).concat(oneOffItems.map(i=>i.id)));
+      const localIds = new Set(active.map(r=>r.id+devKey).concat(oneOffItems.map(i=>i.id+devKey)));
       const stale = serverIds.filter(sid=>!localIds.has(sid));
       for(const sid of stale){
         await sbRest("scheduled_alerts?id=eq."+encodeURIComponent(sid), {method:"DELETE"});
@@ -1651,6 +1654,83 @@ async function snapshotCloudStateHistory(userId){
     fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state_history?user_id=eq."+userId+"&created_at=lt."+encodeURIComponent(cutoff), {method:"DELETE", headers: acctHeaders(true)}).catch(()=>{});
   }catch(e){}
 }
+/* ---- Multi-device sync: remember which cloud version this device last saw, so an edit made on
+   another device can be pulled in (and never silently overwritten by a stale device). ---- */
+function cloudVerKey(uid){ return "impowerup_cloudver_"+uid; }
+function getCloudVer(uid){ try{ return localStorage.getItem(cloudVerKey(uid))||""; }catch(e){ return ""; } }
+function setCloudVer(uid, v){ try{ if(v) localStorage.setItem(cloudVerKey(uid), v); }catch(e){} }
+async function fetchCloudRow(uid){
+  const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+uid+"&select=state_json,updated_at", {headers: acctHeaders(true)});
+  if(!res.ok) return null;
+  const rows = await res.json();
+  return rows[0] || null;
+}
+/* Union-merge: add any record (matched by id) that exists in the other device's copy but not here.
+   This device's own version of a record always wins, so nothing just edited here is lost. */
+function mergeRemoteIntoLocal(remote){
+  if(!remote || typeof remote!=="object") return;
+  Object.keys(remote).forEach(function(k){
+    if(k==="profile") return;
+    const rv = remote[k], lv = state[k];
+    if(Array.isArray(rv) && Array.isArray(lv) && rv.every(x=>x && typeof x==="object" && x.id!==undefined) && lv.every(x=>x && typeof x==="object" && x.id!==undefined)){
+      const have = new Set(lv.map(x=>x.id));
+      rv.forEach(function(x){ if(!have.has(x.id)) lv.push(x); });
+    } else if(lv===undefined && rv!==undefined){
+      state[k] = rv;
+    }
+  });
+}
+/* Pull another device's newer changes into this one and re-render. Skipped while there are
+   unsynced local edits, while a form/modal is open, or while the user is typing. */
+let _pullingCloud = false;
+async function pullCloudStateIfNewer(){
+  if(_pullingCloud || _adminViewing || !state || !state.profile) return;
+  if(!state.profile.cloudSyncEnabled || !state.profile.cloudSession) return;
+  if(_cloudDirty || _syncDebounceTimer) return;
+  try{ if(localStorage.getItem("impowerup_dirty_"+state.profile.cloudSession.user_id)) return; }catch(e){}
+  const host = document.getElementById("modalHost");
+  if(host && host.innerHTML.trim()) return;
+  const ae = document.activeElement;
+  if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+  _pullingCloud = true;
+  try{
+    if(!(await ensureFreshSession())) return;
+    const uid = state.profile.cloudSession.user_id;
+    const row = await fetchCloudRow(uid);
+    if(!row || !row.state_json || !row.updated_at) return;
+    const known = getCloudVer(uid) || state.profile.lastCloudSync || "";
+    if(known && row.updated_at <= known) return;
+    // re-check: user may have started editing while the request was in flight
+    if(_cloudDirty || _syncDebounceTimer) return;
+    const snap = row.state_json;
+    const keep = {
+      cloudSession: state.profile.cloudSession, isCloudAdmin: state.profile.isCloudAdmin,
+      calendarSyncPausedByAdmin: state.profile.calendarSyncPausedByAdmin, googleSyncPausedByClient: state.profile.googleSyncPausedByClient,
+      pushEnabled: state.profile.pushEnabled, cloudSyncEnabled: true, onboarded: true
+    };
+    const localFocus = state.focusSessions;
+    const ns = Object.assign(defaultState(), snap);
+    ns.profile = Object.assign(defaultState().profile, (snap && snap.profile) || {}, keep);
+    migrateCheckInsToSeparateLogs(ns);
+    if((localFocus||[]).some(f=>f.status==="active")) ns.focusSessions = localFocus; // never disturb a running timer
+    _applyingCloudPull = true;
+    try{ state = ns; saveState(); } finally { _applyingCloudPull = false; }
+    setCloudVer(uid, row.updated_at);
+    render();
+    toast("Updated from your other device");
+  }catch(e){ /* offline or transient — try again next cycle */ }
+  finally{ _pullingCloud = false; }
+}
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState==="visible") pullCloudStateIfNewer(); });
+window.addEventListener("focus", function(){ pullCloudStateIfNewer(); });
+window.addEventListener("online", function(){ pullCloudStateIfNewer(); });
+setInterval(function(){ if(document.visibilityState==="visible") pullCloudStateIfNewer(); }, 30000);
+setTimeout(function(){
+  try{
+    if(state && state.profile && state.profile.cloudSession && !_adminViewing && localStorage.getItem("impowerup_dirty_"+state.profile.cloudSession.user_id)){ flushCloudSyncNow(); return; } // unsynced edits from last session: upload first
+  }catch(e){}
+  pullCloudStateIfNewer();
+}, 2500);
 async function syncStateToCloud(){
   // Hard guard, checked at the moment this actually runs (not just when it was scheduled) —
   // a debounced auto-sync timer can fire after state has been swapped to a client's data via
@@ -1661,15 +1741,32 @@ async function syncStateToCloud(){
   if(!state.profile.cloudSession || !state.profile.cloudSyncEnabled) return false;
   if(!(await ensureFreshSession())) return false;
   try{
-    await snapshotCloudStateHistory(state.profile.cloudSession.user_id);
+    const myUid = state.profile.cloudSession.user_id;
+    const seqAtStart = _cloudEditSeq;
+    // If another device saved since this one last synced, fold its records in first so this
+    // upload can't wipe them out.
+    try{
+      const remote = await fetchCloudRow(myUid);
+      const known = getCloudVer(myUid) || state.profile.lastCloudSync || "";
+      if(remote && remote.state_json && remote.updated_at && known && remote.updated_at > known){
+        _applyingCloudPull = true;
+        try{ mergeRemoteIntoLocal(remote.state_json); saveState(); } finally { _applyingCloudPull = false; }
+        render();
+      }
+    }catch(e){}
+    await snapshotCloudStateHistory(myUid);
+    const stamp = new Date().toISOString();
     const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?on_conflict=user_id", {
       method:"POST",
       headers: Object.assign(acctHeaders(true), {Prefer:"resolution=merge-duplicates"}),
-      body: JSON.stringify({ user_id: state.profile.cloudSession.user_id, state_json: serializableStateSnapshot(), updated_at: new Date().toISOString() })
+      body: JSON.stringify({ user_id: myUid, state_json: serializableStateSnapshot(), updated_at: stamp })
     });
     if(!res.ok) return false;
+    setCloudVer(myUid, stamp);
+    if(seqAtStart===_cloudEditSeq){ _cloudDirty = false; try{ localStorage.removeItem("impowerup_dirty_"+myUid); }catch(e){} }
     state.profile.lastCloudSync = new Date().toISOString();
-    saveState();
+    _applyingCloudPull = true;
+    try{ saveState(); } finally { _applyingCloudPull = false; }
     return true;
   }catch(e){ return false; }
 }
@@ -1686,9 +1783,13 @@ let _syncDebounceTimer = null;
    it closes the gap even for swap mechanisms we haven't specifically identified, since it doesn't
    care WHY the identity changed, only THAT it changed. */
 let _viewSessionToken = 0;
+let _cloudDirty = false, _cloudEditSeq = 0, _applyingCloudPull = false;
 function maybeAutoSyncCloud(){
+  if(_applyingCloudPull) return; // state was just replaced by a cloud pull — nothing new to upload
   if(_adminViewing) return; // never sync while browsing as a client — would overwrite the admin's own row with client data
   if(!state.profile.cloudSyncEnabled || !state.profile.cloudSession) return;
+  _cloudDirty = true; _cloudEditSeq++;
+  try{ localStorage.setItem("impowerup_dirty_"+state.profile.cloudSession.user_id, "1"); }catch(e){}
   if(_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
   const tok = _viewSessionToken;
   _syncDebounceTimer = setTimeout(()=>{
@@ -2549,9 +2650,10 @@ async function completeCloudLogin(json, displayNameHint){
   state.profile.onboarded = true;
   saveState();
   try{
-    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+userId+"&select=state_json", {headers: acctHeaders(true)});
+    const res = await fetch(SB_ACCOUNTS_URL+"/rest/v1/app_cloud_state?user_id=eq."+userId+"&select=state_json,updated_at", {headers: acctHeaders(true)});
     if(res.ok){
       const rows = await res.json();
+      if(rows[0] && rows[0].updated_at) setCloudVer(userId, rows[0].updated_at);
       if(rows[0] && rows[0].state_json){
         const snap = rows[0].state_json;
         const sess = state.profile.cloudSession, isAdmin = state.profile.isCloudAdmin;
@@ -4799,22 +4901,26 @@ function alertSoundCardHtml(){
   const curSound = state.profile.alertSound || "classic";
   const curVol = state.profile.alertVolume!=null ? state.profile.alertVolume : 80;
   return '<div class="card" style="margin-bottom:18px;"><h2>🔔 Alert Sound</h2><p class="hc-meta">Choose the sound played when an alert fires, and how loud.</p>'+
+    '<p class="hc-meta" style="margin-top:6px;">📱 <b>On iPhone:</b> sounds play while ImpowerUp is open on screen. Make sure your ringer/silent switch is off silent and volume is up. When the app is closed or your phone is locked, alerts arrive as notifications, and the sound then comes from your iPhone\'s notification settings (Settings → Notifications → ImpowerUp → Sounds).</p>'+
     '<div class="field" style="margin-top:10px;"><label>Volume — <span id="alertVolVal">'+curVol+'</span>%</label>'+
     '<input type="range" id="alertVolumeSlider" min="0" max="100" value="'+curVol+'" style="width:100%" oninput="document.getElementById(\'alertVolVal\').textContent=this.value">'+
     '</div>'+
     '<div class="field" style="margin-top:10px;"><label>Default snooze length</label><div class="chip-group">'+
     [5,10,15,30].map(m=>'<div class="chip '+((state.profile.defaultSnoozeMinutes||5)===m?"selected":"")+'" data-action="pickDefaultSnooze" data-v="'+m+'">'+m+' min</div>').join("")+
     '</div><p class="hc-meta" style="margin-top:4px;">Highlighted first on the alarm screen — you can still tap any of the 4 options when an alert fires.</p></div>'+
-    '<div class="grid cols-3" style="margin-top:12px;gap:10px;">'+
-    Object.keys(ALERT_SOUNDS).map(k=>{
-      const s = ALERT_SOUNDS[k];
-      return '<div class="card" style="padding:12px;text-align:left;cursor:pointer;'+(curSound===k?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="pickAlertSound" data-v="'+k+'">'+
-        '<div style="font-weight:800;font-size:13.5px;">🔔 '+s.label+'</div>'+
-        '<div class="hc-meta" style="margin-top:2px;">'+s.desc+'</div>'+
-        '<button class="btn ghost sm" type="button" style="margin-top:6px;padding:4px 8px;font-size:12px;" data-action="previewAlertSound" data-v="'+k+'">▷ Preview</button>'+
-        '</div>';
-    }).join("")+
-    '</div>'+
+    (function(){
+      const cardFor = function(k){
+        const sd = ALERT_SOUNDS[k];
+        return '<div class="card" style="padding:12px;text-align:left;cursor:pointer;'+(curSound===k?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="pickAlertSound" data-v="'+k+'">'+
+          '<div style="font-weight:800;font-size:13.5px;">'+(sd.calm?"🌿":"🔔")+' '+sd.label+'</div>'+
+          '<div class="hc-meta" style="margin-top:2px;">'+sd.desc+'</div>'+
+          '<button class="btn ghost sm" type="button" style="margin-top:6px;padding:4px 8px;font-size:12px;" data-action="previewAlertSound" data-v="'+k+'">▷ Preview</button>'+
+          '</div>';
+      };
+      const keys = Object.keys(ALERT_SOUNDS);
+      return '<p class="hc-meta" style="font-weight:700;margin-top:12px;">🌿 Calm</p><div class="grid cols-3" style="margin-top:6px;gap:10px;">'+keys.filter(k=>ALERT_SOUNDS[k].calm).map(cardFor).join("")+'</div>'+
+        '<p class="hc-meta" style="font-weight:700;margin-top:14px;">📣 Attention-grabbing</p><div class="grid cols-3" style="margin-top:6px;gap:10px;">'+keys.filter(k=>!ALERT_SOUNDS[k].calm).map(cardFor).join("")+'</div>';
+    })()+
     customAlarmSoundCardHtml(curSound)+
     '</div>';
 }
@@ -5163,7 +5269,7 @@ function renderFocus(){
       '<div class="chip '+(focusMode==="pomodoro"?"selected":"")+'" data-action="setFocusMode" data-v="pomodoro">🍅 Pomodoro</div>'+
       '</div></div>'+
       '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🧠 Brain Interruption check-ins</div><div class="hc-meta" style="margin-top:2px;">A popup + sound nudges you back on track at an interval you choose.</div></div><div class="switch '+(state.profile.brainInterruptEnabled?"on":"")+'" data-action="toggleBrainInterrupt"></div></div>'+
-      '<div id="brainInterruptBlock" style="'+(state.profile.brainInterruptEnabled?"":"display:none;")+'"><div class="row-inline">'+
+      '<div id="brainInterruptBlock" style="'+(state.profile.brainInterruptEnabled?"":"opacity:.55;")+'"><div class="row-inline">'+
       '<div class="field"><label>Every (minutes)</label><input id="bi_minutes" type="number" min="1" max="180" value="'+(state.profile.brainInterruptMinutes||10)+'"></div>'+
       '<div class="field"><label>Alert level</label><select id="bi_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+((state.profile.brainInterruptLevel||"gentle")===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div>'+
       '</div></div>';
@@ -5307,7 +5413,15 @@ function focusPostItHtml(session){
     '<div style="font-size:22px;">🧠</div><div style="font-size:14px;">Brain Dump</div>'+
     '<div style="font-size:11px;font-weight:600;opacity:.8;margin-top:2px;">Jot a thought — timer pauses</div></div>';
 }
-function renderActiveFocus(session){ return renderActiveFocusCard(session) + focusPostItHtml(session); }
+function focusCheckinSettingsHtml(){
+  return '<div class="card" style="margin-top:10px;">'+
+    '<div class="toggle-row" style="padding:4px 0;"><div><div style="font-weight:700;font-size:13px;">🧠 Brain Interruption check-ins</div>'+
+    '<div class="hc-meta" style="margin-top:2px;">A popup + sound nudges you back on track. Changes apply right away.</div></div>'+
+    '<div class="switch '+(state.profile.brainInterruptEnabled?"on":"")+'" data-action="toggleBrainInterrupt"></div></div>'+
+    '<div class="row-inline"><div class="field"><label>Every (minutes)</label><input id="bi_minutes" type="number" min="1" max="180" value="'+(state.profile.brainInterruptMinutes||10)+'"></div>'+
+    '<div class="field"><label>Alert level</label><select id="bi_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+((state.profile.brainInterruptLevel||"gentle")===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div></div>';
+}
+function renderActiveFocus(session){ return renderActiveFocusCard(session) + focusCheckinSettingsHtml() + focusPostItHtml(session); }
 function focusDumpFormHtml(session){
   return '<div style="background:#FEF08A;color:#3d3000;border-radius:6px;padding:16px;box-shadow:0 4px 12px rgba(0,0,0,.2);margin:-4px -4px 4px;">'+
     '<h2 style="margin:0 0 4px;color:#3d3000;">🧠 Brain Dump</h2>'+
@@ -6377,12 +6491,27 @@ function fileToCompressedDataUrl(file, maxW, quality){
 
 /* ============ Alarm engine ============ */
 let alarmSoundHandle = null, holdRAF = null;
+/* iOS (especially the Home Screen app) keeps Web Audio locked until a real tap, re-suspends it
+   ("interrupted") whenever the app is backgrounded, and mutes it with the silent switch unless the
+   audio session is set to "playback". So: set the session type, (re)create/resume the context on
+   every touch, and play a silent primer buffer after each unlock. */
 function unlockAudio(){
   try{
-    if(!window._audioCtx){ window._audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
-    else if(window._audioCtx.state==="suspended"){ window._audioCtx.resume(); }
+    try{ if(navigator.audioSession) navigator.audioSession.type = "playback"; }catch(e){}
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    if(!window._audioCtx){ window._audioCtx = new AC(); window._audioPrimed = false; }
+    const ctx = window._audioCtx;
+    if(ctx.state !== "running"){ ctx.resume().catch(function(){}); }
+    if(!window._audioPrimed){
+      const b = ctx.createBuffer(1, 1, 22050), src = ctx.createBufferSource();
+      src.buffer = b; src.connect(ctx.destination); src.start(0);
+      window._audioPrimed = true;
+    }
   }catch(e){}
 }
+["touchstart","touchend","pointerdown","click","keydown"].forEach(function(ev){ document.addEventListener(ev, unlockAudio, {passive:true}); });
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState==="visible"){ window._audioPrimed = false; } });
 function beep(freq, duration, gainVal){
   const ctx = window._audioCtx; if(!ctx) return;
   const osc = ctx.createOscillator(); const gain = ctx.createGain();
@@ -6619,7 +6748,105 @@ function metalChord(gainVal){
     });
   });
 }
+/* ---- Calm alert sounds: soft attacks, long natural decay, gentle sine/triangle timbres ---- */
+function softTone(freq, startAt, dur, peakGain, type){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime + (startAt||0);
+  const osc = ctx.createOscillator(); const gain = ctx.createGain();
+  osc.type = type||"sine"; osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0002, peakGain), now+0.03);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(now); osc.stop(now+dur+0.05);
+}
+/* Two soft rising notes, like a doorbell chime. */
+function softChimeSound(g){
+  g = (g||1)*0.45;
+  softTone(784, 0, 1.4, g, "sine"); softTone(1568, 0, 0.9, g*0.25, "sine");
+  softTone(1046.5, 0.35, 1.8, g, "sine"); softTone(2093, 0.35, 1.1, g*0.25, "sine");
+}
+/* A gentle ascending bell arpeggio (C major triad) with soft overtones. */
+function gentleBellsSound(g){
+  g = (g||1)*0.4;
+  [523.25, 659.25, 783.99, 1046.5].forEach(function(f,i){
+    softTone(f, i*0.28, 1.6, g, "sine"); softTone(f*2.76, i*0.28, 0.7, g*0.12, "sine");
+  });
+}
+/* Warm wooden marimba plucks on a pentatonic run. */
+function marimbaCalmSound(g){
+  g = (g||1)*0.55;
+  [392, 440, 523.25, 659.25, 523.25].forEach(function(f,i){
+    softTone(f, i*0.2, 0.55, g, "triangle"); softTone(f*4, i*0.2, 0.12, g*0.15, "sine");
+  });
+}
+/* Low singing-bowl tone that blooms and slowly fades. */
+function singingBowlSound(g){
+  g = (g||1)*0.5;
+  softTone(220, 0, 3.2, g, "sine"); softTone(440.8, 0, 2.6, g*0.45, "sine"); softTone(661.5, 0, 1.8, g*0.2, "sine");
+}
+/* Slow sunrise: three soft rising notes that overlap. */
+function morningDawnSound(g){
+  g = (g||1)*0.42;
+  [349.23, 440, 523.25].forEach(function(f,i){ softTone(f, i*0.55, 2.2, g, "sine"); softTone(f*2, i*0.55, 1.4, g*0.2, "sine"); });
+}
+/* A single water-drop "bloop" followed by a quieter echo. */
+function waterDropSound(g){
+  const ctx = window._audioCtx; if(!ctx) return;
+  g = (g||1)*0.5;
+  [0,0.5].forEach(function(t,i){
+    const now = ctx.currentTime + t;
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1300, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now+0.16);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(g*(i?0.45:1), now+0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+0.5);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now+0.55);
+  });
+}
+/* Synthesized piano note: additive harmonics with a quick soft strike and natural decay. */
+function pianoNote(freq, startAt, dur, g){
+  const ctx = window._audioCtx; if(!ctx) return;
+  const now = ctx.currentTime + (startAt||0);
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.linearRampToValueAtTime(Math.max(0.0002, g), now+0.008);
+  master.gain.exponentialRampToValueAtTime(g*0.35, now+0.25);
+  master.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+  master.connect(ctx.destination);
+  [[1,1],[2,0.45],[3,0.22],[4,0.1],[5,0.05]].forEach(function(p){
+    const osc = ctx.createOscillator(); const og = ctx.createGain();
+    osc.type = "sine"; osc.frequency.value = freq*p[0] * (p[0]>1 ? 1.0007 : 1);
+    og.gain.value = p[1];
+    osc.connect(og); og.connect(master);
+    osc.start(now); osc.stop(now+dur+0.05);
+  });
+}
+/* Soft piano arpeggio resolving into a gentle chord. */
+function softPianoSound(g){
+  g = (g||1)*0.38;
+  [261.63, 329.63, 392.00, 523.25].forEach(function(f,i){ pianoNote(f, i*0.24, 1.8, g); });
+  [261.63, 329.63, 392.00].forEach(function(f){ pianoNote(f, 1.0, 2.2, g*0.7); });
+}
+/* A short, lullaby-like five-note piano motif. */
+function pianoMelodySound(g){
+  g = (g||1)*0.38;
+  [[392.00,0],[523.25,0.3],[493.88,0.6],[440.00,0.9],[523.25,1.3]].forEach(function(n){ pianoNote(n[0], n[1], n[1]>1?2.4:1.6, g); });
+}
 const ALERT_SOUNDS = {
+  softPiano:      {calm:true, label:"Soft Piano", desc:"Gentle piano arpeggio settling into a chord", play:function(g){ softPianoSound(g); }},
+  pianoMelody:    {calm:true, label:"Piano Melody", desc:"A short, lullaby-like five-note piano phrase", play:function(g){ pianoMelodySound(g); }},
+
+  softChime:      {calm:true, label:"Soft Chime", desc:"Two gentle rising doorbell-style notes", play:function(g){ softChimeSound(g); }},
+  gentleBells:    {calm:true, label:"Gentle Bells", desc:"Soft ascending bell arpeggio", play:function(g){ gentleBellsSound(g); }},
+  marimbaCalm:    {calm:true, label:"Marimba", desc:"Warm, mellow wooden plucks", play:function(g){ marimbaCalmSound(g); }},
+  singingBowl:    {calm:true, label:"Singing Bowl", desc:"Low, warm tone that slowly fades away", play:function(g){ singingBowlSound(g); }},
+  morningDawn:    {calm:true, label:"Morning Dawn", desc:"Three soft notes rising like sunrise", play:function(g){ morningDawnSound(g); }},
+  waterDrop:      {calm:true, label:"Water Drop", desc:"A single gentle drop with a soft echo", play:function(g){ waterDropSound(g); }},
+
   airRaidSiren:   {label:"Air Raid Siren", desc:"Oscillating rising-and-falling wail — hard to tune out", play:function(g){ airRaidSirenSound(g*1.0); }},
   emergencyAlert: {label:"Emergency Alert", desc:"Harsh dual-tone attention signal, like a broadcast alert", play:function(g){ emergencyAlertTone(g*1.0); }},
   harshBeeps:     {label:"Harsh Beeps", desc:"Rapid staccato high-pitched digital beeps", play:function(g){ harshBeepsBurst(g*1.0); }},
@@ -6644,14 +6871,24 @@ function playCustomAlarmOnce(gainVal){
 }
 function playAlertSoundOnce(key, gainVal){
   if(key==="custom"){ playCustomAlarmOnce(gainVal); return; }
-  const s = ALERT_SOUNDS[key] || ALERT_SOUNDS.classic;
+  const s = ALERT_SOUNDS[key] || ALERT_SOUNDS.airRaidSiren;
   try{ s.play(unlockedGain(gainVal)); }catch(e){}
 }
 function previewAlertSound(key){
   unlockAudio();
   const volPct = (state && state.profile && state.profile.alertVolume!=null) ? state.profile.alertVolume : 80;
   if(key==="custom" && !(state && state.profile && state.profile.customAlarmSoundDataUrl)){ toast("Upload a custom sound first"); return; }
-  playAlertSoundOnce(key, (volPct/100)*0.8);
+  const gainVal = (volPct/100)*0.8;
+  const ctx = window._audioCtx;
+  if(key==="custom" || !ctx){ playAlertSoundOnce(key, gainVal); return; }
+  // Wait for the (iOS) audio context to actually be running before scheduling the sound, so the
+  // first tap after opening the app isn't silently swallowed.
+  const go = function(){
+    playAlertSoundOnce(key, gainVal);
+    if(ctx.state!=="running") toast("Can't play sound — turn off silent mode and turn the volume up, then tap Preview again");
+  };
+  if(ctx.state==="running"){ go(); }
+  else { ctx.resume().then(go, go); }
 }
 function startAlarmSound(level){
   const soundKey = (state && state.profile && state.profile.alertSound) || "classic";
@@ -8398,7 +8635,7 @@ document.addEventListener("click", async function(e){
       state.profile.brainInterruptEnabled = isOn;
       saveState();
       const block = document.getElementById("brainInterruptBlock");
-      if(block) block.style.display = isOn ? "" : "none";
+      if(block) block.style.opacity = isOn ? "" : ".55";
       break;
     }
     case "savePomodoroPreset": {
