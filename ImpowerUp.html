@@ -5199,7 +5199,8 @@ function renderFocus(){
       return '<div class="session-card"><div class="emoji-badge" style="background:var(--surface-2)">'+(s.mode==="pomodoro"?"🍅":mood.e)+'</div>'+
         '<div class="hc-body"><div class="hc-title">'+escapeHtml(s.intention)+'</div>'+
         '<div class="hc-meta"><span>'+(s.mode==="pomodoro"?s.phases.reduce((a,p)=>a+p.minutes,0):s.duration_minutes)+' min total</span><span class="tag">'+s.status+'</span>'+(s.completion_note?'<span>"'+escapeHtml(s.completion_note)+'"</span>':"")+'</div></div>'+
-        '<button class="icon-btn" data-action="deleteFocusSession" data-id="'+s.id+'" title="Delete">🗑️</button></div>';
+        '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;"><button class="btn secondary sm" data-action="duplicateFocusSession" data-id="'+s.id+'" title="Set up a new session just like this one">🔁 Duplicate</button>'+
+        '<button class="icon-btn" data-action="deleteFocusSession" data-id="'+s.id+'" title="Delete">🗑️</button></div></div>';
     }).join("");
   }
   return html;
@@ -5280,6 +5281,7 @@ function renderActiveFocusCard(session){
       '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;">'+escapeHtml(session.lastCheckinMsg||"")+'</div>'+
       '<div class="modal-actions" style="justify-content:center;">'+
       '<button class="btn secondary" data-action="toggleFocusPause" data-id="'+session.id+'">'+(session.paused_at?"▶ Resume":"⏸ Pause")+'</button>'+
+      '<button class="btn ghost" data-action="restartFocus" data-id="'+session.id+'">🔄 Restart</button>'+
     '<button class="btn secondary" data-action="cancelFocus" data-id="'+session.id+'">Cancel</button>'+
       '<button class="btn ghost" data-action="skipPomodoroPhase" data-id="'+session.id+'">⏭ Skip phase</button>'+
       '<button class="btn" data-action="completeFocus" data-id="'+session.id+'">Finish Now</button>'+
@@ -5293,6 +5295,7 @@ function renderActiveFocusCard(session){
     '<div id="focusCheckinMsg" style="font-size:12px;color:var(--accent);min-height:16px;margin-top:6px;"></div>'+
     '<div class="modal-actions" style="justify-content:center;">'+
     '<button class="btn secondary" data-action="toggleFocusPause" data-id="'+session.id+'">'+(session.paused_at?"▶ Resume":"⏸ Pause")+'</button>'+
+    '<button class="btn ghost" data-action="restartFocus" data-id="'+session.id+'">🔄 Restart</button>'+
     '<button class="btn secondary" data-action="cancelFocus" data-id="'+session.id+'">Cancel</button>'+
     '<button class="btn" data-action="completeFocus" data-id="'+session.id+'">Finish Now</button>'+
     '</div></div>';
@@ -8312,6 +8315,43 @@ document.addEventListener("click", async function(e){
       state.focusSessions.push(session);
       saveState(); render();
       startFocusTicker(session);
+      break;
+    }
+    case "restartFocus": {
+      const s = state.focusSessions.find(x=>x.id===id && x.status==="active");
+      if(!s) return;
+      if(!confirm(s.mode==="pomodoro" ? "Restart the current Pomodoro phase from the beginning?" : "Restart the timer from the full duration?")) return;
+      const nowIso = new Date().toISOString();
+      if(s.mode==="pomodoro") s.phaseStartTime = nowIso; else s.start_time = nowIso;
+      s.paused_at = null; s.lastBrainInterruptAt = null;
+      saveState(); render();
+      toast("Timer restarted");
+      break;
+    }
+    case "duplicateFocusSession": {
+      const src = state.focusSessions.find(x=>x.id===id);
+      if(!src) return;
+      if(state.focusSessions.some(x=>x.status==="active")){ toast("Finish or cancel your current session first"); return; }
+      focusMode = src.mode==="pomodoro" ? "pomodoro" : "single";
+      if(focusMode==="pomodoro"){
+        const work = src.workMin || ((src.phases||[]).find(p=>p.type==="work")||{}).minutes || 20;
+        const short = src.shortBreakMin || ((src.phases||[]).find(p=>p.type==="break" && !p.long)||{}).minutes || 5;
+        const long = src.longBreakMin || ((src.phases||[]).find(p=>p.type==="break" && p.long)||{}).minutes || 10;
+        const cycles = src.cyclesBeforeLongBreak || (src.phases||[]).filter(p=>p.type==="work").length || 3;
+        pomodoroFormValues = {work, short, long, cycles};
+      }
+      render();
+      const ii = document.getElementById("fx_intention"); if(ii) ii.value = src.intention||"";
+      if(focusMode==="single"){
+        const sel = document.getElementById("fx_duration_select"), wrap = document.getElementById("fx_custom_wrap"), cust = document.getElementById("fx_duration_custom");
+        const dur = src.duration_minutes || 25;
+        if(sel){
+          if(DURATION_OPTIONS.indexOf(dur)>=0){ sel.value = String(dur); if(wrap) wrap.style.display = "none"; }
+          else { sel.value = "custom"; if(wrap) wrap.style.display = "block"; if(cust) cust.value = dur; }
+        }
+      }
+      window.scrollTo({top:0, behavior:"smooth"});
+      toast("Ready — tap Start to begin");
       break;
     }
     case "deleteFocusSession": {
