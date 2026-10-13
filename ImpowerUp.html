@@ -3598,6 +3598,7 @@ function statIconCard(icon, iconBg, num, lbl){
 }
 const DASHBOARD_WIDGETS = [
   {id:"hero", label:"Level & Streak Card", icon:"🏆"},
+  {id:"quickActions", label:"Quick Add & Start Timer", icon:"➕"},
   {id:"quickLinks", label:"Quick Links", icon:"🧭"},
   {id:"stats", label:"Stats Grid", icon:"📊"},
   {id:"badges", label:"Badges", icon:"🏅"},
@@ -3615,6 +3616,14 @@ function getDashboardOrder(){
   if(!saved || !saved.length) return allIds.slice();
   const filtered = saved.filter(id=>allIds.includes(id));
   const missing = allIds.filter(id=>!filtered.includes(id));
+  // Newly-added "Quick Add" box slots in right under the hero card for people with a saved order.
+  if(missing.includes("quickActions")){
+    const rest = missing.filter(id=>id!=="quickActions");
+    const heroAt = filtered.indexOf("hero");
+    const out = filtered.slice();
+    out.splice(heroAt>=0 ? heroAt+1 : 0, 0, "quickActions");
+    return out.concat(rest);
+  }
   return filtered.concat(missing);
 }
 function dashboardOrderRowHtml(id, i, total){
@@ -3653,6 +3662,7 @@ function renderHome(){
 
   const widgetHtml = {
     hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
+    quickActions: quickActionsWidgetHtml(),
     quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","toolkit","progress","settings"]),
     stats: '<div class="grid cols-4">'+
       statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
@@ -3694,6 +3704,37 @@ function renderHome(){
   });
 
   return html;
+}
+function quickActionsWidgetHtml(){
+  const t = todayStr();
+  const big = "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:84px;padding:12px 8px;font-size:15px;font-weight:800;line-height:1.15;border-radius:16px;text-align:center;text-decoration:none;white-space:normal;";
+  const tile = function(action, icon, label, v, bg){
+    return '<button class="btn secondary" data-action="'+action+'"'+(v?' data-v="'+v+'"':'')+' style="'+big+(bg?'background:'+bg+';':'')+'"><span style="font-size:26px;line-height:1;">'+icon+'</span><span>'+label+'</span></button>';
+  };
+  const grid = "display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;";
+  return '<div class="card"><div style="font-weight:800;font-size:15px;margin-bottom:10px;">➕ Quick Add</div>'+
+    '<div style="'+grid+'">'+
+      tile("openTaskForm","📝","Task",t)+tile("openCustomEventForm","📅","Event",t)+tile("openHabitForm","✅","Habit")+tile("openGoalForm","🎯","Goal")+
+      tile("openReminderForm","⏰","Alert")+tile("openHolidayForm","🏖️","Day Off",t)+
+      '<a class="btn secondary" href="#/actionhub?tab=todolist" style="'+big+'"><span style="font-size:26px;line-height:1;">📋</span><span>To Do List</span></a>'+
+      tile("openJournalForm","🧠","Brain Dump")+
+    '</div>'+
+    '<div style="font-weight:800;font-size:15px;margin:16px 0 10px;">⏱️ Start a Timer</div>'+
+    '<div style="'+grid+'">'+
+      tile("openQuickFocus","⏱️","Focus Timer","single")+tile("openQuickFocus","🍅","Pomodoro","pomodoro")+
+    '</div></div>';
+}
+let quickFocusMode = "single";
+function quickFocusModalHtml(mode){
+  quickFocusMode = mode==="pomodoro" ? "pomodoro" : "single";
+  const pv = pomodoroFormValues;
+  return '<h2>'+(quickFocusMode==="pomodoro"?"🍅 Start a Pomodoro":"⏱️ Start a Focus Timer")+'</h2>'+
+    '<div class="field"><label>What will you work on?</label><input id="qf_intention" type="text" placeholder="e.g. Math homework"></div>'+
+    (quickFocusMode==="pomodoro"
+      ? '<p class="hc-meta">'+pv.work+'m work → '+pv.short+'m break, repeated '+pv.cycles+' times, then a '+pv.long+'m long break. Change these under Toolkit → Focus.</p>'
+      : '<div class="field"><label>Duration</label><select id="qf_duration">'+DURATION_OPTIONS.map(m=>'<option value="'+m+'" '+(m===25?"selected":"")+'>'+m+' minutes</option>').join("")+'</select></div>')+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="startQuickFocus" style="flex:1">Start</button></div>';
 }
 function todayLongDate(){ return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}); }
 function dashboardQuickLinksHtml(paths){
@@ -8691,6 +8732,34 @@ document.addEventListener("click", async function(e){
         closeModal();
         toast("Saved to Brain Dump — back to it! 💪");
       }
+      break;
+    }
+    case "openQuickFocus": {
+      if(state.focusSessions.some(x=>x.status==="active")){ toast("You already have a timer running"); location.hash = "#/toolkit?tab=focus"; return; }
+      openModal(quickFocusModalHtml(v));
+      const qi = document.getElementById("qf_intention"); if(qi) qi.focus();
+      break;
+    }
+    case "startQuickFocus": {
+      const intention = (document.getElementById("qf_intention").value||"").trim();
+      if(!intention){ toast("Add what you're working on first"); return; }
+      const partner = COMPANIONS[Math.floor(Math.random()*COMPANIONS.length)];
+      const partner_greeting = GREETINGS[Math.floor(Math.random()*GREETINGS.length)];
+      let session;
+      const nowIso = new Date().toISOString();
+      if(quickFocusMode==="pomodoro"){
+        const pv = pomodoroFormValues;
+        session = { id: uid(), intention, mode:"pomodoro", status:"active", partner_name: partner, partner_greeting,
+          workMin:pv.work, shortBreakMin:pv.short, longBreakMin:pv.long, cyclesBeforeLongBreak:pv.cycles,
+          phases: buildPomodoroPhases(pv.work, pv.short, pv.long, pv.cycles), phaseIndex:0, phaseStartTime:nowIso, start_time:nowIso };
+      } else {
+        const duration = Number(document.getElementById("qf_duration").value)||25;
+        session = { id: uid(), intention, mode:"single", duration_minutes: duration, status:"active", partner_name: partner, partner_greeting, start_time: nowIso };
+      }
+      state.focusSessions.push(session);
+      saveState(); closeModal();
+      location.hash = "#/toolkit?tab=focus";
+      render();
       break;
     }
     case "cancelFocus": {
