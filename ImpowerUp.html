@@ -3579,36 +3579,29 @@ function levelRingSvg(pct, levelNum){
     '<div class="hero-level">'+levelNum+'</div></div>';
 }
 function heroCardV2Html(lvl, xp, streakDays, doneCount, dueCount){
-  return '<div class="hero-stat-grid">'+
+  return '<div class="hero-stat-grid" style="grid-template-columns:1fr;">'+
     '<div class="hero-level-box">'+
       '<div class="hero-v2-top"><div class="hero-v2-level">Level '+lvl.level+' — '+lvl.title+'</div><div class="hero-v2-trophy" style="width:34px;height:34px;font-size:16px;">'+lvl.emoji+'</div></div>'+
       '<div>'+
         '<div class="hero-v2-xp" style="font-size:22px;margin-top:0;">⚡ '+xp+'</div>'+
-        '<div style="font-size:12px;color:var(--muted,#6b7280);margin-top:2px;font-style:italic;">'+lvl.desc+'</div>'+
         '<div class="hero-v2-progress-label" style="margin-top:8px;margin-bottom:5px;"><span>'+lvl.into+'/'+lvl.needed+'</span><span>'+lvl.pct+'%</span></div>'+
         '<div class="hero-v2-bar"><div style="width:'+lvl.pct+'%;"></div></div>'+
       '</div>'+
-    '</div>'+
-    '<div class="hero-stat-box"><div class="hsb-icon">'+themeEmoji("streak")+'</div><div><div class="hsb-val">'+streakDays+'d</div><div class="hsb-lbl">Streak</div></div></div>'+
-    '<div class="hero-stat-box"><div class="hsb-icon">⭐</div><div><div class="hsb-val">'+doneCount+'/'+dueCount+'</div><div class="hsb-lbl">Today</div></div></div>'+
-    '</div>';
+    '</div></div>';
 }
 function statIconCard(icon, iconBg, num, lbl){
   return '<div class="stat-icon-card"><div class="sic-icon" style="background:'+iconBg+';">'+icon+'</div><div class="sic-num">'+num+'</div><div class="sic-lbl">'+lbl+'</div></div>';
 }
 const DASHBOARD_WIDGETS = [
-  {id:"hero", label:"Level & Streak Card", icon:"🏆"},
   {id:"quickActions", label:"Quick Add & Start Timer", icon:"➕"},
-  {id:"quickLinks", label:"Quick Links", icon:"🧭"},
-  {id:"stats", label:"Stats Grid", icon:"📊"},
-  {id:"badges", label:"Badges", icon:"🏅"},
+  {id:"hero", label:"Level & XP Card", icon:"🏆"},
+  {id:"quickLinks", label:"Shortcuts", icon:"🧭"},
   {id:"bedtime", label:"Time Check", icon:"⏳"},
-  {id:"sleep", label:"Sleep Tracker", icon:"😴"},
-  {id:"mood", label:"Mood Tracker", icon:"🙂"},
   {id:"tasks", label:"Today's Tasks", icon:"📝"},
   {id:"habits", label:"Today's Habits", icon:"✅"},
   {id:"alerts", label:"Today's Alerts", icon:"⏰"},
-  {id:"goals", label:"Goals in Progress", icon:"🎯"}
+  {id:"goals", label:"Goals in Progress (under Show more)", icon:"🎯"},
+  {id:"badges", label:"Badges (under Show more)", icon:"🏅"}
 ];
 function getDashboardOrder(){
   const allIds = DASHBOARD_WIDGETS.map(w=>w.id);
@@ -3616,14 +3609,6 @@ function getDashboardOrder(){
   if(!saved || !saved.length) return allIds.slice();
   const filtered = saved.filter(id=>allIds.includes(id));
   const missing = allIds.filter(id=>!filtered.includes(id));
-  // Newly-added "Quick Add" box slots in right under the hero card for people with a saved order.
-  if(missing.includes("quickActions")){
-    const rest = missing.filter(id=>id!=="quickActions");
-    const heroAt = filtered.indexOf("hero");
-    const out = filtered.slice();
-    out.splice(heroAt>=0 ? heroAt+1 : 0, 0, "quickActions");
-    return out.concat(rest);
-  }
   return filtered.concat(missing);
 }
 function dashboardOrderRowHtml(id, i, total){
@@ -3648,7 +3633,15 @@ function refreshDashOrderList(){
   const el = document.getElementById("dashOrderList");
   if(el) el.innerHTML = order.map((id,i)=>dashboardOrderRowHtml(id,i,order.length)).join("");
 }
+let homeShowMore = false;
 function renderHome(){
+  // One-time move to the streamlined layout: Quick Add first, extras tucked under "Show more".
+  if(!state.profile.homeLayoutV2){
+    state.profile.homeLayoutV2 = true;
+    state.profile.dashboardOrder = null;
+    state.profile.dashboardHidden = (state.profile.dashboardHidden||[]).filter(id=>id!=="quickActions");
+    saveState();
+  }
   const due = habitsDueToday();
   const doneCount = due.filter(h=>isHabitCompletedOn(h, todayStr())).length;
   const activeGoals = state.goals.filter(g=>g.status==="active");
@@ -3664,17 +3657,9 @@ function renderHome(){
     hero: heroCardV2Html(lvl, totalPoints(), bestActiveStreak(), doneCount, due.length),
     quickActions: quickActionsWidgetHtml(),
     quickLinks: dashboardQuickLinksHtml(["actionhub","planner","impowerzone","toolkit","progress","settings"]),
-    stats: '<div class="grid cols-4">'+
-      statIconCard("📅","#DCFCE7", todaysEventCount, "Today's Events")+
-      statIconCard("🎯","#CFFAFE", activeGoals.length, "Active Goals")+
-      statIconCard("🏅","#FEF3C7", bestActiveStreak()+"d", "Best Streak")+
-      statIconCard("📈","#FCE7F3", completionPct+"%", "Completion")+
-      '</div>',
     badges: earnedBadges.length ? '<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hc-meta" style="font-weight:700;">🏅 Badges:</span>'+
       earnedBadges.slice(-8).map(b=>'<span title="'+escapeHtml(b.title)+'" style="font-size:20px;">'+b.emoji+'</span>').join("")+'</div>' : "",
     bedtime: bedtimeWidgetHtml(),
-    sleep: sleepWidgetHtml(),
-    mood: moodWidgetHtml(),
     tasks: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Tasks</h2><a class="btn ghost sm" href="#/tasks">View all</a></div>'+
       (todaysTasks.length===0 ? emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.") : todaysTasks.map(t=>taskRow(t)).join(""))+'</div>',
     habits: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>'+
@@ -3695,13 +3680,22 @@ function renderHome(){
   html += '<div class="card" style="margin-bottom:16px;margin-top:12px;background:var(--surface-2);border:none;text-align:center;font-style:italic;font-weight:600;font-size:13.5px;">💬 "'+escapeHtml(quoteOfTheDay())+'"</div>';
 
   const hidden = state.profile.dashboardHidden || [];
+  const MORE_IDS = ["goals","badges"];
   getDashboardOrder().forEach(id=>{
-    if(hidden.includes(id)) return;
+    if(hidden.includes(id) || MORE_IDS.includes(id)) return;
     const chunk = widgetHtml[id];
     if(!chunk) return;
     html += '<div class="dash-widget-box" draggable="true" data-widget-id="'+id+'" style="margin-top:14px;">'+
       '<div class="dash-drag-handle" title="Drag to reorder">⠿</div>'+chunk+'</div>';
   });
+  // "Show more": streak/today chips, goals, and badges — out of the way until wanted.
+  html += '<button class="btn ghost block" style="margin-top:16px;" data-action="toggleHomeMore">'+(homeShowMore?"Show less ▴":"Show more ▾")+'</button>';
+  if(homeShowMore){
+    html += '<div class="card" style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-weight:800;">'+
+      '<span>'+themeEmoji("streak")+' '+bestActiveStreak()+'d streak</span><span>⭐ '+doneCount+'/'+due.length+' habits today</span>'+
+      '<span>🎯 '+activeGoals.length+' active goal'+(activeGoals.length===1?"":"s")+'</span><span>📅 '+todaysEventCount+' event'+(todaysEventCount===1?"":"s")+' today</span></div>';
+    MORE_IDS.forEach(id=>{ if(!hidden.includes(id) && widgetHtml[id]) html += '<div style="margin-top:14px;">'+widgetHtml[id]+'</div>'; });
+  }
 
   return html;
 }
@@ -3715,7 +3709,7 @@ function quickActionsWidgetHtml(){
   return '<div class="card"><div style="font-weight:800;font-size:15px;margin-bottom:10px;">➕ Quick Add</div>'+
     '<div style="'+grid+'">'+
       tile("openTaskForm","📝","Task",t)+tile("openCustomEventForm","📅","Event",t)+tile("openHabitForm","✅","Habit")+tile("openGoalForm","🎯","Goal")+
-      tile("openReminderForm","⏰","Alert")+tile("openHolidayForm","🏖️","Day Off",t)+
+      tile("openReminderForm","⏰","Alert")+tile("openHolidayForm","🏖️","Day Off",t)+tile("openSleepForm","😴","Log Sleep")+tile("openMoodForm","🙂","Log Mood")+
       '<a class="btn secondary" href="#/actionhub?tab=todolist" style="'+big+'"><span style="font-size:26px;line-height:1;">📋</span><span>To Do List</span></a>'+
       tile("openJournalForm","🧠","Brain Dump")+
     '</div>'+
@@ -8762,6 +8756,7 @@ document.addEventListener("click", async function(e){
       render();
       break;
     }
+    case "toggleHomeMore": { homeShowMore = !homeShowMore; render(); break; }
     case "cancelFocus": {
       const s = state.focusSessions.find(x=>x.id===id);
       s.status = "cancelled"; s.end_time = new Date().toISOString();
