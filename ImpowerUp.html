@@ -3236,13 +3236,13 @@ function getDayTimelineItems(dateStr){
   (state.tasks||[]).filter(t=>t.date===dateStr).forEach(t=>{
     const link = taskLinkedInfo(t);
     const dueToday = t.due_date && t.due_date===dateStr;
-    items.push({time:"", label:t.title, emoji:"📝", type:"task", id:t.id, done:t.status==="done", color:dueToday?"#ef4444":t.color, duration:t.planned_minutes, linkLabel: link?link.label:null, isDue:dueToday});
+    items.push({time:"", label:t.title, emoji:(t.assessment_kind==="assessment"?"✏️":"📝"), type:"task", id:t.id, done:t.status==="done", color:dueToday?"#ef4444":t.color, duration:t.planned_minutes, linkLabel: link?link.label:null, isDue:dueToday});
   });
   // Separate red "due" marker on the due date itself, when it's a different day than the
   // "When To Do It" date above (or when no do-date was set at all) — so a deadline still shows
   // up on the calendar even if nothing was scheduled toward it that day.
   (state.tasks||[]).filter(t=>t.status!=="done" && t.due_date && t.due_date===dateStr && t.date!==dateStr).forEach(t=>{
-    items.push({time:"", label:"Due: "+t.title, emoji:"⚠️", type:"task_due", id:t.id, color:"#ef4444", isDue:true});
+    items.push({time:"", label:"Due: "+t.title+(assessmentLabel(t)?" ("+assessmentLabel(t)+")":""), emoji:"⚠️", type:"task_due", id:t.id, color:"#ef4444", isDue:true});
   });
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
@@ -5684,7 +5684,7 @@ function taskFormHtml(t){
       '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
     priorityChipsHtml("pickTaskPriority", taskFormPriority)+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">📚 Homework / graded assignment</div><div class="hc-meta" style="margin-top:2px;">Marks this task so you can log a grade when it\'s done — switches Type to Academic</div></div><div class="switch '+(taskGradedOn?"on":"")+'" data-action="toggleTaskGraded"></div></div>'+
-    '<div id="tsk_gradedBlock" style="'+(taskGradedOn?"":"display:none;")+'"><div class="field"><label>Class</label><select id="tsk_gradeClass">'+gradeClassOptionsHtml(t.grade_class_id)+'</select></div></div>'+
+    '<div id="tsk_gradedBlock" style="'+(taskGradedOn?"":"display:none;")+'">'+assessKindChipsHtml()+'<div class="field"><label>Class</label><select id="tsk_gradeClass">'+gradeClassOptionsHtml(t.grade_class_id)+'</select></div></div>'+
     '<div class="field"><label>Linked to (optional)</label><select id="tsk_link">'+taskLinkOptionsHtml(linkValue)+'</select></div>'+
     '<div class="toggle-row" style="padding:8px 0;"><div><div style="font-weight:700;font-size:13px;">🔔 Remind me</div><div class="hc-meta" style="margin-top:2px;">Uses the date above — set one first</div></div><div class="switch '+(taskAlarmOn?"on":"")+'" data-action="toggleTaskAlarm"></div></div>'+
     '<div id="tsk_alarmBlock" style="'+(taskAlarmOn?"":"display:none;")+'"><div class="row-inline"><div class="field"><label>Time</label><input id="tsk_alarmTime" type="time" value="'+(t.alarm_time||"09:00")+'"></div>'+
@@ -5703,6 +5703,26 @@ function taskFormHtml(t){
 let taskAlarmOn = false;
 let tskGapNotSure = false;
 let taskFormPriority = "medium";
+let taskAssessKind = "homework", taskAssessType = "";
+const ASSESS_TYPES = [{v:"test",l:"Test"},{v:"quiz",l:"Quiz"},{v:"project",l:"Major Project"},{v:"other",l:"Other"}];
+function assessmentLabel(t){
+  if(!t || t.assessment_kind!=="assessment") return "";
+  const ty = ASSESS_TYPES.find(x=>x.v===t.assessment_type);
+  return ty ? ty.l : "Assessment";
+}
+function assessmentTagHtml(t){
+  const l = assessmentLabel(t);
+  return l ? ' <span class="tag" style="background:#ef444422;color:#ef4444;font-weight:700;">✏️ '+escapeHtml(l)+'</span>' : '';
+}
+function assessKindChipsHtml(){
+  return '<div class="field"><label>This is a…</label><div class="chip-group" id="assessKindChips">'+
+      '<div class="chip '+(taskAssessKind==="homework"?"selected":"")+'" data-action="pickTaskAssessKind" data-v="homework">📝 Homework</div>'+
+      '<div class="chip '+(taskAssessKind==="assessment"?"selected":"")+'" data-action="pickTaskAssessKind" data-v="assessment">✏️ Assessment</div>'+
+    '</div></div>'+
+    '<div class="field" id="assessTypeField" style="'+(taskAssessKind==="assessment"?"":"display:none;")+'"><label>What kind?</label><div class="chip-group" id="assessTypeChips">'+
+      ASSESS_TYPES.map(a=>'<div class="chip '+(taskAssessType===a.v?"selected":"")+'" data-action="pickTaskAssessType" data-v="'+a.v+'">'+a.l+'</div>').join("")+
+    '</div></div>';
+}
 let taskGradedOn = false;
 let taskFormType = "personal";
 let taskFormSubtasks = [];
@@ -5729,6 +5749,8 @@ function openTaskForm(id, prefillDate){
   taskFormCat = t ? (t.category||"") : "";
   taskFormPriority = t ? (t.priority||"medium") : "medium";
   taskGradedOn = !!(t && t.is_graded);
+  taskAssessKind = (t && t.assessment_kind==='assessment') ? 'assessment' : 'homework';
+  taskAssessType = (t && t.assessment_type) || '';
   // Existing tasks saved before this field existed have is_academic===undefined — treat those
   // as Academic if they were already graded (a safe inference), Personal otherwise.
   taskFormType = t ? ((t.is_academic!==undefined ? t.is_academic : !!t.is_graded) ? "academic" : "personal") : "personal";
@@ -5781,10 +5803,13 @@ function overdueListModalHtml(){
     const cat = t.category ? catInfo(t.category) : null;
     const effDate = taskEffectiveDueDate(t);
     const dO = daysOverdueCount(effDate);
-    return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'+
-      '<div style="font-weight:700;">'+escapeHtml(t.title)+(t.is_graded?' <span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':'')+'</div>'+
-      '<div class="hc-meta" style="color:#ef4444;">Due '+fmtDatePretty(effDate)+' · '+dO+' day'+(dO===1?"":"s")+' overdue'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+'</div>'+
-      '</div>';
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">'+
+      '<div style="flex:1;min-width:0;"><div style="font-weight:700;word-break:break-word;">'+escapeHtml(t.title)+(t.is_graded?' <span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>'+assessmentTagHtml(t):'')+'</div>'+
+      '<div class="hc-meta" style="color:#ef4444;">Due '+fmtDatePretty(effDate)+' · '+dO+' day'+(dO===1?"":"s")+' overdue'+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+'</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">'+
+      '<button class="btn sm" data-action="quickDoneTask" data-id="'+t.id+'">✓ Done</button>'+
+      '<button class="btn ghost sm" data-action="openTaskCompleteForm" data-id="'+t.id+'" title="Add time, notes, or a grade">Details…</button>'+
+      '</div></div>';
   }).join("");
   return '<h2>⚠️ Overdue &amp; Missing ('+items.length+')</h2>'+
     '<div style="max-height:360px;overflow-y:auto;margin:8px 0;">'+rows+'</div>'+
@@ -5896,7 +5921,7 @@ function renderTasks(){
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>':typeBit)+subtaskProgressBadgeHtml(t)+'</div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>'+assessmentTagHtml(t):typeBit)+subtaskProgressBadgeHtml(t)+'</div>'+
       subtaskChecklistHtml(t)+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:6px;">'+
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
@@ -7515,6 +7540,18 @@ document.addEventListener("click", async function(e){
       }
       break;
     }
+    case "pickTaskAssessKind": {
+      taskAssessKind = v;
+      document.querySelectorAll('[data-action="pickTaskAssessKind"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
+      const f = document.getElementById("assessTypeField"); if(f) f.style.display = v==="assessment" ? "" : "none";
+      if(v!=="assessment"){ taskAssessType = ""; document.querySelectorAll('[data-action="pickTaskAssessType"]').forEach(c=>c.classList.remove("selected")); }
+      break;
+    }
+    case "pickTaskAssessType": {
+      taskAssessType = (taskAssessType===v) ? "" : v;
+      document.querySelectorAll('[data-action="pickTaskAssessType"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===taskAssessType));
+      break;
+    }
     case "toggleTaskGraded": {
       const isOn = t.classList.toggle("on");
       taskGradedOn = isOn;
@@ -7565,7 +7602,7 @@ document.addEventListener("click", async function(e){
       const subtasks = taskFormSubtasks.filter(s=>s.title.trim()!=="").map(s=>({id:s.id||uid(), title:s.title.trim(), done:!!s.done}));
       const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate, due_date: taskDueDate,
         is_academic: taskGradedOn ? true : (taskFormType==="academic"),
-        is_graded: taskGradedOn, grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
+        is_graded: taskGradedOn, assessment_kind: taskGradedOn ? taskAssessKind : "", assessment_type: (taskGradedOn && taskAssessKind==="assessment") ? taskAssessType : "", grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
         linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
         description: (document.getElementById("tsk_notes")?document.getElementById("tsk_notes").value:"").trim(),
         alarm_enabled: taskAlarmOn,
@@ -8843,13 +8880,24 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openOverdueList": openModal(overdueListModalHtml()); break;
+    case "quickDoneTask": {
+      const tsk = (state.tasks||[]).find(x=>x.id===id);
+      if(!tsk) return;
+      tsk.status = "done";
+      tsk.completed_at = new Date().toISOString();
+      saveState();
+      openModal(overdueListModalHtml()); // refresh the popup in place so the next one is right there
+      render();
+      toast("Marked done ✓");
+      break;
+    }
     case "copyOverdueList": {
       const items = overdueTasks();
       if(!items.length){ toast("Nothing overdue"); break; }
       const text = "Overdue / Missing Assignments ("+items.length+"):\n"+items.map(ti=>{
         const effDate = taskEffectiveDueDate(ti);
         const dO = daysOverdueCount(effDate);
-        return "- "+ti.title+" — due "+fmtDatePretty(effDate)+" ("+dO+" day"+(dO===1?"":"s")+" overdue)"+(ti.is_graded && ti.grade_class_name ? " ["+ti.grade_class_name+"]" : "");
+        return "- "+ti.title+" — due "+fmtDatePretty(effDate)+" ("+dO+" day"+(dO===1?"":"s")+" overdue)"+(ti.is_graded && ti.grade_class_name ? " ["+ti.grade_class_name+"]" : "")+(assessmentLabel(ti) ? " ("+assessmentLabel(ti)+")" : "");
       }).join("\n");
       if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>toast("List copied!")).catch(()=>fallbackCopyText(text));
       else fallbackCopyText(text);
