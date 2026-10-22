@@ -413,7 +413,7 @@ let SECTION_ICONS = {
 const DEFAULT_SECTION_ICONS = JSON.parse(JSON.stringify(SECTION_ICONS));
 const SECTION_ICON_META = [
   {key:"habits",label:"Habits"},{key:"goals",label:"Goals"},{key:"tasks",label:"Tasks"},
-  {key:"focus",label:"Focus"},{key:"alerts",label:"Alerts"},{key:"timeblind",label:"Time Blindness"},
+  {key:"focus",label:"Focus"},{key:"alerts",label:"Reminders"},{key:"timeblind",label:"Time Blindness"},
   {key:"calendar",label:"Calendar"},{key:"schedule",label:"Schedule"},{key:"classes",label:"Classes"},{key:"templates",label:"Templates"},
   {key:"sleep",label:"Sleep Tracker"},{key:"mood",label:"Mood Tracker"},{key:"braindump",label:"Brain Dump"},{key:"grades",label:"Grades"},
   {key:"stats",label:"Stats"},{key:"matrix",label:"Success Matrix"},{key:"heatmap",label:"Habit Heatmap"},
@@ -956,6 +956,10 @@ function getOneOffPushItems(){
     const fireAt = computeOneOffFireAt(e.date, e.time);
     if(fireAt) items.push({id:"cevt_"+e.id, title:e.label||"Event", body:e.description||"", fireAt, notify_email:!!e.notify_email, notify_sms:!!e.notify_sms});
   });
+  (state.reminders||[]).filter(r=>r.is_active!==false && r.date && r.time).forEach(r=>{
+    const fireAt = computeOneOffFireAt(r.date, r.time);
+    if(fireAt) items.push({id:"rem_"+r.id, title:r.title, body:r.message||"", fireAt, notify_email:!!r.notify_email, notify_sms:!!r.notify_sms});
+  });
   (state.tasks||[]).filter(t=>t.alarm_enabled && t.alarm_time && t.date && t.status!=="done").forEach(t=>{
     const fireAt = computeOneOffFireAt(t.date, t.alarm_time);
     if(fireAt) items.push({id:"tsk_"+t.id, title:"Task: "+t.title, body:"", fireAt, notify_email:!!t.notify_email, notify_sms:!!t.notify_sms});
@@ -1163,7 +1167,7 @@ async function syncAllAlertsToServer(force){
     // One row per (alert, device) so EVERY registered device gets the push — not just whichever synced last.
     let h = 0; for(let i=0;i<endpoint.length;i++){ h = (h*31 + endpoint.charCodeAt(i))>>>0; }
     const devKey = "@@"+h.toString(36);
-    const active = state.reminders.filter(r=>r.is_active!==false && r.time && (r.days||[]).length);
+    const active = state.reminders.filter(r=>r.is_active!==false && !r.date && r.time && (r.days||[]).length);
     for(const r of active){
       const next = computeNextFireAt(r.time, r.days);
       await sbRest("scheduled_alerts?on_conflict=id", {
@@ -2468,7 +2472,7 @@ function computeMissedAlarms(){
   for(let back=1; back>=0; back--){
     const dateStr = addDays(todayStr(), -back);
     const dow = dayOfWeekName(dateStr);
-    const queueForDay = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, dateStr)}))
+    const queueForDay = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign(reminderForDate(r, dateStr), {_effTime:getEffectiveReminderTime(r, dateStr)}))
       .concat(getVirtualEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
       .concat(getCustomEventAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})))
       .concat(getTaskAlarms(dateStr).map(r=>Object.assign({}, r, {_effTime:r.time})));
@@ -3223,10 +3227,10 @@ function getDayTimelineItems(dateStr){
     const coveredHabitIds = new Set((template.time_blocks||[]).filter(b=>b.type==="habit").map(b=>b.habit_id));
     const coveredReminderIds = new Set((template.time_blocks||[]).filter(b=>b.type==="reminder").map(b=>b.reminder_id));
     state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr) && !coveredHabitIds.has(h.id)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), color:h.color}));
-    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr)) && !coveredReminderIds.has(r.id)).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
+    state.reminders.filter(r=>r.is_active!==false && reminderOccursOn(r, dateStr) && !coveredReminderIds.has(r.id)).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   } else {
     state.habits.filter(h=>h.is_active!==false && isHabitDueOn(h,dateStr)).forEach(h=>items.push({time:"", label:h.title, emoji:h.emoji, type:"habit", id:h.id, done:isHabitCompletedOn(h,dateStr), color:h.color}));
-    state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(dateStr))).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
+    state.reminders.filter(r=>r.is_active!==false && reminderOccursOn(r, dateStr)).forEach(r=>items.push({time:r.time, label:r.title, emoji:"⏰", type:"reminder", id:r.id, color:r.color}));
   }
   (state.customEvents||[]).filter(e=>eventOccursOnDate(e,dateStr)).forEach(e=>items.push({time:e.time||"", label:e.label+(e.repeat&&e.repeat!=="none"?" 🔁":""), emoji:e.is_graded?"📚":(e.emoji||(e.alarm_enabled?"🔔":"📌")), type:"custom_event", id:e.id, duration:e.duration_minutes, color:e.color, isGraded:!!e.is_graded, gradeClassName:e.grade_class_name||"", gradePercentage:e.grade_percentage}));
   const sched = state.profile.plannerShowClasses ? getScheduleDayInfo(dateStr) : null;
@@ -3389,7 +3393,7 @@ const BOTTOM_NAV_PRIMARY_COUNT = 4;
 let _navExpandedRoute = null;
 function navSubsectionsFor(path){
   if(path==="actionhub") return [{id:"tasks",label:"Tasks",icon:sectionIcon("tasks")},{id:"todolist",label:"To Do List",icon:(sectionIcon("todolist")||"📋"),indent:1},{id:"habits",label:"Habits",icon:sectionIcon("habits")},{id:"goals",label:"Goals",icon:sectionIcon("goals")}];
-  if(path==="toolkit") return [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
+  if(path==="toolkit") return [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Reminders",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
   if(path==="impowerzone") return IMPOWERZONE_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="progress") return PROGRESS_SECTIONS.map(s=>({id:s.id, label:s.label, icon:sectionIcon(s.id)}));
   if(path==="planner") return [
@@ -3470,7 +3474,7 @@ function renderActionHub(){
 }
 function renderToolkit(){
   const tab = currentQueryParam("tab") || "focus";
-  const tabs = [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Alerts",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
+  const tabs = [{id:"focus",label:"Focus",icon:sectionIcon("focus")},{id:"alerts",label:"Reminders",icon:sectionIcon("alerts")},{id:"timeblind",label:"Time Blindness",icon:sectionIcon("timeblind")}];
   let html = tabStripHtml("toolkit", tabs, tab);
   if(tab==="alerts") html += renderReminders();
   else if(tab==="timeblind") html += renderTimeBlindness();
@@ -3599,7 +3603,7 @@ const DASHBOARD_WIDGETS = [
   {id:"bedtime", label:"Time Check", icon:"⏳"},
   {id:"tasks", label:"Today's Tasks", icon:"📝"},
   {id:"habits", label:"Today's Habits", icon:"✅"},
-  {id:"alerts", label:"Today's Alerts", icon:"⏰"},
+  {id:"alerts", label:"Today's Reminders", icon:"⏰"},
   {id:"goals", label:"Goals in Progress (under Show more)", icon:"🎯"},
   {id:"badges", label:"Badges (under Show more)", icon:"🏅"}
 ];
@@ -3645,7 +3649,7 @@ function renderHome(){
   const due = habitsDueToday();
   const doneCount = due.filter(h=>isHabitCompletedOn(h, todayStr())).length;
   const activeGoals = state.goals.filter(g=>g.status==="active");
-  const upcomingReminders = state.reminders.filter(r=>r.is_active!==false && (r.days||[]).includes(dayOfWeekName(todayStr())))
+  const upcomingReminders = state.reminders.filter(r=>r.is_active!==false && reminderOccursOn(r, todayStr()))
     .map(r=>Object.assign({}, r, {time:getEffectiveReminderTime(r, todayStr())})).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
   const lvl = levelFromXp(totalPoints());
   const earnedBadges = computeEarnedBadges();
@@ -3664,7 +3668,7 @@ function renderHome(){
       (todaysTasks.length===0 ? emptyState("📝","No tasks due today","Add a task with today\'s date, or check the Tasks tab for anything still pending.") : todaysTasks.map(t=>taskRow(t)).join(""))+'</div>',
     habits: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Habits</h2><a class="btn ghost sm" href="#/habits">View all</a></div>'+
       (due.length===0 ? emptyState("✨","No habits scheduled today","Add a habit to get started.") : due.slice().sort((a,b)=>Number(isHabitCompletedOn(a,todayStr()))-Number(isHabitCompletedOn(b,todayStr()))).map(h=>habitRow(h)).join(""))+'</div>',
-    alerts: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Alerts</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>'+
+    alerts: '<div><div class="section-head" style="margin-top:0;"><h2>Today\'s Reminders</h2><a class="btn ghost sm" href="#/planner">Open planner</a></div>'+
       (upcomingReminders.length===0 ? emptyState("⏰","Nothing scheduled today","Set an alert from a habit, goal, or the planner.") : upcomingReminders.map(r=>reminderRow(r)).join(""))+'</div>',
     goals: activeGoals.length ? '<div><div class="section-head" style="margin-top:0;"><h2>Goals in Progress</h2><a class="btn ghost sm" href="#/goals">View all</a></div>'+
       activeGoals.slice(0,3).map(g=>goalRow(g)).join("")+'</div>' : ""
@@ -3709,7 +3713,7 @@ function quickActionsWidgetHtml(){
   return '<div class="card"><div style="font-weight:800;font-size:15px;margin-bottom:10px;">➕ Quick Add</div>'+
     '<div style="'+grid+'">'+
       tile("openTaskForm","📝","Task",t)+tile("openCustomEventForm","📅","Event",t)+tile("openHabitForm","✅","Habit")+tile("openGoalForm","🎯","Goal")+
-      tile("openReminderForm","⏰","Alert")+tile("openHolidayForm","🏖️","Day Off",t)+tile("openSleepForm","😴","Log Sleep")+tile("openMoodForm","🙂","Log Mood")+
+      tile("openReminderForm","⏰","Reminder")+tile("openHolidayForm","🏖️","Day Off",t)+tile("openSleepForm","😴","Log Sleep")+tile("openMoodForm","🙂","Log Mood")+
       '<a class="btn secondary" href="#/actionhub?tab=todolist" style="'+big+'"><span style="font-size:26px;line-height:1;">📋</span><span>To Do List</span></a>'+
       tile("openJournalForm","🧠","Brain Dump")+
     '</div>'+
@@ -4976,8 +4980,22 @@ function customAlarmSoundCardHtml(curSound){
     '<input type="file" id="customAlarmFileInput" accept="audio/*,video/mp4,.mp4,.mp3,.m4a,.wav,.ogg" style="display:none;">'+
     '</div>';
 }
+/* A reminder either repeats on weekdays (days[]) or fires once on one date (date). */
+function reminderOccursOn(r, dateStr){
+  if(r.date) return r.date === dateStr;
+  return reminderOccursOn(r, dateStr);
+}
+function reminderForDate(r, dateStr){
+  const c = Object.assign({}, r);
+  c.days = reminderOccursOn(r, dateStr) ? [dayOfWeekName(dateStr)] : [];
+  return c;
+}
+function reminderRepeatLabel(r){
+  if(r.date){ return "Once · "+fmtDatePretty(r.date); }
+  return (r.days||[]).join(", ");
+}
 function renderReminders(){
-  let html = topbarHtml("Alerts","Managed automatically from habits, goals, and your planner — or add a standalone one.");
+  let html = topbarHtml("Reminders","Managed automatically from habits, goals, and your planner — or add a standalone one.");
   html += alertSoundCardHtml();
   html += '<button class="btn secondary block" data-action="openReminderForm" style="margin-bottom:18px;">+ Standalone Reminder</button>';
   if(state.reminders.length===0){ html += emptyState("⏰","No reminders yet","Set an alert on a habit or goal, or add one here."); return html; }
@@ -4987,7 +5005,7 @@ function renderReminders(){
     return '<div class="reminder-card" style="'+(r.color?"border-left:3px solid "+r.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(r.color||"var(--surface-2)")+'22;font-size:18px;">⏰</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(r.title)+'</div>'+
-      '<div class="hc-meta"><span>'+fmtTime12(r.time)+'</span><span class="tag">'+(r.alarm_level||"moderate")+'</span><span>'+(r.days||[]).join(", ")+'</span>'+
+      '<div class="hc-meta"><span>'+fmtTime12(r.time)+'</span><span class="tag">'+(r.alarm_level||"moderate")+'</span><span>'+reminderRepeatLabel(r)+'</span>'+
       (linkedHabit?'<span class="tag">habit</span>':linkedGoal?'<span class="tag">goal</span>':'<span class="tag">standalone</span>')+'</div>'+
       (r.message?'<div style="font-size:12px;margin-top:4px;color:var(--text-muted);font-style:italic;">"'+escapeHtml(r.message)+'"</div>':"")+'</div>'+
       '<button class="icon-btn" data-action="editReminder" data-id="'+r.id+'">✏️</button>'+
@@ -5002,7 +5020,11 @@ function reminderFormHtml(r){
     '<div class="field"><label>Title</label><input id="r_title" type="text" placeholder="e.g. Take medication" value="'+escapeHtml(r.title)+'"></div>'+
     '<div class="row-inline"><div class="field"><label>Time</label><input id="r_time" type="time" value="'+r.time+'"></div>'+
     '<div class="field"><label>Alert level</label><select id="r_level">'+["gentle","moderate","loud","persistent"].map(l=>'<option value="'+l+'" '+(r.alarm_level===l?"selected":"")+'>'+l+'</option>').join("")+'</select></div></div>'+
-    '<div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+((r.days||[]).includes(d)?"selected":"")+'" data-action="pickRDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div>'+
+    '<div class="field"><label>When</label><div class="chip-group">'+
+      '<div class="chip '+(reminderFormMode==="weekly"?"selected":"")+'" data-action="pickRMode" data-v="weekly">Repeats on days</div>'+
+      '<div class="chip '+(reminderFormMode==="once"?"selected":"")+'" data-action="pickRMode" data-v="once">Just once</div></div></div>'+
+    '<div id="r_daysBlock" style="'+(reminderFormMode==="weekly"?"":"display:none;")+'"><div class="field"><label>Days</label><div class="chip-group">'+DAY_NAMES.map(d=>'<div class="chip '+((r.days||[]).includes(d)?"selected":"")+'" data-action="pickRDay" data-v="'+d+'">'+d+'</div>').join("")+'</div></div></div>'+
+    '<div id="r_dateBlock" style="'+(reminderFormMode==="once"?"":"display:none;")+'"><div class="field"><label>Date</label><input id="r_date" type="date" value="'+(r.date||todayStr())+'"></div></div>'+
     '<div class="field"><label>Color</label><div class="swatch-group">'+COLORS.map(c=>'<div class="swatch '+(reminderFormColor===c?"selected":"")+'" style="background:'+c+'" data-action="pickRColor" data-v="'+c+'"></div>').join("")+'<input type="color" class="colorwheel-input" id="r_colorWheel" value="'+reminderFormColor+'" title="Pick any color"></div></div>'+
     '<div class="field"><label>Motivational message</label><input id="r_msg" type="text" value="'+escapeHtml(r.message||"")+'"></div>'+
     notifyChannelChipsHtml()+
@@ -5011,9 +5033,11 @@ function reminderFormHtml(r){
     '<button class="btn" data-action="saveReminder" data-id="'+(r.id||"")+'" style="flex:1">Save</button></div>';
 }
 let reminderFormDays=[];
+let reminderFormMode="weekly";
 function openReminderForm(id){
   const r = id ? state.reminders.find(x=>x.id===id) : null;
   reminderFormDays = r ? (r.days||[]).slice() : ["Mon","Tue","Wed","Thu","Fri"];
+  reminderFormMode = (r && r.date) ? "once" : "weekly";
   reminderFormColor = r ? (r.color||COLORS[0]) : COLORS[state.reminders.length % COLORS.length];
   notifyEmailOn = !!(r && r.notify_email);
   notifySmsOn = !!(r && r.notify_sms);
@@ -5679,6 +5703,7 @@ function taskFormHtml(t){
     '<div class="row-inline"><div class="field" style="flex:1;"><label>When To Do It (optional)</label><input id="tsk_date" type="date" value="'+(t.date||"")+'"></div>'+
     '<div class="field" style="flex:1;"><label>When It\'s Due (optional)</label><input id="tsk_dueDate" type="date" value="'+(t.due_date||"")+'" style="'+(t.due_date?"color:#ef4444;font-weight:700;":"")+'"></div></div>'+
     '<p class="hc-meta" style="margin-top:-6px;">Both show on Planner/Calendar — the due date appears in red.</p>'+
+    taskRepeatBlockHtml(t)+
     '<div class="field"><label>Notes (optional)</label><textarea id="tsk_notes" placeholder="Any extra details">'+escapeHtml(t.description||"")+'</textarea></div>'+
     '<div class="field"><label>Subtasks (optional)</label><div id="subtaskList">'+subtaskListRowsHtml()+
       '</div><button class="btn secondary sm" type="button" data-action="addSubtaskRow">+ Add subtask</button></div>'+
@@ -5703,6 +5728,87 @@ function taskFormHtml(t){
 let taskAlarmOn = false;
 let tskGapNotSure = false;
 let taskFormPriority = "medium";
+/* ---- Repeating tasks: finishing one creates the next occurrence (same title, notes, subtasks, priority…) ---- */
+let taskRepeatDays = [];
+function taskRepeatSummary(t){
+  const r = t && t.repeat;
+  if(!r || r==="none") return "";
+  if(r==="daily") return "Every day";
+  if(r==="monthly") return "Monthly";
+  const names = (t.repeat_days||[]).map(d=>(WEEKDAY_OPTS.find(w=>w[0]===d)||[0,""])[1]).join("/");
+  if(r==="weekly") return "Weekly"+(names?" ("+names+")":"");
+  if(r==="custom"){
+    const n = Math.max(1, Number(t.repeat_interval)||1), u = t.repeat_unit||"week";
+    return "Every "+(n>1?n+" ":"")+u+(n>1?"s":"")+(u==="week"&&names?" ("+names+")":"");
+  }
+  return "";
+}
+function taskRepeatBlockHtml(t){
+  const repeat = (t && t.repeat) || "none";
+  const unit = (t && t.repeat_unit) || "week";
+  const labels = {none:"Does not repeat", daily:"Every day", weekly:"Weekly", monthly:"Monthly (same date)", custom:"Custom…"};
+  const unitLabels = {day:"day(s)", week:"week(s)", month:"month(s)"};
+  const showDays = repeat==="weekly" || (repeat==="custom" && unit==="week");
+  return '<div class="field"><label>🔁 Repeat (optional)</label><select id="tsk_repeat">'+
+      Object.keys(labels).map(r=>'<option value="'+r+'" '+(repeat===r?"selected":"")+'>'+labels[r]+'</option>').join("")+'</select></div>'+
+    '<div id="tsk_repeatCustomBlock" style="'+(repeat==="custom"?"":"display:none;")+'"><div class="row-inline">'+
+      '<div class="field" style="flex:0 0 90px;"><label>Every</label><input id="tsk_repeatInterval" type="number" min="1" value="'+((t&&t.repeat_interval)||1)+'"></div>'+
+      '<div class="field" style="flex:1;"><label>&nbsp;</label><select id="tsk_repeatUnit">'+
+        Object.keys(unitLabels).map(u=>'<option value="'+u+'" '+(unit===u?"selected":"")+'>'+unitLabels[u]+'</option>').join("")+'</select></div></div></div>'+
+    '<div id="tsk_repeatDaysBlock" style="'+(showDays?"":"display:none;")+'"><div class="field"><label>Repeat on</label><div class="chip-group">'+
+      WEEKDAY_OPTS.map(w=>'<div class="chip '+(taskRepeatDays.includes(w[0])?"selected":"")+'" data-action="pickTaskRepeatDay" data-v="'+w[0]+'">'+w[1]+'</div>').join("")+'</div></div></div>'+
+    '<div id="tsk_repeatUntilBlock" style="'+(repeat!=="none"?"":"display:none;")+'"><div class="field"><label>Stop repeating after (optional)</label><input id="tsk_repeatUntil" type="date" value="'+((t&&t.repeat_until)||"")+'"></div>'+
+      '<p class="hc-meta" style="margin-top:-6px;">When you mark one done, the next one is created automatically for the next date. Delete a task (or set Repeat to "Does not repeat") to stop the series.</p></div>';
+}
+function updateTaskRepeatUI(){
+  const type = document.getElementById("tsk_repeat").value;
+  const unitEl = document.getElementById("tsk_repeatUnit");
+  const unit = unitEl ? unitEl.value : "week";
+  const showDays = type==="weekly" || (type==="custom" && unit==="week");
+  const a = document.getElementById("tsk_repeatCustomBlock"), b = document.getElementById("tsk_repeatDaysBlock"), c = document.getElementById("tsk_repeatUntilBlock");
+  if(a) a.style.display = type==="custom" ? "" : "none";
+  if(b) b.style.display = showDays ? "" : "none";
+  if(c) c.style.display = type==="none" ? "none" : "";
+}
+/* Next date this repeating task should land on, or "" if the series has ended. */
+function nextTaskOccurrenceDate(t){
+  if(!t || !t.repeat || t.repeat==="none") return "";
+  const base = t.date || t.due_date || todayStr();
+  const anchor = t.repeat_anchor || base;
+  const today = todayStr();
+  // Done early -> next one after this one's date. Done late -> next scheduled date from today on.
+  let cursor = base >= today ? addDays(base, 1) : today;
+  const pseudo = { date: anchor, repeat: t.repeat, repeat_days: t.repeat_days||[], repeat_interval: t.repeat_interval||1, repeat_unit: t.repeat_unit||"week", repeat_until: t.repeat_until||"" };
+  for(let i=0;i<800;i++){
+    if(pseudo.repeat_until && cursor > pseudo.repeat_until) return "";
+    if(eventOccursOnDate(pseudo, cursor)) return cursor;
+    cursor = addDays(cursor, 1);
+  }
+  return "";
+}
+function spawnNextRepeatingTask(done){
+  const next = nextTaskOccurrenceDate(done);
+  if(!next) return null;
+  const seriesId = done.series_id || done.id;
+  const dupe = (state.tasks||[]).find(x=>x.status!=="done" && (x.series_id||x.id)===seriesId && (x.date===next || (!x.date && x.due_date===next)));
+  if(dupe) return null;
+  const copy = JSON.parse(JSON.stringify(done));
+  copy.id = uid(); copy.series_id = seriesId; copy.repeat_anchor = done.repeat_anchor || done.date || done.due_date || next;
+  copy.status = "pending"; copy.actual_minutes = null; copy.distraction = ""; copy.helped = "";
+  copy.follow_up_needed = false; copy.follow_up_date = ""; copy.follow_up_notes = "";
+  copy.created_at = new Date().toISOString(); copy.completed_at = null;
+  if(copy.is_graded){ copy.grade_score = null; copy.grade_max = null; copy.grade_percentage = null; copy.graded_at = ""; }
+  copy.subtasks = (copy.subtasks||[]).map(st=>Object.assign({},st,{id:uid(), done:false}));
+  if(done.date){
+    copy.date = next;
+    if(done.due_date){
+      const gap = dateToEpochDay(done.due_date) - dateToEpochDay(done.date);
+      copy.due_date = addDays(next, gap);
+    }
+  } else { copy.date = ""; copy.due_date = next; }
+  state.tasks.push(copy);
+  return copy;
+}
 let taskAssessKind = "homework", taskAssessType = "";
 const ASSESS_TYPES = [{v:"test",l:"Test"},{v:"quiz",l:"Quiz"},{v:"project",l:"Major Project"},{v:"other",l:"Other"}];
 function assessmentLabel(t){
@@ -5749,6 +5855,7 @@ function openTaskForm(id, prefillDate){
   taskFormCat = t ? (t.category||"") : "";
   taskFormPriority = t ? (t.priority||"medium") : "medium";
   taskGradedOn = !!(t && t.is_graded);
+  taskRepeatDays = (t && t.repeat_days && t.repeat_days.length) ? t.repeat_days.slice() : [weekdayIndexOf((t&&(t.date||t.due_date))||todayStr())];
   taskAssessKind = (t && t.assessment_kind==='assessment') ? 'assessment' : 'homework';
   taskAssessType = (t && t.assessment_type) || '';
   // Existing tasks saved before this field existed have is_academic===undefined — treat those
@@ -5921,7 +6028,7 @@ function renderTasks(){
     return '<div class="habit-card" style="'+(t.color?"border-left:3px solid "+t.color+";":"")+'">'+
       '<div class="emoji-badge" style="background:'+(t.color||COLORS[0])+'22;">'+(cat?cat.e:"📝")+'</div>'+
       '<div class="hc-body"><div class="hc-title">'+escapeHtml(t.title)+taskLinkBadgeHtml(t)+'</div>'+
-      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>'+assessmentTagHtml(t):typeBit)+subtaskProgressBadgeHtml(t)+'</div>'+
+      '<div class="hc-meta">⏱ '+fmtMinutesDuration(t.planned_minutes||0)+' planned'+(t.date?' · '+fmtDatePretty(t.date):'')+dueBit+(cat?' · '+escapeHtml(cat.l):'')+priorityBadgeHtml(t.priority)+(t.is_graded?'<span class="tag">📚 '+escapeHtml(t.grade_class_name||"Graded")+'</span>'+assessmentTagHtml(t):typeBit)+(t.repeat&&t.repeat!=="none"?'<span class="tag">🔁 '+escapeHtml(taskRepeatSummary(t))+'</span>':'')+subtaskProgressBadgeHtml(t)+'</div>'+
       subtaskChecklistHtml(t)+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:6px;">'+
       '<button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+t.id+'">Mark Done</button>'+
@@ -7060,7 +7167,7 @@ function checkReminders(){
   const nowHM = String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
   const today = todayStr();
   const dow = dayOfWeekName(today);
-  const queue = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign({}, r, {_effTime:getEffectiveReminderTime(r, today)}))
+  const queue = state.reminders.filter(r=>r.is_active!==false).map(r=>Object.assign(reminderForDate(r, today), {_effTime:getEffectiveReminderTime(r, today)}))
     .concat(getVirtualEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
     .concat(getCustomEventAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})))
     .concat(getTaskAlarms(today).map(r=>Object.assign({}, r, {_effTime:r.time})));
@@ -7540,6 +7647,12 @@ document.addEventListener("click", async function(e){
       }
       break;
     }
+    case "pickTaskRepeatDay": {
+      const wd = Number(v), i = taskRepeatDays.indexOf(wd);
+      if(i>=0) taskRepeatDays.splice(i,1); else taskRepeatDays.push(wd);
+      document.querySelectorAll('[data-action="pickTaskRepeatDay"]').forEach(c=>c.classList.toggle("selected", taskRepeatDays.includes(Number(c.getAttribute("data-v")))));
+      break;
+    }
     case "pickTaskAssessKind": {
       taskAssessKind = v;
       document.querySelectorAll('[data-action="pickTaskAssessKind"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
@@ -7600,7 +7713,15 @@ document.addEventListener("click", async function(e){
       if(taskGradedOn && !gradeClassId){ toast("Pick a class for this graded assignment"); return; }
       collectSubtasksFromDOM();
       const subtasks = taskFormSubtasks.filter(s=>s.title.trim()!=="").map(s=>({id:s.id||uid(), title:s.title.trim(), done:!!s.done}));
-      const payload = { title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate, due_date: taskDueDate,
+      const repeatType = document.getElementById("tsk_repeat") ? document.getElementById("tsk_repeat").value : "none";
+      const repeatUnit = document.getElementById("tsk_repeatUnit") ? document.getElementById("tsk_repeatUnit").value : "week";
+      const usesDays = repeatType==="weekly" || (repeatType==="custom" && repeatUnit==="week");
+      if(repeatType!=="none" && !taskDate && !taskDueDate){ toast("Add a date (do-date or due date) so we know when it repeats"); return; }
+      if(usesDays && taskRepeatDays.length===0){ toast("Pick at least one day to repeat on"); return; }
+      const repeatFields = { repeat: repeatType, repeat_days: usesDays ? taskRepeatDays.slice() : [], repeat_interval: Math.max(1, Number(document.getElementById("tsk_repeatInterval")?document.getElementById("tsk_repeatInterval").value:1)||1), repeat_unit: repeatUnit,
+        repeat_until: (repeatType!=="none" && document.getElementById("tsk_repeatUntil")) ? document.getElementById("tsk_repeatUntil").value : "",
+        repeat_anchor: repeatType!=="none" ? (taskDate || taskDueDate) : "" };
+      const payload = Object.assign({ title, planned_minutes: planned, color: taskFormColor, category: taskFormCat, priority: taskFormPriority, date: taskDate, due_date: taskDueDate,
         is_academic: taskGradedOn ? true : (taskFormType==="academic"),
         is_graded: taskGradedOn, assessment_kind: taskGradedOn ? taskAssessKind : "", assessment_type: (taskGradedOn && taskAssessKind==="assessment") ? taskAssessType : "", grade_class_id: gradeClassId, grade_class_name: gradeClassName, subtasks,
         linked_type: linkParts[0]||"", linked_id: linkParts[1]||"",
@@ -7608,7 +7729,7 @@ document.addEventListener("click", async function(e){
         alarm_enabled: taskAlarmOn,
         alarm_time: taskAlarmOn ? document.getElementById("tsk_alarmTime").value : "",
         alarm_level: taskAlarmOn ? document.getElementById("tsk_alarmLevel").value : "moderate",
-        notify_email: notifyEmailOn, notify_sms: notifySmsOn };
+        notify_email: notifyEmailOn, notify_sms: notifySmsOn }, repeatFields);
       state.tasks = state.tasks || [];
       if(id){ Object.assign(state.tasks.find(x=>x.id===id), payload); }
       else {
@@ -7734,8 +7855,9 @@ document.addEventListener("click", async function(e){
           else { state.grades.push(Object.assign({id:uid()}, gradeEntry)); }
         }
       }
+      const spawned = spawnNextRepeatingTask(tsk);
       saveState(); closeModal(); render();
-      toast("Nice work! Task complete.");
+      toast(spawned ? "Nice work! Next one set for "+fmtDatePretty(spawned.date||spawned.due_date) : "Nice work! Task complete.");
       break;
     }
     case "reopenTask": {
@@ -8571,6 +8693,14 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
+    case "pickRMode": {
+      reminderFormMode = v;
+      document.querySelectorAll('[data-action="pickRMode"]').forEach(c=>c.classList.toggle("selected", c.getAttribute("data-v")===v));
+      const d1=document.getElementById("r_daysBlock"), d2=document.getElementById("r_dateBlock");
+      if(d1) d1.style.display = v==="weekly" ? "" : "none";
+      if(d2) d2.style.display = v==="once" ? "" : "none";
+      break;
+    }
     case "pickRColor": { reminderFormColor = v; document.querySelectorAll('[data-action="pickRColor"]').forEach(s=>s.classList.toggle("selected", s.getAttribute("data-v")===v)); break; }
     case "toggleNotifyChannel": {
       if(v==="email") notifyEmailOn = !notifyEmailOn; else notifySmsOn = !notifySmsOn;
@@ -8580,7 +8710,10 @@ document.addEventListener("click", async function(e){
     case "saveReminder": {
       const title = document.getElementById("r_title").value.trim();
       if(!title){ toast("Please enter a title"); return; }
-      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormDays.slice(), color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true, notify_email: notifyEmailOn, notify_sms: notifySmsOn };
+      const onceDate = reminderFormMode==="once" ? (document.getElementById("r_date").value||"") : "";
+      if(reminderFormMode==="once" && !onceDate){ toast("Pick a date for this reminder"); return; }
+      if(reminderFormMode==="weekly" && reminderFormDays.length===0){ toast("Pick at least one day, or choose Just once"); return; }
+      const payload = { title, time: document.getElementById("r_time").value, alarm_level: document.getElementById("r_level").value, days: reminderFormMode==="once" ? [] : reminderFormDays.slice(), date: onceDate, color: reminderFormColor, message: document.getElementById("r_msg").value.trim(), is_active:true, notify_email: notifyEmailOn, notify_sms: notifySmsOn };
       if(id){ Object.assign(state.reminders.find(x=>x.id===id), payload); } else { payload.id = uid(); state.reminders.push(payload); }
       saveState(); closeModal(); render();
       toast("Reminder saved");
@@ -8885,6 +9018,7 @@ document.addEventListener("click", async function(e){
       if(!tsk) return;
       tsk.status = "done";
       tsk.completed_at = new Date().toISOString();
+      spawnNextRepeatingTask(tsk);
       saveState();
       openModal(overdueListModalHtml()); // refresh the popup in place so the next one is right there
       render();
@@ -9462,6 +9596,10 @@ document.addEventListener("change", function(e){
     state.profile.alertVolume = Number(e.target.value);
     saveState();
     previewAlertSound(state.profile.alertSound || "classic");
+    return;
+  }
+  if(e.target.id === "tsk_repeat" || e.target.id === "tsk_repeatUnit"){
+    updateTaskRepeatUI();
     return;
   }
   if(e.target.id === "ce_repeat" || e.target.id === "ce_repeatUnit"){
