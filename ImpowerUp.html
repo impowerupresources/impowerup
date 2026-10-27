@@ -4984,7 +4984,7 @@ function customAlarmSoundCardHtml(curSound){
 /* A reminder either repeats on weekdays (days[]) or fires once on one date (date). */
 function reminderOccursOn(r, dateStr){
   if(r.date) return r.date === dateStr;
-  return reminderOccursOn(r, dateStr);
+  return (r.days||[]).includes(dayOfWeekName(dateStr));
 }
 function reminderForDate(r, dateStr){
   const c = Object.assign({}, r);
