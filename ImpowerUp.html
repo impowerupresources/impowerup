@@ -356,6 +356,28 @@
   .pa-zone-label{font-size:11px;font-weight:700;color:#555;margin:8px 0 3px;}
   .pa-drawing-img{max-width:320px;max-height:180px;border:1px solid #ccc;border-radius:6px;display:block;margin:4px 0;}
   .pa-score{background:#f4f4f4;border:1px solid #ccc;border-radius:8px;padding:10px;margin-top:14px;font-size:12.5px;white-space:pre-wrap;}
+  /* Weekly grid planner */
+  .wg-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border,#d9d3ea);border-radius:12px;background:var(--surface);}
+  .wg-table{display:grid;grid-template-columns:44px repeat(7,minmax(92px,1fr));min-width:700px;font-size:11px;}
+  .wg-head{position:sticky;top:0;z-index:2;background:var(--surface-2);font-weight:800;text-align:center;padding:6px 2px;border-bottom:1px solid var(--border,#d9d3ea);border-left:1px solid var(--border,#d9d3ea);}
+  .wg-head.today{box-shadow:inset 0 -3px 0 var(--accent);}
+  .wg-time{background:var(--surface-2);color:var(--text-muted);font-weight:700;text-align:right;padding:2px 4px;border-top:1px solid var(--border,#d9d3ea);min-height:30px;font-size:10px;}
+  .wg-time.hour{color:var(--text);}
+  .wg-cell{border-top:1px solid var(--border,#d9d3ea);border-left:1px solid var(--border,#d9d3ea);min-height:30px;padding:1px;cursor:pointer;position:relative;}
+  .wg-cell.hour{border-top-color:var(--text-muted);}
+  .wg-cell.anytime{min-height:38px;background:var(--surface-2);}
+  .wg-cell.dragover{background:rgba(37,99,235,.18);outline:2px dashed var(--accent);outline-offset:-2px;}
+  .wg-chip{border-radius:6px;padding:2px 4px;margin:1px 0;font-size:10.5px;line-height:1.25;overflow-wrap:anywhere;border-left:3px solid var(--accent);background:var(--surface-2);cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+  .wg-chip[data-gdrag]{cursor:grab;}
+  .wg-chip.done{text-decoration:line-through;opacity:.6;}
+  .wg-ghost{position:fixed;z-index:9999;pointer-events:none;opacity:.9;box-shadow:0 6px 18px rgba(0,0,0,.3);max-width:140px;}
+  .pg-head{font-weight:800;font-style:italic;font-size:12px;margin:0 0 6px;}
+  .pg-table{width:100%;border-collapse:collapse;table-layout:fixed;font-family:Arial,Helvetica,sans-serif;}
+  .pg-table th,.pg-table td{border:1px solid #000;font-size:8.5px;padding:1px 3px;vertical-align:top;height:15px;overflow:hidden;color:#000;}
+  .pg-table th{font-size:9px;height:20px;}
+  .pg-table td.pg-t{font-weight:800;text-align:center;width:34px;font-size:8px;}
+  .pg-table td.pg-m{font-weight:800;text-align:center;width:20px;font-size:8px;}
+  @page{margin:0.4in;}
   @media print{
     body>*:not(#printAssessArea){display:none!important;}
     #printAssessArea{display:block!important;}
@@ -672,6 +694,7 @@ const BADGES = [
 /* ============ State ============ */
 function defaultState(){
   return {
+    weekNotes:[], weekRewards:{},
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
       plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
@@ -720,7 +743,14 @@ function loadState(){
     return merged;
   }catch(e){ return defaultState(); }
 }
-function saveState(){ if(STORE_KEY) localStorage.setItem(STORE_KEY, JSON.stringify(state)); if(typeof maybeAutoSyncCloud==="function") maybeAutoSyncCloud(); }
+let _alertSyncTimer = null;
+/* Push the latest reminders/alarms to the server shortly after ANY change, so a reminder created and then
+   immediately closed (or backgrounded) still reaches the server and fires while the app is closed. */
+function scheduleAlertSync(){
+  if(_alertSyncTimer) clearTimeout(_alertSyncTimer);
+  _alertSyncTimer = setTimeout(function(){ _alertSyncTimer = null; try{ if(typeof syncAllAlertsToServer==="function" && state && !_adminViewing) syncAllAlertsToServer(true); }catch(e){} }, 1200);
+}
+function saveState(){ if(STORE_KEY) localStorage.setItem(STORE_KEY, JSON.stringify(state)); if(typeof maybeAutoSyncCloud==="function") maybeAutoSyncCloud(); scheduleAlertSync(); }
 function displayName(){ return state.profile.nickname || state.profile.firstName || "there"; }
 function fullName(){ return (state.profile.firstName+" "+state.profile.lastName).trim(); }
 
@@ -3241,7 +3271,7 @@ function getDayTimelineItems(dateStr){
   (state.tasks||[]).filter(t=>t.date===dateStr).forEach(t=>{
     const link = taskLinkedInfo(t);
     const dueToday = t.due_date && t.due_date===dateStr;
-    items.push({time:"", label:t.title, emoji:(t.assessment_kind==="assessment"?"✏️":"📝"), type:"task", id:t.id, done:t.status==="done", color:dueToday?"#ef4444":t.color, duration:t.planned_minutes, linkLabel: link?link.label:null, isDue:dueToday});
+    items.push({time:t.grid_time||"", label:t.title, emoji:(t.assessment_kind==="assessment"?"✏️":"📝"), type:"task", id:t.id, done:t.status==="done", color:dueToday?"#ef4444":t.color, duration:t.planned_minutes, linkLabel: link?link.label:null, isDue:dueToday});
   });
   // Separate red "due" marker on the due date itself, when it's a different day than the
   // "When To Do It" date above (or when no do-date was set at all) — so a deadline still shows
@@ -3249,6 +3279,7 @@ function getDayTimelineItems(dateStr){
   (state.tasks||[]).filter(t=>t.status!=="done" && t.due_date && t.due_date===dateStr && t.date!==dateStr).forEach(t=>{
     items.push({time:"", label:"Due: "+t.title+(assessmentLabel(t)?" ("+assessmentLabel(t)+")":""), emoji:"⚠️", type:"task_due", id:t.id, color:"#ef4444", isDue:true});
   });
+  (state.weekNotes||[]).filter(n=>n.date===dateStr).forEach(n=>items.push({time:n.time||"", label:n.text, emoji:"🗒️", type:"week_note", id:n.id, color:"#8B5CF6", gridOnly:true}));
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
 }
@@ -3308,6 +3339,7 @@ function openModal(html){
     '<span class="modal-close-x" data-action="closeModal" title="Close">✕</span>'+html+'</div></div>';
 }
 let focusDumpPausedId = null;
+let pendingGridTime = null;
 function focusSessionPause(s){ if(s && !s.paused_at){ s.paused_at = new Date().toISOString(); saveState(); } }
 function focusSessionResume(s){
   if(!s || !s.paused_at) return;
@@ -3318,6 +3350,7 @@ function focusSessionResume(s){
 }
 function closeModal(){
   document.getElementById("modalHost").innerHTML = "";
+  pendingGridTime = null;
   if(focusDumpPausedId){
     const sid = focusDumpPausedId; focusDumpPausedId = null;
     const s = (state.focusSessions||[]).find(x=>x.id===sid && x.status==="active");
@@ -4059,10 +4092,11 @@ function renderPlanner(){
   let html = topbarHtml(sectionIcon("calendar")+" Planner","Plan your day, week, and month.");
   html += plannerShortcutsHtml("calendar");
   html += plannerQuickActionsHtml();
-  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","month"].map(v=>
+  html += '<div class="planner-header-row"><div class="segmented">'+["day","week","grid","month"].map(v=>
     '<div class="seg '+(plannerViewMode===v?"active":"")+'" data-action="setPlannerView" data-v="'+v+'">'+v.charAt(0).toUpperCase()+v.slice(1)+'</div>').join("")+'</div></div>';
   if(plannerViewMode==="day") html += renderPlannerDay();
   else if(plannerViewMode==="week") html += renderPlannerWeek();
+  else if(plannerViewMode==="grid") html += renderPlannerGrid();
   else html += renderPlannerMonth();
   return html;
 }
@@ -4269,6 +4303,211 @@ function renderPlannerWeek(){
     html += '</div>';
   }
   return html;
+}
+/* ============ Weekly Grid (paper-template style) ============ */
+const GRID_START_MIN = 7*60, GRID_ROWS = 31; // 7:00 AM .. 10:00 PM in 30-min rows
+function gridWeekStart(dateStr){
+  const [y,m,d] = dateStr.split("-").map(Number);
+  const dow = new Date(y,m-1,d).getDay();
+  return addDays(dateStr, -((dow - getWeekStartDow() + 7)%7));
+}
+function gridRowLabel(r){
+  const mins = GRID_START_MIN + r*30, h = Math.floor(mins/60), m = mins%60;
+  return {h, m, text: m===0 ? ((h%12)||12)+(h>=12?"p":"a") : ":30"};
+}
+function gridRowFor(time){
+  if(!time || !/^\d{1,2}:\d{2}$/.test(time)) return -1;
+  const [h,m] = time.split(":").map(Number);
+  const r = Math.floor((h*60+m-GRID_START_MIN)/30);
+  return Math.max(0, Math.min(GRID_ROWS-1, r));
+}
+function gridTimeForRow(r){ const mins = GRID_START_MIN + r*30; return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0"); }
+function gridDayModel(dateStr){
+  const rows = []; for(let i=0;i<GRID_ROWS;i++) rows.push({items:[], cover:null});
+  const anytime = [];
+  getDayTimelineItems(dateStr).forEach(it=>{
+    const r = gridRowFor(it.time);
+    if(r<0){ anytime.push(it); return; }
+    rows[r].items.push(it);
+    const dur = Number(it.duration)||(it.type==="reminder"?15:0);
+    const span = Math.min(GRID_ROWS-r, Math.ceil(dur/30));
+    for(let k=1;k<span;k++) rows[r+k].cover = it.color || "#8B5CF6";
+  });
+  return {rows, anytime};
+}
+function gridChipHtml(it, dateStr){
+  const color = it.color || "#8B5CF6";
+  const draggable = (it.type==="custom_event" || it.type==="task" || it.type==="week_note" || it.type==="reminder");
+  let label = it.label || "";
+  if(it.type==="task_due") label = label;
+  return '<div class="wg-chip'+(it.done?" done":"")+'" '+(draggable?'data-gdrag="1" ':'')+
+    'data-action="openTimelineItemEditor" data-type="'+it.type+'" data-id="'+(it.id||"")+'" data-date="'+dateStr+'" '+
+    'style="border-left-color:'+color+';background:'+color+'26;">'+(it.emoji||"")+' '+escapeHtml(label)+'</div>';
+}
+function renderPlannerGrid(){
+  const weekStart = gridWeekStart(plannerDate);
+  const days = []; for(let i=0;i<7;i++) days.push(addDays(weekStart,i));
+  const models = days.map(gridDayModel);
+  const reward = (state.weekRewards||{})[weekStart] || "";
+  let html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap;">'+
+    '<div style="display:flex;align-items:center;gap:6px;"><button class="icon-btn" data-action="shiftWeek" data-v="-7">‹</button>'+
+    '<div style="font-weight:800;">Week of '+fmtDatePretty(weekStart)+'</div>'+
+    '<button class="icon-btn" data-action="shiftWeek" data-v="7">›</button>'+
+    (gridWeekStart(todayStr())!==weekStart?'<button class="btn ghost sm" data-action="gridThisWeek">This week</button>':'')+'</div>'+
+    '<button class="btn secondary sm" data-action="printWeekGrid">🖨️ Print / PDF</button></div>'+
+    '<div class="field" style="margin-bottom:10px;"><label>🎁 Reward this week</label>'+
+    '<input id="wg_reward" type="text" maxlength="120" placeholder="What will you treat yourself to when the week goes well?" value="'+escapeHtml(reward)+'"></div>';
+  html += '<div class="wg-scroll"><div class="wg-table">';
+  html += '<div class="wg-head" style="border-left:none;"></div>';
+  days.forEach(d=>{
+    const [yy,mm,dd] = d.split("-").map(Number);
+    html += '<div class="wg-head'+(d===todayStr()?" today":"")+'" data-action="jumpToDay" data-v="'+d+'" style="cursor:pointer;">'+DAY_NAMES[new Date(yy,mm-1,dd).getDay()].toUpperCase()+' '+dd+'<div>'+dayLetterBadgeHtml(d,"sm")+plannerHolidayBadgeHtml(d,"sm")+'</div></div>';
+  });
+  // Anytime row (tasks, habits and notes with no time)
+  html += '<div class="wg-time">Any<br>time</div>';
+  days.forEach((d,i)=>{
+    html += '<div class="wg-cell anytime" data-gcell="1" data-action="gridCell" data-v="'+d+'|">'+models[i].anytime.map(it=>gridChipHtml(it,d)).join("")+'</div>';
+  });
+  for(let r=0;r<GRID_ROWS;r++){
+    const lab = gridRowLabel(r);
+    html += '<div class="wg-time'+(lab.m===0?" hour":"")+'">'+lab.text+'</div>';
+    days.forEach((d,i)=>{
+      const row = models[i].rows[r];
+      html += '<div class="wg-cell'+(lab.m===0?" hour":"")+'" data-gcell="1" data-action="gridCell" data-v="'+d+'|'+gridTimeForRow(r)+'"'+(row.cover?' style="background:'+row.cover+'1f;"':'')+'>'+row.items.map(it=>gridChipHtml(it,d)).join("")+'</div>';
+    });
+  }
+  html += '</div></div>';
+  html += '<p class="hc-meta" style="margin-top:8px;text-align:center;">Tap any square to add a note, event or task. Press and hold an item, then drag it to move it. Classes, habits and repeating items are edited from their own forms.</p>';
+  return html;
+}
+function gridCellModalHtml(date, time){
+  const [yy,mm,dd] = date.split("-").map(Number);
+  const dl = new Date(yy,mm-1,dd).toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"});
+  return '<h2>➕ '+dl+(time?' · '+fmtTime12(time):' · Anytime')+'</h2>'+
+    '<div class="field"><label>🗒️ Quick note</label><textarea id="wn_text" rows="2" placeholder="Type anything you want on your week…"></textarea></div>'+
+    '<button class="btn" data-action="saveWeekNote" data-v="'+date+'|'+time+'" style="width:100%;margin-bottom:10px;">Save note</button>'+
+    '<div style="display:flex;gap:8px;">'+
+    '<button class="btn secondary" data-action="gridAddEvent" data-v="'+date+'|'+time+'" style="flex:1">+ Event</button>'+
+    '<button class="btn secondary" data-action="gridAddTask" data-v="'+date+'|'+time+'" style="flex:1">+ Task</button></div>'+
+    '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button></div>';
+}
+function weekNoteFormHtml(n){
+  return '<h2>🗒️ Note</h2>'+
+    '<div class="field"><label>Note</label><textarea id="wn_text" rows="3">'+escapeHtml(n.text||"")+'</textarea></div>'+
+    '<div class="modal-actions"><button class="btn danger" data-action="deleteWeekNote" data-id="'+n.id+'" style="flex:1">Delete</button>'+
+    '<button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
+    '<button class="btn" data-action="updateWeekNote" data-id="'+n.id+'" style="flex:1">Save</button></div>';
+}
+function gridMoveItem(type, id, toDate, toTime){
+  if(type==="week_note"){
+    const n = (state.weekNotes||[]).find(x=>x.id===id); if(!n) return;
+    n.date = toDate; n.time = toTime;
+  } else if(type==="custom_event"){
+    const ev = (state.customEvents||[]).find(x=>x.id===id); if(!ev) return;
+    if(ev.repeat && ev.repeat!=="none"){ toast("Repeating events can't be dragged — tap it to edit the series"); return; }
+    if(!toTime){ toast("Events need a time — drop it on a time slot"); return; }
+    ev.date = toDate; ev.time = toTime;
+  } else if(type==="task"){
+    const t = (state.tasks||[]).find(x=>x.id===id); if(!t) return;
+    t.date = toDate;
+    if(toTime) t.grid_time = toTime; else delete t.grid_time;
+  } else if(type==="reminder"){
+    const r = (state.reminders||[]).find(x=>x.id===id); if(!r) return;
+    if(!r.date){ toast("Repeating reminders can't be dragged — tap it to edit the days"); return; }
+    if(!toTime){ toast("Reminders need a time — drop it on a time slot"); return; }
+    r.date = toDate; r.time = toTime;
+  } else return;
+  saveState(); render(); toast("Moved");
+}
+/* Press-and-hold (touch) or click-and-drag (mouse) to move grid items between squares. */
+let _gd = null, _gdLastTouch = 0, _gridSuppressClick = 0;
+function _gdPoint(e){ return (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e; }
+function gridDragStart(e){
+  const isTouch = !!e.touches;
+  if(!isTouch && Date.now()-_gdLastTouch < 800) return;
+  if(isTouch) _gdLastTouch = Date.now();
+  const chip = e.target.closest ? e.target.closest("[data-gdrag]") : null;
+  if(!chip) return;
+  const pt = _gdPoint(e);
+  _gd = {chip, type:chip.getAttribute("data-type"), id:chip.getAttribute("data-id"), startX:pt.clientX, startY:pt.clientY, active:false, isTouch, timer:null, ghost:null, over:null, x:pt.clientX, y:pt.clientY};
+  if(isTouch){ document.addEventListener("touchmove", gridDragMove, {passive:false}); _gd.timer = setTimeout(function(){ if(_gd) gridDragActivate(); }, 380); }
+  else e.preventDefault();
+}
+function gridDragActivate(){
+  if(!_gd || _gd.active) return;
+  _gd.active = true;
+  const g = _gd.chip.cloneNode(true);
+  g.classList.add("wg-ghost"); g.removeAttribute("data-action");
+  document.body.appendChild(g); _gd.ghost = g;
+  try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
+  _gdPosition();
+}
+function _gdPosition(){
+  if(!_gd || !_gd.ghost) return;
+  _gd.ghost.style.left = (_gd.x+8)+"px"; _gd.ghost.style.top = (_gd.y+8)+"px";
+  const el = document.elementFromPoint(_gd.x, _gd.y);
+  const cell = el && el.closest ? el.closest("[data-gcell]") : null;
+  if(_gd.over && _gd.over!==cell) _gd.over.classList.remove("dragover");
+  if(cell) cell.classList.add("dragover");
+  _gd.over = cell;
+}
+function gridDragMove(e){
+  if(!_gd) return;
+  const pt = _gdPoint(e);
+  _gd.x = pt.clientX; _gd.y = pt.clientY;
+  if(!_gd.active){
+    const moved = Math.hypot(pt.clientX-_gd.startX, pt.clientY-_gd.startY);
+    if(_gd.isTouch){ if(moved>8){ clearTimeout(_gd.timer); document.removeEventListener("touchmove", gridDragMove, {passive:false}); _gd = null; } return; }
+    if(moved<6) return;
+    gridDragActivate();
+  }
+  if(e.cancelable) e.preventDefault();
+  _gdPosition();
+}
+function gridDragEnd(e){
+  if(!_gd) return;
+  clearTimeout(_gd.timer);
+  document.removeEventListener("touchmove", gridDragMove, {passive:false});
+  const d = _gd; _gd = null;
+  if(!d.active) return;
+  if(d.ghost) d.ghost.remove();
+  if(d.over) d.over.classList.remove("dragover");
+  _gridSuppressClick = Date.now();
+  if(e && e.type==="touchcancel") return;
+  if(d.over){
+    const parts = (d.over.getAttribute("data-action")==="gridCell" ? d.over.getAttribute("data-v") : "|").split("|");
+    gridMoveItem(d.type, d.id, parts[0], parts[1]||"");
+  }
+}
+document.addEventListener("touchstart", gridDragStart, {passive:true});
+document.addEventListener("touchend", gridDragEnd);
+document.addEventListener("touchcancel", gridDragEnd);
+document.addEventListener("mousedown", gridDragStart);
+document.addEventListener("mousemove", gridDragMove);
+document.addEventListener("mouseup", gridDragEnd);
+document.addEventListener("click", function(e){
+  if(_gridSuppressClick && Date.now()-_gridSuppressClick < 500){ _gridSuppressClick = 0; e.stopPropagation(); e.preventDefault(); }
+}, true);
+document.addEventListener("contextmenu", function(e){ if(_gd && _gd.active) e.preventDefault(); });
+function printWeekGrid(){
+  const weekStart = gridWeekStart(plannerDate);
+  const days = []; for(let i=0;i<7;i++) days.push(addDays(weekStart,i));
+  const models = days.map(gridDayModel);
+  const reward = (state.weekRewards||{})[weekStart] || "";
+  const txt = it=>escapeHtml((it.emoji?it.emoji+" ":"")+(it.label||""));
+  let h = '<div class="pg-head">WEEK OF: '+escapeHtml(fmtDatePretty(weekStart)+" – "+fmtDatePretty(addDays(weekStart,6)))+'<br>REWARD: '+escapeHtml(reward)+'</div>';
+  h += '<table class="pg-table"><tr><th colspan="2"></th>'+days.map(d=>'<th>'+DAY_NAMES[new Date(d.split("-")[0],d.split("-")[1]-1,d.split("-")[2]).getDay()].toUpperCase()+' '+Number(d.split("-")[2])+'</th>').join("")+'</tr>';
+  h += '<tr><td class="pg-t" colspan="2">ANY TIME</td>'+days.map((d,i)=>'<td>'+models[i].anytime.map(txt).join("<br>")+'</td>').join("")+'</tr>';
+  for(let r=0;r<GRID_ROWS;r++){
+    const lab = gridRowLabel(r);
+    h += '<tr>'+(lab.m===0 ? '<td class="pg-t" rowspan="'+(r===GRID_ROWS-1?1:2)+'">'+(((lab.h%12)||12)+(lab.h>=12?" pm":" am"))+'</td>' : '')+
+      '<td class="pg-m">'+(lab.m===0?"00":"30")+'</td>'+
+      days.map((d,i)=>'<td>'+models[i].rows[r].items.map(txt).join("<br>")+'</td>').join("")+'</tr>';
+  }
+  h += '</table>';
+  const area = document.getElementById("printAssessArea");
+  area.innerHTML = h;
+  setTimeout(function(){ try{ window.print(); }catch(e){ toast("Printing isn't available here — try from a browser"); } setTimeout(function(){ area.innerHTML = ""; }, 1000); }, 50);
 }
 function renderPlannerMonth(){
   const view = state.profile.monthGlanceView || "compact";
@@ -7737,6 +7976,7 @@ document.addEventListener("click", async function(e){
         payload.id = uid(); payload.status = "pending"; payload.actual_minutes = null;
         payload.distraction = ""; payload.helped = ""; payload.follow_up_needed = false;
         payload.follow_up_date = ""; payload.follow_up_notes = ""; payload.created_at = new Date().toISOString(); payload.completed_at = null;
+        if(pendingGridTime){ payload.grid_time = pendingGridTime; }
         state.tasks.push(payload);
         if(pendingTodoItemId){ const ti = todoItems().find(x=>x.id===pendingTodoItemId); if(ti){ ti.task_id = payload.id; ti.done = true; } pendingTodoItemId = null; }
         const gapNoteEl = document.getElementById("tsk_gapNote");
@@ -8109,6 +8349,45 @@ document.addEventListener("click", async function(e){
     }
 
     case "setPlannerView": plannerViewMode=v; render(); break;
+    case "gridCell": {
+      const parts = (v||"|").split("|");
+      openModal(gridCellModalHtml(parts[0], parts[1]||""));
+      break;
+    }
+    case "gridThisWeek": plannerDate = todayStr(); render(); break;
+    case "saveWeekNote": {
+      const parts = (v||"|").split("|");
+      const text = (document.getElementById("wn_text").value||"").trim();
+      if(!text){ toast("Type a note first"); break; }
+      if(!state.weekNotes) state.weekNotes = [];
+      state.weekNotes.push({id:uid(), date:parts[0], time:parts[1]||"", text, created_at:new Date().toISOString()});
+      saveState(); closeModal(); render();
+      break;
+    }
+    case "updateWeekNote": {
+      const n = (state.weekNotes||[]).find(x=>x.id===id); if(!n){ closeModal(); break; }
+      const text = (document.getElementById("wn_text").value||"").trim();
+      if(!text){ toast("Type a note, or delete it"); break; }
+      n.text = text; saveState(); closeModal(); render();
+      break;
+    }
+    case "deleteWeekNote": {
+      state.weekNotes = (state.weekNotes||[]).filter(x=>x.id!==id);
+      saveState(); closeModal(); render();
+      break;
+    }
+    case "gridAddEvent": {
+      const parts = (v||"|").split("|");
+      openModal(customEventFormHtml(parts[0], {date:parts[0], time:parts[1]||"09:00", emoji:"📌", label:"", description:"", duration_minutes:30, alarm_enabled:false, alarm_level:"moderate", repeat:"none", repeat_days:[], repeat_until:"", repeat_interval:1, repeat_unit:"week"}));
+      break;
+    }
+    case "gridAddTask": {
+      const parts = (v||"|").split("|");
+      pendingGridTime = parts[1] || null;
+      openTaskForm(null, parts[0]);
+      break;
+    }
+    case "printWeekGrid": printWeekGrid(); break;
     case "jumpToDay": closeModal(); plannerDate=v; plannerViewMode="day"; render(); break;
     case "shiftWeek": plannerDate = addDays(plannerDate, Number(v)); render(); break;
     case "shiftPlannerDay": {
@@ -8691,6 +8970,7 @@ document.addEventListener("click", async function(e){
       else if(type==="task" || type==="task_due") openTaskForm(id);
       else if(type==="class_period"){ if(id) openClassForm(id); else openDayOverrideForm(date); }
       else if(type==="event") openApplyTemplateModal(date);
+      else if(type==="week_note"){ const n=(state.weekNotes||[]).find(x=>x.id===id); if(n) openModal(weekNoteFormHtml(n)); }
       break;
     }
     case "pickRDay": { const idx=reminderFormDays.indexOf(v); if(idx>=0) reminderFormDays.splice(idx,1); else reminderFormDays.push(v); refreshReminderFormSelections(); break; }
@@ -9551,6 +9831,12 @@ document.addEventListener("input", function(e){
   if(e.target.id === "customAccentPicker2"){ state.profile.accent2 = e.target.value; saveState(); applyTheme(); return; }
 });
 document.addEventListener("change", function(e){
+  if(e.target.id === "wg_reward"){
+    if(!state.weekRewards) state.weekRewards = {};
+    state.weekRewards[gridWeekStart(plannerDate)] = e.target.value.trim();
+    saveState();
+    return;
+  }
   if(e.target.id === "importIcsFile"){
     const file = e.target.files[0];
     if(file) importICSFile(file);
