@@ -697,10 +697,10 @@ function defaultState(){
     weekNotes:[], weekRewards:{},
     profile:{ firstName:"", lastName:"", nickname:"", theme:"auto", accent:"#2563EB", accent2:"#14B8A6", aestheticTheme:"default", onboarded:false,
       firedReminders:{}, snoozeCounts:{}, snoozedReminders:{}, badgesSeen:[],
-      plannerDayCalPos:"bottom", weekGlanceView:"horizontal", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
+      plannerDayCalPos:"bottom", weekGlanceView:"vertical", monthGlanceView:"compact", weekStartDay:"sunday", alertSound:"airRaidSiren", alertVolume:80, customAlarmSoundName:"", customAlarmSoundDataUrl:"",
       plannerShowClasses:true, plannerShowTemplates:false,
       username:"", email:"", pushEnabled:false,
-      cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00",
+      cloudSession:null, isCloudAdmin:false, cloudSyncEnabled:false, lastCloudSync:null, bedtime:"22:00", bedtimeCustom:false, bedtimeByDay:{},
       brainInterruptEnabled:false, brainInterruptMinutes:10, brainInterruptLevel:"gentle",
       checkInFrequency:"daily", checkInCustomDays:[],
       notifyEmail:"", notifyPhone:"", emailNotifyEnabled:false, smsNotifyEnabled:false,
@@ -4247,7 +4247,7 @@ function renderPlannerWeek(){
   const dow = new Date(y,m-1,d).getDay();
   const startDow = getWeekStartDow();
   const weekStart = addDays(plannerDate, -((dow - startDow + 7)%7));
-  const view = state.profile.weekGlanceView || "horizontal";
+  const view = state.profile.weekGlanceView==="compact" ? "horizontal" : "vertical"; // detailed columns are the default
   const weekStartDay = state.profile.weekStartDay || "sunday";
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;">'+
     '<button class="icon-btn" data-action="shiftWeek" data-v="-7">‹</button>'+
@@ -4258,7 +4258,7 @@ function renderPlannerWeek(){
     '<button class="icon-btn" data-action="toggleWeekGlanceView" title="'+(view==="horizontal"?"Switch to vertical view":"Switch to horizontal view")+'">'+(view==="horizontal"?"☰":"▦")+'</button>'+
     '</div></div>';
   if(view==="vertical"){
-    html += '<div class="grid week-glance-cols" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:start;">';
+    html += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px;"><div class="grid week-glance-cols" style="display:grid;grid-template-columns:repeat(7,minmax(175px,1fr));min-width:1260px;gap:8px;align-items:stretch;">';
     for(let i=0;i<7;i++){
       const d2 = addDays(weekStart, i);
       const items = getDayTimelineItems(d2);
@@ -4267,9 +4267,11 @@ function renderPlannerWeek(){
       const tmpl = getTemplateForDate(d2);
       const [yy,mm,ddd] = d2.split("-").map(Number);
       const itemsHtml = items.length ? items.map(it=>
-        '<div style="font-size:11px;line-height:1.35;white-space:normal;overflow-wrap:break-word;word-break:break-word;margin-bottom:4px;text-align:left;">'+(it.emoji||"")+' '+escapeHtml(it.label||"")+'</div>'
-      ).join("") : '<div style="font-size:11px;color:var(--text-muted);text-align:left;">Nothing scheduled</div>';
-      html += '<div class="card '+(d2===todayStr()?"today":"")+'" style="padding:8px 6px;cursor:pointer;min-width:0;'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
+        '<div style="font-size:13px;line-height:1.4;white-space:normal;overflow-wrap:break-word;word-break:break-word;margin-bottom:7px;padding-left:6px;border-left:3px solid '+(it.color||"var(--accent)")+';text-align:left;'+(it.done?"opacity:.55;text-decoration:line-through;":"")+'">'+
+        (it.time?'<div style="font-size:11px;font-weight:800;color:var(--text-muted);">'+fmtTime12(it.time)+(it.duration?' · '+it.duration+' min':'')+'</div>':'')+
+        (it.emoji||"")+' '+escapeHtml(it.label||"")+(it.linkLabel?'<div style="font-size:11px;color:var(--text-muted);">'+escapeHtml(it.linkLabel)+'</div>':'')+'</div>'
+      ).join("") : '<div style="font-size:12px;color:var(--text-muted);text-align:left;">Nothing scheduled</div>';
+      html += '<div class="card '+(d2===todayStr()?"today":"")+'" style="padding:12px 10px;min-height:260px;cursor:pointer;min-width:0;'+(d2===todayStr()?"box-shadow:inset 0 0 0 2px var(--accent);":"")+'" data-action="jumpToDay" data-v="'+d2+'">'+
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;">'+
         '<div><div style="font-size:10px;color:var(--text-muted);">'+DAY_NAMES[new Date(yy,mm-1,ddd).getDay()]+'</div>'+
         '<div style="font-weight:800;font-size:15px;">'+ddd+'</div></div>'+
@@ -4277,11 +4279,11 @@ function renderPlannerWeek(){
         '</div>'+
         (tmpl?'<div style="font-size:12px;">'+tmpl.emoji+'</div>':'')+
         '<div style="margin:2px 0;">'+dayLetterBadgeHtml(d2,"sm")+plannerHolidayBadgeHtml(d2,"sm")+'</div>'+
-        '<div style="margin-top:4px;">'+itemsHtml+'</div>'+
-        (habitCount?'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+doneCount+'/'+habitCount+'</div>':'')+
+        '<div style="margin-top:8px;">'+itemsHtml+'</div>'+
+        (habitCount?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Habits '+doneCount+'/'+habitCount+'</div>':'')+
         '</div>';
     }
-    html += '</div>';
+    html += '</div></div>';
   } else {
     html += '<div class="grid" style="grid-template-columns:repeat(7,1fr);gap:6px;">';
     for(let i=0;i<7;i++){
@@ -5830,13 +5832,45 @@ function fmtMinutesDuration(mins){
 function pendingTasksTotalMinutes(){
   return (state.tasks||[]).filter(t=>t.status!=="done" && t.date===todayStr()).reduce((sum,t)=>sum+(Number(t.planned_minutes)||0),0);
 }
-function bedtimeTargetDate(){
-  const bt = state.profile.bedtime||"22:00";
-  const [bh,bm] = bt.split(":").map(Number);
+/* Bedtime can be one time every night, or different for each day of the week (profile.bedtimeCustom +
+   profile.bedtimeByDay keyed by weekday 0=Sun..6=Sat). A day's bedtime is the time you go to sleep that night. */
+function bedtimeFor(dow){
+  const p = state.profile;
+  if(p.bedtimeCustom && p.bedtimeByDay && p.bedtimeByDay[dow]) return p.bedtimeByDay[dow];
+  return p.bedtime || "22:00";
+}
+function bedtimeTarget(){
   const now = new Date();
-  let target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), bh||22, bm||0, 0, 0);
-  if(target.getTime() <= now.getTime()) target = new Date(target.getTime() + 24*60*60*1000);
-  return target;
+  for(let add=0; add<3; add++){
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate()+add);
+    const bt = bedtimeFor(day.getDay());
+    const [bh,bm] = bt.split(":").map(Number);
+    const target = new Date(day.getFullYear(), day.getMonth(), day.getDate(), isNaN(bh)?22:bh, bm||0, 0, 0);
+    if(target.getTime() > now.getTime()) return {date:target, time:bt};
+  }
+  return {date:new Date(now.getTime()+3600000), time:"22:00"};
+}
+function bedtimeTargetDate(){ return bedtimeTarget().date; }
+const BEDTIME_DAY_LABELS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function bedtimeEditorHtml(singleId, dayPrefix){
+  const custom = !!state.profile.bedtimeCustom;
+  let h = '<div class="toggle-row" style="padding:6px 0;"><div><div style="font-weight:700;font-size:13px;">Different bedtime each day</div><div class="hc-meta" style="margin-top:2px;">Set a separate time for each night of the week</div></div>'+
+    '<div class="switch '+(custom?"on":"")+'" data-action="toggleBedtimeCustom" data-v="'+singleId+'"></div></div>';
+  if(!custom){
+    h += '<div class="field"><label>Bedtime</label><input id="'+singleId+'" type="time" value="'+(state.profile.bedtime||"22:00")+'"></div>';
+  } else {
+    h += BEDTIME_DAY_LABELS.map((n,i)=>'<div class="field" style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><label style="flex:1;margin:0;">'+n+'</label><input id="'+dayPrefix+i+'" type="time" value="'+bedtimeFor(i)+'" style="flex:1;"></div>').join("");
+  }
+  return h;
+}
+function readBedtimeInputs(singleId, dayPrefix){
+  const p = state.profile;
+  if(p.bedtimeCustom){
+    if(!p.bedtimeByDay) p.bedtimeByDay = {};
+    for(let i=0;i<7;i++){ const el = document.getElementById(dayPrefix+i); if(el && el.value) p.bedtimeByDay[i] = el.value; }
+  } else {
+    const el = document.getElementById(singleId); if(el && el.value) p.bedtime = el.value;
+  }
 }
 let tasksCountdownTimer = null;
 function startTasksCountdownTicker(){
@@ -5861,7 +5895,7 @@ function bedtimeWidgetHtml(){
   return '<div class="card" style="margin-bottom:14px;"><h2>⏳ Time Check</h2>'+
     '<div class="grid cols-2" style="margin-top:10px;">'+
     '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" style="font-size:20px;">'+fmtMinutesDuration(pendingTasksTotalMinutes())+'</div><div class="hsb-lbl">Pending task time</div></div>'+
-    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="hsb-lbl">until bedtime ('+fmtTime12(state.profile.bedtime||"22:00")+')</div></div>'+
+    '<div class="hero-stat-box" style="min-height:auto;padding:14px;"><div class="hsb-val" id="bedtimeCountdown" style="font-size:20px;">—</div><div class="hsb-lbl">until bedtime ('+fmtTime12(bedtimeTarget().time)+')</div></div>'+
     '</div>'+
     '<div id="bedtimeFitNote" style="font-size:12.5px;font-weight:700;margin-top:8px;"></div>'+
     '<button class="btn ghost sm" style="margin-top:8px;" data-action="openBedtimeForm">✏️ Change bedtime</button>'+
@@ -5869,7 +5903,7 @@ function bedtimeWidgetHtml(){
 }
 function bedtimeFormHtml(){
   return '<h2>Change Bedtime</h2>'+
-    '<div class="field"><label>Bedtime</label><input id="bt_time" type="time" value="'+(state.profile.bedtime||"22:00")+'"></div>'+
+    bedtimeEditorHtml("bt_time","bt_d")+
     '<div class="modal-actions"><button class="btn secondary" data-action="closeModal" style="flex:1">Cancel</button>'+
     '<button class="btn" data-action="saveBedtime" style="flex:1">Save</button></div>';
 }
@@ -6716,8 +6750,8 @@ function renderSettings(){
     '<button class="btn secondary sm" style="margin-top:8px;" data-action="resetNavOrder">Reset to default order</button></div>';
 
   html += '<div class="card" style="margin-top:14px;"><h2>🌙 Bedtime</h2>'+
-    '<p class="hc-meta">Used by the countdown on the Tasks tab to show how much time you have left tonight.</p>'+
-    '<div class="field" style="margin-top:8px;"><input id="set_bedtime" type="time" value="'+(state.profile.bedtime||"22:00")+'"></div>'+
+    '<p class="hc-meta">Used by the Time Check countdown to show how much time you have left tonight. Turn on "different bedtime each day" if your schedule varies.</p>'+
+    '<div style="margin-top:8px;">'+bedtimeEditorHtml("set_bedtime","set_bt_d")+'</div>'+
     '<button class="btn secondary sm" data-action="saveBedtimeFromSettings">Save</button></div>';
 
   const ciFreq = state.profile.checkInFrequency || "daily";
@@ -7743,14 +7777,24 @@ document.addEventListener("click", async function(e){
       break;
     }
     case "openBedtimeForm": openModal(bedtimeFormHtml()); break;
+    case "toggleBedtimeCustom": {
+      const prefix = v==="bt_time" ? "bt_d" : "set_bt_d";
+      readBedtimeInputs(v, prefix);
+      const p = state.profile;
+      p.bedtimeCustom = !p.bedtimeCustom;
+      if(p.bedtimeCustom && (!p.bedtimeByDay || !Object.keys(p.bedtimeByDay).length)){ p.bedtimeByDay = {}; for(let i=0;i<7;i++) p.bedtimeByDay[i] = p.bedtime || "22:00"; }
+      saveState();
+      if(v==="bt_time") openModal(bedtimeFormHtml()); else render();
+      break;
+    }
     case "saveBedtime": {
-      state.profile.bedtime = document.getElementById("bt_time").value || "22:00";
+      readBedtimeInputs("bt_time","bt_d");
       saveState(); closeModal(); render();
       toast("Bedtime updated");
       break;
     }
     case "saveBedtimeFromSettings": {
-      state.profile.bedtime = document.getElementById("set_bedtime").value || "22:00";
+      readBedtimeInputs("set_bedtime","set_bt_d");
       saveState(); render();
       toast("Bedtime updated");
       break;
@@ -8402,7 +8446,7 @@ document.addEventListener("click", async function(e){
     case "togglePlannerDayCalPos": state.profile.plannerDayCalPos = (state.profile.plannerDayCalPos==="bottom"?"top":"bottom"); saveState(); render(); break;
     case "togglePlannerShowClasses": state.profile.plannerShowClasses = !(state.profile.plannerShowClasses!==false); saveState(); render(); break;
     case "togglePlannerShowTemplates": state.profile.plannerShowTemplates = !state.profile.plannerShowTemplates; saveState(); render(); break;
-    case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="horizontal"?"vertical":"horizontal"); saveState(); render(); break;
+    case "toggleWeekGlanceView": state.profile.weekGlanceView = (state.profile.weekGlanceView==="compact"?"vertical":"compact"); saveState(); render(); break;
     case "toggleMonthGlanceView": state.profile.monthGlanceView = (state.profile.monthGlanceView==="expanded"?"compact":"expanded"); saveState(); render(); break;
     case "toggleWeekStartDay": state.profile.weekStartDay = (state.profile.weekStartDay==="monday"?"sunday":"monday"); saveState(); render(); break;
     case "toggleEmojiPicker": {
