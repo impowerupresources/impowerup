@@ -3279,6 +3279,22 @@ function getDayTimelineItems(dateStr){
   (state.tasks||[]).filter(t=>t.status!=="done" && t.due_date && t.due_date===dateStr && t.date!==dateStr).forEach(t=>{
     items.push({time:"", label:"Due: "+t.title+(assessmentLabel(t)?" ("+assessmentLabel(t)+")":""), emoji:"⚠️", type:"task_due", id:t.id, color:"#ef4444", isDue:true});
   });
+  // Repeating tasks only create their NEXT copy once the current one is finished, so project the upcoming
+  // occurrences onto the calendar (lighter, marked 🔁) until the series ends.
+  const allTasks = state.tasks||[];
+  allTasks.filter(t=>t.status!=="done" && t.repeat && t.repeat!=="none" && t.date && dateStr > t.date).forEach(t=>{
+    if(t.repeat_until && dateStr > t.repeat_until) return;
+    const sid = t.series_id || t.id;
+    if(allTasks.some(x=>(x.series_id||x.id)===sid && x.id!==t.id && x.date===dateStr)) return;
+    const pseudo = { date: t.repeat_anchor || t.date, repeat: t.repeat, repeat_days: t.repeat_days||[], repeat_interval: t.repeat_interval||1, repeat_unit: t.repeat_unit||"week", repeat_until: t.repeat_until||"" };
+    if(!eventOccursOnDate(pseudo, dateStr)) return;
+    items.push({time:t.grid_time||"", label:t.title+" 🔁", emoji:"📝", type:"task_proj", id:t.id, color:t.color, duration:t.planned_minutes, projected:true});
+  });
+  // Show finished tasks on the day they were actually completed, too (not only the day they were planned for).
+  allTasks.filter(t=>t.status==="done" && t.completed_at).forEach(t=>{
+    let cd = ""; try{ cd = todayStr(new Date(t.completed_at)); }catch(e){}
+    if(cd && cd===dateStr && t.date!==dateStr) items.push({time:"", label:"Completed: "+t.title, emoji:"✅", type:"task_done", id:t.id, done:true, color:t.color});
+  });
   (state.weekNotes||[]).filter(n=>n.date===dateStr).forEach(n=>items.push({time:n.time||"", label:n.text, emoji:"🗒️", type:"week_note", id:n.id, color:"#8B5CF6", gridOnly:true}));
   items.sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
   return items;
@@ -4193,7 +4209,7 @@ function dayTimelineListHtml(dateStr){
       controls = it.done
         ? '<button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>'
         : '<div style="display:flex;gap:6px;flex-shrink:0;"><button class="btn secondary sm" data-action="openTaskCompleteForm" data-id="'+it.id+'">Done</button><button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'">✏️</button></div>';
-    } else if(it.type==="task_due"){
+    } else if(it.type==="task_due" || it.type==="task_proj" || it.type==="task_done"){
       controls = '<button class="icon-btn" data-action="openTaskForm" data-id="'+it.id+'" style="flex-shrink:0;">✏️</button>';
     }
     const itColor = it.color||(tmpl?tmpl.color:"var(--accent)");
@@ -9011,7 +9027,7 @@ document.addEventListener("click", async function(e){
       if(type==="habit") openHabitForm(id);
       else if(type==="reminder") openReminderForm(id);
       else if(type==="custom_event"){ const ev=(state.customEvents||[]).find(x=>x.id===id); if(ev) openCustomEventForm(ev.date, id); }
-      else if(type==="task" || type==="task_due") openTaskForm(id);
+      else if(type==="task" || type==="task_due" || type==="task_proj" || type==="task_done") openTaskForm(id);
       else if(type==="class_period"){ if(id) openClassForm(id); else openDayOverrideForm(date); }
       else if(type==="event") openApplyTemplateModal(date);
       else if(type==="week_note"){ const n=(state.weekNotes||[]).find(x=>x.id===id); if(n) openModal(weekNoteFormHtml(n)); }
